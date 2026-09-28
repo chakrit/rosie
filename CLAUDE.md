@@ -28,6 +28,13 @@ rebuilding rosie. See `docs/spec/` for the design.
   `rust-coding` skills for all coding work.
 - User-facing configuration is TOML.
 
+## Git checkpoints
+
+Commit coherent, completed slices autonomously after completing the checks required for
+that work. Do not ask for permission to make a local commit. A local commit does not
+authorize pushing, publishing, merging, releasing, deploying, or any other change to
+shared or external state; each requires separate user authorization.
+
 ## Durable artifacts
 
 `docs/` holds this project's durable record.

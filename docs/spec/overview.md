@@ -1,85 +1,43 @@
-# Rosie — working plan
+# Rosie overview
 
-Status: draft
-
-This is the working plan for rosie, kept close to the words chakrit used when describing
-it. Quoted text is chakrit's wording. Lines marked **Interpretation** are the agent's
-reading of that wording and still need confirmation. Open questions are tracked outside
-this file until settled; each settled answer amends this file.
+Status: accepted. Nothing here is implemented yet; every section is target behavior.
 
 ## What rosie is
 
 - "Rosie" is inspired by the Jetsons' robot maid.
-- "basically a mac cleanup cli geared for developers."
+- A macOS cleanup CLI geared for developers.
 - Written in Rust, following the PRODIGY9 school skills and conventions.
-- "everything should be fast fast fast as per rust standard."
+- Everything should be fast, as per Rust standard.
+- Rosie is just a cleanup tool. It does not reason about how projects are edited,
+  project activity, or git. Plan selection is decided by rules and the aggressive level
+  only.
 
-## Two phases: scan and clean
+## Shape
 
-- "CLI design should allow for basic interactive scan/clean in two phases."
-- "it should also allow for inspectable plan mode (ala terraform)."
-- Basic invocation: "rosie invocation -> scan, present plan, user confirm y/n, execute
-  plan".
-- The phases can run independently: "can be called with rosie scan or rosie run [plan]
-  or some such to execute phases independently."
+- Cleanup runs in two phases: scan, which produces an inspectable plan (like terraform),
+  and run, which executes it. The basic invocation scans, presents the plan, asks the
+  user to confirm, and executes. See [plan.md](plan.md).
+- Cleanup targets are data, not code: rules in TOML, downloaded as packs, editable and
+  publishable independently of rosie. Built-in coverage spans standard coding-tool
+  artifacts (`node_modules`, cargo `target/`, and similar), detected smartly rather than
+  by name alone (check `Cargo.toml` before treating a folder named `target` for cleanup).
+  See [rules.md](rules.md).
+- Cleanup can be targeted: a specific project directory, or specific cleanup groups
+  (all `node_modules`, Docker, cargo targets). See [cli.md](cli.md).
+- A special mode cleans a macOS application and its leftovers, in the manner of
+  AppCleaner.app. See [app.md](app.md).
+- Every mutation goes through one safety layer gated by a `roots` allowlist. Rosie
+  elevates through the system `sudo` only for items that need root. See
+  [safety.md](safety.md).
 
-**Interpretation:** `rosie scan` writes a plan file that a person can read (and
-possibly edit) before `rosie run <plan>` executes exactly that plan, like
-`terraform plan -out` followed by `terraform apply <plan>`.
+## Subject specs
 
-## Privilege elevation
-
-- "it detects and self-elevate (if possible) using sudo if needed."
-- "let user type into regular sudo prompt so we don't have to worry our selves about any
-  security stuff."
-
-**Interpretation:** rosie never handles passwords itself; when a plan contains items
-that need root, rosie re-invokes itself through the system `sudo` and the user answers
-sudo's own prompt.
-
-## Cleanup targets are data, not code
-
-- "the things to scan should be a large mini-dsl collection or a lua vm or somesuch."
-- "we can manually edit/publish targets independently of what's built-in w rosie (i.e.
-  future devs can add their own rules/new unsupported tools etc.)."
-- "Prefer toml configuration where needed or even use toml as the cleanup target
-  configuration layer."
-
-**Interpretation:** built-in targets ship as the same rule format that users and
-third parties write, so a built-in rule is only a rule that happens to be bundled.
-
-## Built-in coverage and smart detection
-
-- "the built-ins should cover all standard coding tool artifacts like node_modules cargo
-  target/ etc."
-- "it should be a bit smart in how those folders are detected as well not just by name
-  (i.e. check cargo.toml before treating a folder named target for cleanup)."
-
-## Restorable mode
-
-- "it sihould support restorable mode somehow (like moving this to trash bin instead of
-  immediately deleting etc.)"
-
-## Targeted cleanup
-
-- "it should also allow a targeted cleanup like a specific project dir, specific cleanup
-  groups (i.e. all node_modules or dockers or cargo targets)."
-
-**Interpretation:** a scan can be narrowed by location (a directory) and by group (a
-named set of rules), and both narrowings can combine.
-
-## macOS application cleanup
-
-- "another special mode is for macos application cleanups (look at how appcleaner.app
-  does it or similar app in the family)."
-- "so i can go something like `rosie clean SomeRandom.app` and it'd know to scan for
-  user prefs, launchdaemons etc."
-
-**Interpretation:** given an app bundle, rosie reads its bundle identifier and name, then
-finds the files that app leaves across `~/Library`, `/Library`, and launch agent and
-daemon folders. The result is a plan like any other scan.
-
-## Working order
-
-- "Do not start coding just yet, only basic inits are allowed. Docs/specs/architect/plan
-  first."
+| File                       | Covers                                                |
+|----------------------------|-------------------------------------------------------|
+| [cli.md](cli.md)           | commands, modes, flags, config commands               |
+| [plan.md](plan.md)         | plan file, confirmation prompt, run, `.sh` export     |
+| [rules.md](rules.md)       | rule format, detection strategies, packs, pull        |
+| [safety.md](safety.md)     | FS interaction layer, roots, walk skips, Trash, sudo  |
+| [app.md](app.md)           | `clean app` and `clean orphans`                       |
+| [stack.md](stack.md)       | toolchain, crates, FFI policy                         |
+| [testing.md](testing.md)   | test tiers, record-and-replay fixtures, fakes         |

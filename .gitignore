@@ -28,3 +28,6 @@ ace.local.toml
 
 # ACE working files
 .ace/
+
+# Throwaway local artifacts
+/tmp/

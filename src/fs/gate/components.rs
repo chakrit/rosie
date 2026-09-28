@@ -58,6 +58,16 @@ impl<B: Backend> Gate<B> {
         }
     }
 
+    /// Checks a `roots` config entry: refused only when an existing path component is a
+    /// symlink. A path, or the tail of one, that does not exist on disk is valid — a
+    /// seeded tool-cache root is absent on a machine without that tool
+    /// (`docs/spec/safety.md#roots`).
+    pub fn check_root_entry(&self, path: &Path) -> Result<PathBuf, Error> {
+        let path = resolve_dots(path)?;
+        self.refuse_symlinks_in_existing(&path)?;
+        Ok(path)
+    }
+
     /// `lstat`s every component of an already resolved, existing path from `/` down,
     /// refusing the first symlink. Returns the metadata of the path itself.
     pub(super) fn lstat_without_symlinks(&self, path: &Path) -> Result<Metadata, Error> {

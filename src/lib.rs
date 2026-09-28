@@ -2,4 +2,5 @@
 
 pub mod config;
 pub mod fs;
+pub mod packs;
 pub mod plan;

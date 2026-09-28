@@ -46,6 +46,7 @@ pub enum Call {
     ReadLink(PathBuf),
     ReadFile(PathBuf),
     WriteFile(PathBuf),
+    CreateFile(PathBuf),
     CreateDirAll(PathBuf),
     RemoveFile(PathBuf),
     RemoveEmptyDir(PathBuf),
@@ -223,9 +224,19 @@ impl Backend for FakeBackend {
             Location::Absent(key, Creatable::Anything) => key,
         };
 
-        let mut node = Node::new(Body::File(contents.to_vec()), 0, state.user_uid, FILE_MODE);
-        node.allocated = allocation_for(contents.len());
-        state.create_entry(key, node)
+        state.create_file_entry(key, contents)
+    }
+
+    fn create_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        let mut state = self.begin(Call::CreateFile(path.into()), path, Op::CreateFile)?;
+        // `open(O_CREAT | O_EXCL)` fails on any entry at the name, a final symlink too.
+        let key = match state.locate(path, FinalLink::Keep)? {
+            Location::Found(_) => return Err(ErrorKind::AlreadyExists.into()),
+            Location::Absent(_, Creatable::FolderOnly) => return Err(ErrorKind::NotFound.into()),
+            Location::Absent(key, Creatable::Anything) => key,
+        };
+
+        state.create_file_entry(key, contents)
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {
@@ -312,6 +323,12 @@ impl Body {
 }
 
 impl State {
+    fn create_file_entry(&mut self, key: PathBuf, contents: &[u8]) -> io::Result<()> {
+        let mut node = Node::new(Body::File(contents.to_vec()), 0, self.user_uid, FILE_MODE);
+        node.allocated = allocation_for(contents.len());
+        self.create_entry(key, node)
+    }
+
     fn children<'a>(&'a self, dir: &'a Path) -> impl Iterator<Item = (PathBuf, u64)> + 'a {
         self.subtree(dir)
             .filter(move |(path, _)| path.parent() == Some(dir))

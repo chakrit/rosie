@@ -68,6 +68,27 @@ impl<B: Backend> Gate<B> {
         Ok(path)
     }
 
+    /// The name `name` is stored under in `folder`, as `folder`'s listing spells it.
+    ///
+    /// The volume looks `name` up as it compares names, so on a volume that folds case
+    /// or Unicode form, as APFS does by default, this is the entry `name` folds onto.
+    /// Only the volume knows its folding rules, so rosie asks it rather than folding
+    /// names itself. A missing entry is an [`Error::Io`] of kind `NotFound`; a `name`
+    /// that is not one entry's name, such as `..` or one holding `/`, is refused.
+    pub fn stored_name(&self, folder: &Path, name: &OsStr) -> Result<OsString, Error> {
+        if Path::new(name).file_name() != Some(name) {
+            return Err(Error::NotAnEntryName {
+                name: name.to_owned(),
+            });
+        }
+
+        let folder = resolve_dots(folder)?;
+        let path = folder.join(name);
+
+        let meta = self.io(Op::Lstat, &path, self.backend.lstat(&path))?;
+        self.spelling_on_disk(&folder, name, meta)
+    }
+
     /// `lstat`s every component of an already resolved, existing path from `/` down,
     /// refusing the first symlink. Returns the metadata of the path itself.
     pub(super) fn lstat_without_symlinks(&self, path: &Path) -> Result<Metadata, Error> {

@@ -2,7 +2,7 @@
 
 use std::ffi::OsString;
 use std::fs;
-use std::io;
+use std::io::{self, Write as _};
 use std::os::macos::fs::MetadataExt as _;
 use std::os::unix::fs::{MetadataExt as _, PermissionsExt as _};
 use std::os::unix::process::ExitStatusExt as _;
@@ -47,6 +47,14 @@ impl Backend for RealBackend {
 
     fn write_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         fs::write(path, contents)
+    }
+
+    fn create_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        let mut file = fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(path)?;
+        file.write_all(contents)
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {

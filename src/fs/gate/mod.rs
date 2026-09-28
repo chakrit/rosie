@@ -125,6 +125,18 @@ impl<B: Backend> Gate<B> {
         )
     }
 
+    /// Creates a new file under rosie's own folders. Fails with `AlreadyExists` when
+    /// the volume already holds the name under any spelling it treats as the same.
+    pub fn create_own_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
+        let path = self.confine_to_own(path)?;
+        self.refuse_symlinks_in_existing(&path)?;
+        self.io(
+            Op::CreateFile,
+            &path,
+            self.backend.create_file(&path, contents),
+        )
+    }
+
     /// Creates a folder under rosie's own folders, with any missing parents.
     pub fn create_own_dir_all(&self, path: &Path) -> Result<(), Error> {
         let path = self.confine_to_own(path)?;
@@ -189,6 +201,7 @@ impl<B: Backend> Gate<B> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsStr;
     use std::io::ErrorKind;
 
     use super::*;
@@ -586,6 +599,55 @@ mod tests {
         );
     }
 
+    // stored names
+
+    #[test]
+    fn names_the_entry_a_lookup_folds_onto_as_it_is_stored() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/packs/Rosie");
+        fake.add_dir("/Users/me/packs/other");
+        let gate = gate(&fake, &[]);
+
+        let stored = gate
+            .stored_name(path("/Users/me/packs"), OsStr::new("rosie"))
+            .expect("folded lookup");
+        let exact = gate
+            .stored_name(path("/Users/me/packs"), OsStr::new("other"))
+            .expect("exact lookup");
+
+        assert_eq!(stored, OsString::from("Rosie"));
+        assert_eq!(exact, OsString::from("other"));
+    }
+
+    #[test]
+    fn reports_a_missing_stored_name_as_not_found() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/packs/rosie");
+        let gate = gate(&fake, &[]);
+
+        let result = gate.stored_name(path("/Users/me/packs"), OsStr::new("rosy"));
+
+        assert!(
+            matches!(result, Err(Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound)
+        );
+    }
+
+    #[test]
+    fn refuses_a_stored_name_that_is_not_one_entry_name() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/packs/rosie");
+        let gate = gate(&fake, &[]);
+
+        for name in ["", ".", "..", "rosie/..", "rosie/", "/etc", "a/b"] {
+            let result = gate.stored_name(path("/Users/me/packs"), OsStr::new(name));
+
+            assert!(
+                matches!(&result, Err(Error::NotAnEntryName { name: refused }) if refused == name),
+                "{name:?}: got {result:?}"
+            );
+        }
+    }
+
     // rosie's own data
 
     #[test]
@@ -619,12 +681,14 @@ mod tests {
         let outside = gate.write_own_file(path("/Users/me/.zshrc"), b"pwned");
         let escaped = gate.delete_own(path("/Users/me/.local/share/rosie/../../../.zshrc"));
         let prefixed = gate.write_own_file(path("/Users/me/.config/rosie-evil/x"), b"x");
+        let created = gate.create_own_file(path("/Users/me/.zshrc"), b"pwned");
 
         assert!(matches!(outside, Err(Error::OutsideOwnData { .. })));
         assert!(
             matches!(escaped, Err(Error::OutsideOwnData { path }) if path == Path::new("/Users/me/.zshrc"))
         );
         assert!(matches!(prefixed, Err(Error::OutsideOwnData { .. })));
+        assert!(matches!(created, Err(Error::OutsideOwnData { .. })));
         assert!(fake.exists("/Users/me/.zshrc"));
     }
 
@@ -644,6 +708,7 @@ mod tests {
         let results = [
             gate.read_own_file(&evil.join("precious.txt")).map(drop),
             gate.write_own_file(&evil.join("planted.txt"), b"x"),
+            gate.create_own_file(&evil.join("planted.txt"), b"x"),
             gate.create_own_dir_all(&evil.join("sub")),
             gate.rename_own(&evil, &real.join("moved")),
             gate.rename_own(&real, &evil.join("moved")),

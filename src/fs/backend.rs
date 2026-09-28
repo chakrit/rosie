@@ -30,6 +30,12 @@ pub trait Backend {
     /// Creates or truncates a regular file with the given contents.
     fn write_file(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
 
+    /// Creates a new regular file with the given contents (`O_CREAT | O_EXCL`). Fails
+    /// with `AlreadyExists` when any entry, a symlink included, already holds the name
+    /// as the volume compares names: case and Unicode form folded on a default APFS
+    /// volume. A final symlink is never followed.
+    fn create_file(&self, path: &Path, contents: &[u8]) -> io::Result<()>;
+
     /// Creates a folder and any missing parents.
     fn create_dir_all(&self, path: &Path) -> io::Result<()>;
 
@@ -69,6 +75,10 @@ impl<B: Backend + ?Sized> Backend for &B {
 
     fn write_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
         (**self).write_file(path, contents)
+    }
+
+    fn create_file(&self, path: &Path, contents: &[u8]) -> io::Result<()> {
+        (**self).create_file(path, contents)
     }
 
     fn create_dir_all(&self, path: &Path) -> io::Result<()> {

@@ -309,7 +309,7 @@ mod tests {
 
     /// The plists a run boots out, in order.
     fn runnable_bootouts(plan: &Plan) -> Vec<&str> {
-        plan.runnable()
+        plan.runnable_as(RunAs::User)
             .bootouts
             .iter()
             .map(|bootout| bootout.plist.to_str().expect("utf-8"))

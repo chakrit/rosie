@@ -48,6 +48,15 @@ pub trait Backend {
     /// Runs a program directly, never through a shell, with stdin closed, and waits for
     /// it to finish.
     fn run(&self, argv: &Argv) -> io::Result<CommandOutput>;
+
+    /// Runs a program like [`Backend::run`], handing each line of its stdout and stderr
+    /// to `on_line` as it arrives instead of collecting them.
+    fn run_streaming<F: FnMut(&str)>(&self, argv: &Argv, on_line: F) -> io::Result<Exit>;
+
+    /// Runs `sudo <argv>` with plain `sudo`, no flags. `stdin` is piped to it and then
+    /// closed; its stdout is collected. Its stderr is rosie's own, where sudo asks for
+    /// the password and the elevated child reports its progress.
+    fn sudo(&self, argv: &Argv, stdin: &[u8]) -> io::Result<CommandOutput>;
 }
 
 impl<B: Backend + ?Sized> Backend for &B {
@@ -94,7 +103,18 @@ impl<B: Backend + ?Sized> Backend for &B {
     fn run(&self, argv: &Argv) -> io::Result<CommandOutput> {
         (**self).run(argv)
     }
+
+    fn run_streaming<F: FnMut(&str)>(&self, argv: &Argv, on_line: F) -> io::Result<Exit> {
+        (**self).run_streaming(argv, on_line)
+    }
+
+    fn sudo(&self, argv: &Argv, stdin: &[u8]) -> io::Result<CommandOutput> {
+        (**self).sudo(argv, stdin)
+    }
 }
+
+/// The root user's id.
+pub const ROOT_UID: u32 = 0;
 
 /// What `lstat` reports about one path.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

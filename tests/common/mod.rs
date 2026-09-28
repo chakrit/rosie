@@ -24,7 +24,7 @@ pub(crate) use contract;
 
 /// A backend plus the fixtures rosie itself never creates (symlinks, hardlinks).
 pub trait Harness {
-    type B: Backend;
+    type B: Backend + Sync;
 
     fn backend(&self) -> &Self::B;
     /// An empty, symlink-free folder to work in.

@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::backend::Argv;
+use super::gate::Exposure;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -48,6 +49,18 @@ pub enum Error {
 
     #[error("{path} is a mount of another volume; rosie does not delete across volumes", path = path.display())]
     CrossesVolume { path: PathBuf },
+
+    #[error(
+        "{path} is a dataless cloud placeholder; rosie neither downloads nor deletes it",
+        path = path.display(),
+    )]
+    Placeholder { path: PathBuf },
+
+    #[error("{folder} {exposure}", folder = folder.display())]
+    NotRootControlled { folder: PathBuf, exposure: Exposure },
+
+    #[error("cannot check the folders above it: {0}")]
+    AboveUnchecked(#[source] Box<Error>),
 
     #[error("{path} is outside rosie's own folders", path = path.display())]
     OutsideOwnData { path: PathBuf },

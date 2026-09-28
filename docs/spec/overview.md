@@ -13,9 +13,9 @@ Status: accepted. Nothing here is implemented yet; every section is target behav
 - Everything should be fast, as per Rust standard. See
   [performance.md](performance.md).
 - Rosie shows interactive progress where possible.
-- Rosie is just a cleanup tool. It has no concept of a project and does not reason about
-  how code is edited, activity, or git. Plan selection is decided by rules and the
-  aggressive level only.
+- Rosie is just a cleanup tool. It does not reason about how code is edited, activity,
+  or git. `.git` may be used as an ordinary rule marker. Plan selection is decided by
+  rules and the aggressive level only.
 
 ## Shape
 

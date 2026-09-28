@@ -18,6 +18,11 @@ the folder.
 3. Genuinely unsettled exploration that matches none of the above? →
    [`scratch/`](scratch/).
 
+**Decision records are an exception, not a routing destination.** If
+`docs/decisions/` exists, read its `README.md` before writing there. Every
+decision record adds a substantial losing argument to an accompanying
+`docs/spec/` amendment; never route an artifact there from the normal gate.
+
 ## Everything settled amends `spec/`
 
 Put every settled instruction, agreement, library choice, convention, and preference in

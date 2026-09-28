@@ -48,11 +48,16 @@ re-open it. If a spec is wrong, raise it with the user and amend the spec.
 approach that was agreed, a library that was picked, a convention or preference that
 was fixed. Write it there as it was given: the rule, at the length it was given, with
 no reason supplied and no note of what it was chosen over. A one-sentence rule — "use
-RESTful routes" — is a complete entry. There is no decisions log.
+RESTful routes" — is a complete entry.
 
 File new material by the gate, first match wins: third-party lookup → `vendor/`; our
 own design or surface → `spec/`; unsettled exploration → `scratch/` (last resort,
 opened with a "not spec because ___" line). Nothing defaults to `scratch/`.
+
+**Decision records are an exception, not a routing destination.** If
+`docs/decisions/` exists, read its `README.md` before writing there. Every
+decision record adds a substantial losing argument to an accompanying
+`docs/spec/` amendment; never route an artifact there from the normal gate.
 
 **Before writing under `docs/`, read `docs/README.md`, then the destination folder's
 `README.md`.** The root file defines the routing gate. The folder file defines its

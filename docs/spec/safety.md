@@ -39,6 +39,8 @@ forced through it; there are no exceptions.
 - Pack tarballs are unpacked with the `tar` and `flate2` crates. Only regular files and
   folders are accepted; absolute paths, `..`, symlinks, and hardlinks are rejected.
   Entries are written through the metadata methods.
+- Decision record:
+  [FS layer metadata and pack unpacking](../decisions/2026-09-29-fs-layer-metadata-and-pack-unpacking.md).
 
 ## Roots
 
@@ -74,6 +76,10 @@ Rosie never follows, resolves, or accepts a symlink. Nothing is canonicalized.
   path ([rules.md](rules.md#paths)).
 - Deleting a matched folder removes the symlinks inside it as links; their targets are
   untouched.
+- A hand-written plan fed to `rosie run` is the user's own doing; the gate compares its
+  paths as written.
+- Decision record:
+  [symlinks and the path gate](../decisions/2026-09-29-symlinks-and-path-gate.md).
 
 ## Walk skips
 
@@ -107,6 +113,7 @@ item paths, component by component. Bare names and symlinked launches are not ma
   `rosie restore`.
 - Rosie's delete never follows symlinks and makes user-owned read-only folders writable
   as it goes.
+- Decision record: [no Trash mode](../decisions/2026-09-29-no-trash-mode.md).
 
 ## Elevation
 
@@ -131,6 +138,8 @@ The root entry point is a hidden `__elevated` subcommand, gated four ways:
    carries the invoking user's home.
 
 Every other root invocation is refused.
+
+Decision record: [elevation without FFI](../decisions/2026-09-29-elevation-without-ffi.md).
 
 ### Refusing `sudo rosie`
 

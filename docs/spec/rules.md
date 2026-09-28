@@ -7,32 +7,34 @@ new or unsupported tools and publish them independently of rosie.
 
 ## Rule tables
 
-Rules are TOML tables named `[rules.<name>]`.
+Rules are TOML tables named `[rules.<name>]`. Each rule has one `strategy`, and each
+strategy has its own fields:
 
-### Folder rules
+| `strategy` | Fields                                   | Does                                  |
+|------------|------------------------------------------|---------------------------------------|
+| `name`     | `target`                                 | cleans folders matched by name alone  |
+| `marker`   | `target`, `marker` and/or `inside`       | cleans folders whose markers match    |
+| `lua`      | `target`, exactly one of `expr`/`script` | cleans folders the Lua code accepts   |
+| `tool`     | `cmd`, `cmd_aggressive`                  | runs the tool's own cleanup command   |
 
-A folder rule has a `target` (the folder name) and a `strategy` discriminator:
+`target` is the folder name.
 
-| `strategy` | Matches when                                                        |
-|------------|---------------------------------------------------------------------|
-| `name`     | the folder name alone matches                                       |
-| `marker`   | `marker = [...]` sibling files and/or `inside = [...]` files match  |
-| `lua`      | the Lua `expr` or `script` returns true                             |
+### Folder strategies
 
-- `marker` and `inside` are any-of lists; globs are allowed. When both are set, both
-  must match.
+- `marker = [...]` lists sibling files; `inside = [...]` lists files within the folder.
+  Both are any-of lists; globs are allowed. When both are set, both must match.
 - A `lua` rule has exactly one of `expr` or `script`. `expr` is wrapped as
   `return (...)`; `script` is a full chunk. Both or neither is a load error naming the
   rule.
 
-### Tool rules
+### Tool strategy
 
 A tool rule invokes the tool's own cleanup command instead of reimplementing its
 internals:
 
 ```toml
 [rules.docker]
-kind = "tool"
+strategy = "tool"
 cmd = "docker system prune --force"
 cmd_aggressive = "docker system prune --all --volumes --force"
 ```
@@ -76,6 +78,8 @@ Lua ships in v1, sandboxed with a read-only API:
 - There is no auto-update. When rules are old, rosie warns: "Your rules are x months
   old, consider rosie rules pull to update".
 - Pull warns about rules from different packs that share the same target and detection.
+- `rosie rules remove <pack>` removes any pack, including `rosie`. Removing the last
+  pack means the next run auto-pulls `rosie` again.
 - Rule packs may add per-bundle-ID leftover paths for app cleanup ([app.md](app.md)).
 
 ## Layers and overrides
@@ -86,11 +90,7 @@ Layers, later overriding earlier by rule name:
 2. User rules: `~/.config/rosie/rules/`
 3. Project rules: `.rosie.toml`
 
-Override or disable a rule by its qualified name:
-
-```toml
-[rules."rosie/docker"]
-enabled = false
-```
+A later layer overrides a rule by its qualified name, e.g. `[rules."rosie/docker"]`.
+Rules cannot be disabled individually: a pack is used whole or removed.
 
 Rules and packs cannot add `roots` ([safety.md](safety.md#roots)).

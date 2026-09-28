@@ -4,6 +4,9 @@ Status: accepted. Target behavior; not implemented.
 
 Cleanup runs in two phases that can also be invoked independently: scan produces a
 plan, run executes it, like `terraform plan -out` followed by `terraform apply`.
+`rosie scan` (alias `rosie plan`) prints the TOML plan to stdout; `rosie clean` scans,
+confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or piped plan
+([cli.md](cli.md#scan-and-clean)).
 
 ## Plan file
 
@@ -39,5 +42,5 @@ edits it, rosie re-shows the trimmed plan and re-prompts.
 
 ## Shell-script export
 
-Rosie can write a plan as a shell script that the user inspects and runs with sudo
-themselves. An `.sh` plan is export-only, for power users; rosie cannot run it.
+`rosie scan … --sh` prints the plan as a shell script that the user inspects and runs
+with sudo themselves. An `.sh` plan is export-only, for power users; rosie cannot run it.

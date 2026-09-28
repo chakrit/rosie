@@ -1,0 +1,13 @@
+school = "prod9/school"
+skills = [
+    "architect",
+    "code",
+    "rust-coding",
+    "hardcore",
+    "smoke",
+    "safety-audit",
+]
+
+[backends.claude]
+model = "claude-opus-5-5"
+effort = "medium"

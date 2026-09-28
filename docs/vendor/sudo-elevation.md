@@ -5,9 +5,8 @@
 ## Re-exec via `sudo` preserving args/env
 
 - A CLI that needs root re-invokes itself as `sudo <argv0> <original-args...>`. This
-  hands the password prompt to the real `sudo` binary, matching rosie's stated design
-  ("let user type into regular sudo prompt so we don't have to worry ourselves about
-  any security stuff").
+  hands the password prompt to the real `sudo` binary. Rosie instead pipes items to a
+  hidden `__elevated` subcommand ([spec](../spec/safety.md#elevation)).
 - By default `sudoers` applies `env_reset`: the child process gets a **minimal**
   environment (`TERM`, `PATH`, `HOME`, `MAIL`, `SHELL`, `LOGNAME`, `USER`, `USERNAME`,
   plus `SUDO_*` and anything explicitly allow-listed via `env_keep`). Any environment

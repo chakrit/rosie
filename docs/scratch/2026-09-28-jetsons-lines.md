@@ -1,4 +1,4 @@
-<!-- not spec because: candidate message flavor; nothing chosen yet -->
+<!-- not spec because: raw candidate lines; the lines adopted are recorded in spec/safety.md, the rest are unchosen -->
 
 # The Jetsons: Quotes and Lines for rosie CLI Messages
 

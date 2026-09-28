@@ -6,19 +6,22 @@ Status: accepted. Target behavior; not implemented.
 
 Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 
-| Mode              | Cleans                                                    |
-|-------------------|-----------------------------------------------------------|
-| `project [<dir>]` | artifacts of one project                                  |
-| `tree [<dir>]`    | meta-scan over the fs-based modes under `<dir>`           |
-| `caches`          | tool-wide caches not tied to a project                    |
-| `app [<X.app>]`   | an application and its leftovers ([app.md](app.md))       |
-| `orphans`         | leftovers of apps no longer installed ([app.md](app.md))  |
+| Mode            | Cleans                                                    |
+|-----------------|-----------------------------------------------------------|
+| `tree [<dir>]`  | everything the rules match under `<dir>`                  |
+| `caches`        | tool-wide caches                                          |
+| `app [<X.app>]` | an application and its leftovers ([app.md](app.md))       |
+| `orphans`       | leftovers of apps no longer installed ([app.md](app.md))  |
 
-- **caches** covers tool-wide caches not tied to a project: cargo registry, DerivedData,
-  Docker, Homebrew, `~/Library/Caches`.
-- **tree** applies `project` to every project root found, includes `caches` targets
-  whose fixed path lies under the tree root, and never dispatches `app` mode.
+- **tree** walks `<dir>` applying the folder rules, includes `caches` targets whose fixed
+  path lies under `<dir>`, and never dispatches `app` mode.
+- **caches** covers tool-wide caches: cargo registry, DerivedData, Docker, Homebrew,
+  `~/Library/Caches`.
 - `<dir>` defaults to the current directory.
+- A `<dir>` or `<X.app>` argument whose path contains a symlink, or whose spelling does
+  not match the disk, is refused ([safety.md](safety.md#symlinks)).
+- Which rules each mode uses is inferred from the rule's shape
+  ([rules.md](rules.md#modes)).
 
 ## Scan and clean
 
@@ -33,13 +36,12 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 `rosie scan tree ~ | rosie run -`.
 
+- `rosie run` does not ask for confirmation; the plan is the confirmation.
+- `rosie clean` with no terminal fails with a usage error.
+
 ### Bare `rosie`
 
-Bare `rosie` auto-detects the mode:
-
-- A `.git` is found → `project` clean of that project.
-- Invoked in the home folder → `caches` plus `tree` over each allowlisted root
-  ([safety.md](safety.md#roots)).
+Bare `rosie` is `rosie clean tree .`.
 
 ## Management commands
 
@@ -53,11 +55,14 @@ Bare `rosie` auto-detects the mode:
 | `rosie roots remove [<path>]`    | removes a path from the `roots` allowlist                 |
 | `rosie config`                   | shows every config key and its current value              |
 | `rosie config get [<key>]`       | prints a config value                                     |
-| `rosie config set [<key> <val>]` | sets a config value, e.g. `rosie config set trash true`   |
+| `rosie config set [<key> <val>]` | sets a config value                                       |
 | `rosie config unset [<key>]`     | deletes the key from `config.toml`; its default applies   |
 
+- Example: `rosie config set walk.enter_bundles true`.
 - `rosie rules remove` removes any pack, including `rosie`. Removing the last pack means
   the next run auto-pulls `rosie` again ([rules.md](rules.md#packs)).
+- `rosie roots add` refuses a path that contains a symlink or does not match the disk's
+  spelling, naming the real path ([safety.md](safety.md#symlinks)).
 
 The hidden `__elevated` subcommand is internal and refuses every invocation that does
 not come from rosie itself ([safety.md](safety.md#elevation)).
@@ -84,13 +89,18 @@ Flags for `scan`, `plan`, and `clean`:
 |------------------------|-----------------------------------------------------------------|
 | `--only <rule>`        | limits the run to that rule name in any pack; repeatable        |
 | `--aggressive`         | ticks aggressive items; `cmd_aggressive` replaces `cmd`         |
-| `--trash`              | moves items to the macOS Trash for this run instead of deleting |
 | `--enter-bundles`      | walk into bundles (overrides `[walk] enter_bundles`)            |
 | `--enter-mounts`       | walk across volumes (overrides `[walk] enter_mounts`)           |
 | `--enter-placeholders` | open dataless cloud placeholders (`[walk] enter_placeholders`)  |
 | `--sh`                 | `scan` / `plan` only: prints the plan as a shell script         |
 
 Rule names for `--only` are listed by `rosie rules`.
+
+Global flags are `--help` and `--version`. There is no `--verbose`.
+
+## Exit status
+
+Rosie exits non-zero when any item failed or the command errored.
 
 ## Configuration
 
@@ -99,7 +109,6 @@ User configuration is TOML at `~/.config/rosie/config.toml`. Keys defined so far
 | Key                         | Default     | Spec                                      |
 |-----------------------------|-------------|-------------------------------------------|
 | `roots`                     | seeded list | [safety.md](safety.md#roots)              |
-| `trash`                     | `false`     | [safety.md](safety.md#deletion-and-trash) |
 | `[walk] enter_bundles`      | `false`     | [safety.md](safety.md#walk-skips)         |
 | `[walk] enter_mounts`       | `false`     | [safety.md](safety.md#walk-skips)         |
 | `[walk] enter_placeholders` | `false`     | [safety.md](safety.md#walk-skips)         |

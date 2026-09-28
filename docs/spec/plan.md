@@ -10,15 +10,21 @@ confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or pipe
 
 ## Plan file
 
+The exact TOML layout is defined during implementation and written back here.
+
+- A plan carries a format version.
 - A plan is a TOML file with one entry per item: target, path, size, action.
-- Entries are keyed by path and list every rule that matched that path.
+- Path entries are keyed by path and list every rule that matched that path. Tool
+  entries are keyed by rule.
 - Nested matches collapse into the outer one.
 - Tool rules with an identical trimmed `cmd` dedupe into one entry.
 - Aggressive items appear unticked unless `--aggressive` is given
   ([rules.md](rules.md#aggressive-twins)).
 - Items outside `roots` appear as blocked, with a `rosie roots add <path>` hint
   ([safety.md](safety.md#roots)).
-- Scan marks an item `sudo` when the user cannot delete it
+- Unticked and blocked entries are kept in the plan but not executed.
+- A plan never carries roots; run checks against the `roots` in `config.toml`.
+- Scan marks an item `sudo` when it is not owned by the user
   ([safety.md](safety.md#elevation)).
 - Walk skips are reported: the user is told what was skipped
   ([safety.md](safety.md#walk-skips)).
@@ -30,9 +36,9 @@ stderr, never written into the plan TOML.
 
 - Scan and confirmation show the item count and total size of ticked items, unticked
   aggressive items, and blocked items.
-- The end of a run shows the total freed and the items done, plus skipped items (stale,
-  running process, sudo refused) with their sizes.
-- A `--trash` run reports "moved to Trash", not freed.
+- The end of a run shows the total freed and the items done, plus skipped and failed
+  items (stale, running process, sudo refused, errors) with their sizes, and walk-skip
+  counts per reason.
 - Sizes are allocated bytes; hardlinks are counted once.
 - Tool items show "size unknown" in the plan and are excluded from totals.
 
@@ -47,9 +53,11 @@ edits it, rosie re-shows the trimmed plan and re-prompts.
 
 ## Run
 
-- Run re-validates each entry; a stale entry is skipped and reported.
+- Run re-validates each entry; a stale entry is skipped and reported. An entry is stale
+  when its path is missing or its `lstat` type changed.
 - Run refuses items that any process is executing from
   ([safety.md](safety.md#running-processes)).
+- A failed item is reported and the run continues.
 - Run does the user's items first, then elevates once for the remaining `sudo` items
   ([safety.md](safety.md#elevation)).
 - While a tool command runs, rosie shows a spinner with the command and a live rolling

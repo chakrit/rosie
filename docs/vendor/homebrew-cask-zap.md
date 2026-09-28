@@ -24,7 +24,7 @@ Homebrew runs them:
 Docs quote (docs.brew.sh/Cask-Cookbook#stanza-zap): "zap procedures will never be
 performed by default" — opt-in only. Cask authors are told zap "should not remove files
 created by the user directly" (e.g. documents), only app-owned state — the same
-distinction rosie's own restorable-mode boundary needs to draw.
+distinction an app-leftover cleaner needs to draw.
 
 ## Directive list
 

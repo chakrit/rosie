@@ -2,7 +2,7 @@
 
 # macOS app uninstaller family: how leftovers are found and removed
 
-Rosie's `rosie clean SomeApp.app` mode plays in the same space as AppCleaner and its
+Rosie's `rosie clean app <X.app>` mode plays in the same space as AppCleaner and its
 peers. This is a survey of how that family works, to inform rosie's own rule design.
 Confidence varies a lot by source — Pearcleaner is read from its own code (high
 confidence); AppCleaner and CleanMyMac are closed source, so their entries are
@@ -218,7 +218,7 @@ shape (name/bundle-based discovery of outside-the-bundle files).
 | Project | Language | Notable detail | Source |
 |---|---|---|---|
 | bigbearman/macos-app-uninstaller | shell | `find -iname "*name*" -o -iname "*bundleid*"`, one level deep per known dir. Notes Group Containers sometimes use an identifier different from the app's bundle ID. | github.com/bigbearman/macos-app-uninstaller |
-| wpexpertinbd/BHUninstaller | Rust + Node | Every removal goes to Trash behind a review sheet explaining why each file matched — same restorable-by-default posture rosie's spec wants. | github.com/wpexpertinbd/BHUninstaller |
+| wpexpertinbd/BHUninstaller | Rust + Node | Every removal goes to Trash behind a review sheet explaining why each file matched. | github.com/wpexpertinbd/BHUninstaller |
 | gostonx/uninstally | Swift | "Smart bundle-identifier detection," Finder extension. | github.com/gostonx/uninstally |
 | SyntaxFear/scrub-app | native/shell | Ranks matches by confidence, highest = exact bundle-ID match. | github.com/SyntaxFear/scrub-app |
 
@@ -305,7 +305,7 @@ files, then `--forget` to clear the receipt.
   this).
 - No tool in the family fully automates launch-agent/daemon unload *and* privileged
   helper teardown *and* pkg-receipt cleanup in one coherent, modern (`bootout`,
-  `SMAppService`) pipeline — rosie doing all three correctly, with the older `bootout`
+  `SMAppService`) pipeline — rosie doing all three correctly, with the modern `bootout`
   syntax instead of Pearcleaner's legacy `load`/`unload`, would be a genuine
   improvement over the surveyed prior art.
 - Orphan-mode leftover scanning (cleaning up after an app that's already gone) needs a

@@ -21,17 +21,17 @@ Keep one row per spec file. Update this table in the same change when adding, re
 retiring a file. Read it before adding a spec; amend the existing file when its subject
 already has a row.
 
-| File             | Covers                                                 | Status   |
-|------------------|--------------------------------------------------------|----------|
-| `overview.md`    | what rosie is, its principles, map of subject specs    | accepted |
-| `cli.md`         | commands, modes, flags, config keys                    | accepted |
-| `plan.md`        | plan file, stats, confirmation, run, `.sh` export      | accepted |
-| `rules.md`       | rule format, detection strategies, packs, layering     | accepted |
-| `safety.md`      | FS interaction layer, roots, walk skips, Trash, sudo   | accepted |
-| `app.md`         | `clean app` and `clean orphans`                        | accepted |
-| `performance.md` | parallel walk, sizing, delete                          | accepted |
-| `stack.md`       | toolchain, crates, FFI policy                          | accepted |
-| `testing.md`     | test tiers, fixtures, fakes, benchmark budgets         | accepted |
+| File             | Covers                                                  | Status   |
+|------------------|---------------------------------------------------------|----------|
+| `overview.md`    | what rosie is, its principles, map of subject specs     | accepted |
+| `cli.md`         | commands, modes, flags, config keys, exit codes         | accepted |
+| `plan.md`        | plan file, stats, confirmation, run, `.sh` export       | accepted |
+| `rules.md`       | rule format, detection strategies, packs, layering, Lua | accepted |
+| `safety.md`      | FS layer, roots, symlinks, walk skips, deletion, sudo   | accepted |
+| `app.md`         | `clean app` and `clean orphans`                         | accepted |
+| `performance.md` | parallel walk, sizing, delete                           | accepted |
+| `stack.md`       | toolchain, crates, FFI policy                           | accepted |
+| `testing.md`     | test tiers, fixtures, fakes, benchmark budgets          | accepted |
 
 ## Format
 

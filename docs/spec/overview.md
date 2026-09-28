@@ -7,7 +7,9 @@ Status: accepted. Nothing here is implemented yet; every section is target behav
 - "Rosie" is inspired by the Jetsons' robot maid.
 - A macOS cleanup CLI geared for developers.
 - Written in Rust, following the PRODIGY9 school skills and conventions.
-- Everything should be fast, as per Rust standard.
+- Everything should be fast, as per Rust standard. See
+  [performance.md](performance.md).
+- Rosie shows interactive progress where possible.
 - Rosie is just a cleanup tool. It does not reason about how projects are edited,
   project activity, or git. Plan selection is decided by rules and the aggressive level
   only.
@@ -32,12 +34,13 @@ Status: accepted. Nothing here is implemented yet; every section is target behav
 
 ## Subject specs
 
-| File                       | Covers                                                |
-|----------------------------|-------------------------------------------------------|
-| [cli.md](cli.md)           | commands, modes, flags, config commands               |
-| [plan.md](plan.md)         | plan file, confirmation prompt, run, `.sh` export     |
-| [rules.md](rules.md)       | rule format, detection strategies, packs, pull        |
-| [safety.md](safety.md)     | FS interaction layer, roots, walk skips, Trash, sudo  |
-| [app.md](app.md)           | `clean app` and `clean orphans`                       |
-| [stack.md](stack.md)       | toolchain, crates, FFI policy                         |
-| [testing.md](testing.md)   | test tiers, record-and-replay fixtures, fakes         |
+| File                             | Covers                                                |
+|----------------------------------|-------------------------------------------------------|
+| [cli.md](cli.md)                 | commands, modes, flags, config commands               |
+| [plan.md](plan.md)               | plan file, stats, confirmation, run, `.sh` export     |
+| [rules.md](rules.md)             | rule format, detection strategies, packs, pull        |
+| [safety.md](safety.md)           | FS interaction layer, roots, walk skips, Trash, sudo  |
+| [app.md](app.md)                 | `clean app` and `clean orphans`                       |
+| [performance.md](performance.md) | parallel walk, sizing, delete                         |
+| [stack.md](stack.md)             | toolchain, crates, FFI policy                         |
+| [testing.md](testing.md)         | test tiers, fixtures, fakes, benchmark budgets        |

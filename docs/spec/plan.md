@@ -23,6 +23,19 @@ confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or pipe
 - Walk skips are reported: the user is told what was skipped
   ([safety.md](safety.md#walk-skips)).
 
+## Stats
+
+Plans and clean runs report saved space. Simple stats suffice. Stats are printed to
+stderr, never written into the plan TOML.
+
+- Scan and confirmation show the item count and total size of ticked items, unticked
+  aggressive items, and blocked items.
+- The end of a run shows the total freed and the items done, plus skipped items (stale,
+  running process, sudo refused) with their sizes.
+- A `--trash` run reports "moved to Trash", not freed.
+- Sizes are allocated bytes; hardlinks are counted once.
+- Tool items show "size unknown" in the plan and are excluded from totals.
+
 ## Editing a plan
 
 Users may delete entries from a plan before `rosie run`. Run never adds anything.
@@ -39,6 +52,9 @@ edits it, rosie re-shows the trimmed plan and re-prompts.
   ([safety.md](safety.md#running-processes)).
 - Run does the user's items first, then elevates once for the remaining `sudo` items
   ([safety.md](safety.md#elevation)).
+- While a tool command runs, rosie shows a spinner with the command and a live rolling
+  window of the last 3 lines of its output. When it finishes, those 3 lines stay as the
+  item's result. When stderr is not a terminal, only the final 3 lines are printed.
 
 ## Shell-script export
 

@@ -7,11 +7,18 @@ Status: accepted. Target behavior; not implemented.
 All filesystem, command, sudo, and Trash interaction goes through one layer. Everything
 is forced through it; there are no exceptions.
 
+- The layer is a `Backend` trait: read_dir, metadata (allocated size, dev and inode,
+  dataless flag), file reads for Lua, canonicalize, remove, Trash, commands, and sudo.
+- `RealBackend` implements it for the machine; tests inject an in-memory fake
+  ([testing.md](testing.md)).
+- The roots gate is one concrete wrapper, `Gate<B: Backend>`. Code only ever receives
+  the gate, never a bare backend.
+- Static generics, no `dyn`: `Gate<B>`, `Scanner<B>`, `Runner<B>`, `App<B>`.
+- The trait carries no `Send` or `Sync` bound. Only parallel functions add
+  `where B: Sync`, using scoped threads; no `Send`, no `'static`.
 - Roots (home, Trash, `/Library`, scan root) are injected, never read from `$HOME`.
 - Every mutation is refused unless its canonical path lies within the plan's allowed
   roots.
-- Commands, sudo, and Trash sit behind an interface with recording fakes in tests
-  ([testing.md](testing.md)).
 
 ## Roots
 

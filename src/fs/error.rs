@@ -22,6 +22,9 @@ pub enum Error {
         source: io::Error,
     },
 
+    #[error("{name:?} is not the name of one entry in a folder")]
+    NotAnEntryName { name: std::ffi::OsString },
+
     #[error("{path} is not an absolute path", path = path.display())]
     Relative { path: PathBuf },
 
@@ -78,6 +81,7 @@ pub enum Op {
     ReadLink,
     ReadFile,
     WriteFile,
+    CreateFile,
     CreateDir,
     RemoveFile,
     RemoveDir,
@@ -93,6 +97,7 @@ impl Op {
             Op::ReadLink => "cannot read link",
             Op::ReadFile => "cannot read",
             Op::WriteFile => "cannot write",
+            Op::CreateFile => "cannot create",
             Op::CreateDir => "cannot create folder",
             Op::RemoveFile => "cannot remove",
             Op::RemoveDir => "cannot remove folder",

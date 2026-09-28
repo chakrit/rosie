@@ -13,6 +13,8 @@ use rosie::fs::{Backend, Bounds, Error, FileKind, Gate, RealBackend};
 
 contract!(
     writes_reads_and_overwrites_files,
+    creating_a_file_refuses_a_name_taken_under_another_case,
+    creating_a_file_refuses_a_symlink_without_following_it,
     lists_folder_entries_by_name,
     lstat_reports_the_entry_itself,
     hardlinks_share_an_inode,
@@ -42,6 +44,35 @@ fn writes_reads_and_overwrites_files(h: &impl Harness) {
     h.backend().write_file(&file, b"second").expect("overwrite");
 
     assert_eq!(h.backend().read_file(&file).expect("read"), b"second");
+}
+
+// Create-new writes let rosie notice two archive names the volume folds into one
+// (`docs/spec/safety.md#rosies-own-data`).
+
+fn creating_a_file_refuses_a_name_taken_under_another_case(h: &impl Harness) {
+    let first = h.root().join("ok.toml");
+    let second = h.root().join("OK.toml");
+    h.backend().create_file(&first, b"first").expect("create");
+
+    let clash = h.backend().create_file(&second, b"second");
+
+    assert_eq!(error_kind(clash), ErrorKind::AlreadyExists);
+    assert_eq!(h.backend().read_file(&first).expect("read"), b"first");
+    assert_eq!(
+        sorted(h.backend().read_dir(h.root()).expect("list")),
+        vec![OsString::from("ok.toml")]
+    );
+}
+
+fn creating_a_file_refuses_a_symlink_without_following_it(h: &impl Harness) {
+    let link = h.root().join("link");
+    let target = h.root().join("target");
+    h.symlink(&link, Path::new("target"));
+
+    let through_link = h.backend().create_file(&link, b"planted");
+
+    assert_eq!(error_kind(through_link), ErrorKind::AlreadyExists);
+    assert_eq!(error_kind(h.backend().lstat(&target)), ErrorKind::NotFound);
 }
 
 fn lists_folder_entries_by_name(h: &impl Harness) {
@@ -434,4 +465,19 @@ fn real_gate_refuses_a_case_mismatch_naming_the_disk_spelling() {
     let result = gate.check_typed_path(&h.root().join("code"));
 
     assert!(matches!(result, Err(Error::Misspelled { real, .. }) if real == spelled));
+}
+
+#[test]
+fn real_creating_a_file_refuses_a_name_taken_under_another_unicode_form() {
+    let h = RealHarness::new();
+    let composed = h.root().join("caf\u{e9}.toml");
+    let decomposed = h.root().join("cafe\u{301}.toml");
+    RealBackend
+        .create_file(&composed, b"first")
+        .expect("create NFC file");
+
+    let clash = RealBackend.create_file(&decomposed, b"second");
+
+    assert_eq!(error_kind(clash), ErrorKind::AlreadyExists);
+    assert_eq!(RealBackend.read_file(&composed).expect("read"), b"first");
 }

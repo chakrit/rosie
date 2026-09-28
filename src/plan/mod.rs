@@ -54,21 +54,27 @@ impl Plan {
         &self.reports
     }
 
-    /// The ticked entries a run executes. A bootout runs exactly when the delete that
-    /// holds its plist does, and every bootout must finish before the deletes start, so
-    /// a launch job is unloaded before its plist is gone (`docs/spec/app.md`).
-    pub fn runnable(&self) -> Runnable<'_> {
-        let deletes: Vec<&Delete> = self
+    /// The ticked entries a process running as `run_as` executes. A bootout runs with
+    /// the part of a run that carries its delete, and every bootout must finish before
+    /// the deletes start, so a launch job is unloaded before its plist is gone
+    /// (`docs/spec/app.md`). Only the deletes that run as `run_as` are included: the
+    /// elevated child boots out the jobs of a user's delete and leaves the delete to the
+    /// user's own process (see [`Delete::phase`]).
+    pub fn runnable_as(&self, run_as: RunAs) -> Runnable<'_> {
+        let ticked: Vec<&Delete> = self
             .deletes
             .iter()
             .filter(|d| d.status.is_ticked())
             .collect();
         Runnable {
-            bootouts: deletes
+            bootouts: ticked
                 .iter()
                 .flat_map(|delete| delete.bootouts.iter())
                 .collect(),
-            deletes,
+            deletes: ticked
+                .into_iter()
+                .filter(|delete| delete.run_as == run_as)
+                .collect(),
             tools: self
                 .tools
                 .iter()
@@ -80,6 +86,36 @@ impl Plan {
                 .filter(|r| r.selection.is_ticked())
                 .collect(),
         }
+    }
+
+    /// The ticked entries a run executes as `run_as`, as a plan of their own: a run
+    /// does the user's part itself and pipes the `sudo` part to the elevated child
+    /// (`docs/spec/safety.md#elevation`). Tools run as the user; receipts as root.
+    pub fn ticked_for(&self, run_as: RunAs) -> Plan {
+        let deletes = self
+            .deletes
+            .iter()
+            .filter(|delete| delete.status.is_ticked() && delete.phase() == run_as);
+        let tools = self
+            .tools
+            .iter()
+            .filter(|tool| tool.selection.is_ticked() && run_as == RunAs::User);
+        let receipts = self
+            .receipts
+            .iter()
+            .filter(|receipt| receipt.selection.is_ticked() && receipt.run_as() == run_as);
+
+        Plan {
+            deletes: deletes.cloned().collect(),
+            tools: tools.cloned().collect(),
+            receipts: receipts.cloned().collect(),
+            reports: Vec::new(),
+        }
+    }
+
+    /// Whether the plan holds no entry that could run.
+    pub fn is_empty(&self) -> bool {
+        self.deletes.is_empty() && self.tools.is_empty() && self.receipts.is_empty()
     }
 }
 
@@ -149,6 +185,21 @@ pub struct Delete {
     pub bootouts: Vec<Bootout>,
 }
 
+impl Delete {
+    /// Which part of a run carries this delete and its bootouts: the elevated part when
+    /// the delete or any of its bootouts needs root. A delete that runs as the user but
+    /// holds a `system` job's plist goes to the elevated part for its bootouts only; the
+    /// user's own process deletes it once the elevated part is done. So a plist is never
+    /// deleted before its job is booted out, and root never deletes the user's items.
+    pub fn phase(&self) -> RunAs {
+        let bootout_needs_root = self.bootouts.iter().any(|b| b.run_as() == RunAs::Sudo);
+        match (self.run_as, bootout_needs_root) {
+            (RunAs::User, false) => RunAs::User,
+            _ => RunAs::Sudo,
+        }
+    }
+}
+
 /// `launchctl bootout <domain> <plist>`, run before the delete that holds the plist.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Bootout {
@@ -156,9 +207,24 @@ pub struct Bootout {
     pub domain: LaunchDomain,
 }
 
+/// The system tools a run executes, by absolute path, so the elevated child never looks
+/// one up in a `PATH` the user controls.
+const LAUNCHCTL: &str = "/bin/launchctl";
+const PKGUTIL: &str = "/usr/sbin/pkgutil";
+
 impl Bootout {
+    /// The command as the plan and its shell export show it.
     pub fn argv(&self) -> Argv {
-        Argv::new("launchctl")
+        self.argv_for("launchctl")
+    }
+
+    /// The command as a run executes it.
+    pub fn absolute_argv(&self) -> Argv {
+        self.argv_for(LAUNCHCTL)
+    }
+
+    fn argv_for(&self, launchctl: &str) -> Argv {
+        Argv::new(launchctl)
             .arg("bootout")
             .arg(self.domain.to_string())
             .arg(&self.plist)
@@ -190,8 +256,18 @@ pub struct Receipt {
 }
 
 impl Receipt {
+    /// The command as the plan and its shell export show it.
     pub fn argv(&self) -> Argv {
-        Argv::new("pkgutil")
+        self.argv_for("pkgutil")
+    }
+
+    /// The command as a run executes it.
+    pub fn absolute_argv(&self) -> Argv {
+        self.argv_for(PKGUTIL)
+    }
+
+    fn argv_for(&self, pkgutil: &str) -> Argv {
+        Argv::new(pkgutil)
             .arg("--forget")
             .arg(self.package.as_str())
     }

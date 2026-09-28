@@ -134,6 +134,9 @@ pub enum SkipReason {
     RunningProcess,
     /// Elevation for the `sudo` items was refused or failed.
     SudoRefused,
+    /// A folder above the item could be changed by someone other than root, so the
+    /// elevated child left it for the user to delete by hand.
+    UnsafeToElevate,
 }
 
 impl SkipReason {
@@ -142,6 +145,7 @@ impl SkipReason {
             SkipReason::Stale => "stale",
             SkipReason::RunningProcess => "running process",
             SkipReason::SudoRefused => "sudo refused",
+            SkipReason::UnsafeToElevate => "unsafe to elevate",
         }
     }
 }
@@ -230,6 +234,7 @@ pub struct RunStats {
     pub stale: Tally,
     pub running_process: Tally,
     pub sudo_refused: Tally,
+    pub unsafe_to_elevate: Tally,
     pub failed: Tally,
     pub walk_skips: WalkSkips,
 }
@@ -241,6 +246,7 @@ impl RunStats {
             Outcome::Skipped(SkipReason::Stale) => &mut self.stale,
             Outcome::Skipped(SkipReason::RunningProcess) => &mut self.running_process,
             Outcome::Skipped(SkipReason::SudoRefused) => &mut self.sudo_refused,
+            Outcome::Skipped(SkipReason::UnsafeToElevate) => &mut self.unsafe_to_elevate,
             Outcome::Failed => &mut self.failed,
         };
         tally.add(size);
@@ -251,18 +257,25 @@ impl RunStats {
         self.done.size
     }
 
+    /// Whether any item failed; rosie then exits non-zero (`docs/spec/cli.md#exit-status`).
+    pub fn any_failed(&self) -> bool {
+        !self.failed.is_empty()
+    }
+
     /// Every skipped item, whatever the reason.
     pub fn skipped(&self) -> Tally {
         self.stale
             .plus(self.running_process)
             .plus(self.sudo_refused)
+            .plus(self.unsafe_to_elevate)
     }
 
-    fn skip_reasons(&self) -> [(SkipReason, Tally); 3] {
+    fn skip_reasons(&self) -> [(SkipReason, Tally); 4] {
         [
             (SkipReason::Stale, self.stale),
             (SkipReason::RunningProcess, self.running_process),
             (SkipReason::SudoRefused, self.sudo_refused),
+            (SkipReason::UnsafeToElevate, self.unsafe_to_elevate),
         ]
     }
 }
@@ -386,6 +399,10 @@ mod tests {
                 ItemSize::Known(Size::bytes(6)),
                 Outcome::Skipped(SkipReason::SudoRefused),
             ),
+            (
+                ItemSize::Known(Size::bytes(8)),
+                Outcome::Skipped(SkipReason::UnsafeToElevate),
+            ),
             (ItemSize::Unknown, Outcome::Failed),
             (ItemSize::Known(Size::bytes(70)), Outcome::Failed),
         ];
@@ -398,7 +415,8 @@ mod tests {
         assert_eq!(stats.stale, tally(1, 30, 0));
         assert_eq!(stats.running_process, tally(1, 400, 0));
         assert_eq!(stats.sudo_refused, tally(2, 11, 0));
-        assert_eq!(stats.skipped(), tally(4, 441, 0));
+        assert_eq!(stats.unsafe_to_elevate, tally(1, 8, 0));
+        assert_eq!(stats.skipped(), tally(5, 449, 0));
         assert_eq!(stats.failed, tally(2, 70, 1));
     }
 

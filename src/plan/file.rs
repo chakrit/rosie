@@ -482,7 +482,7 @@ mod tests {
 
         assert_eq!(parsed, plan, "{text}");
         assert_eq!(parsed.deletes().len(), 6, "{text}");
-        assert_eq!(parsed.runnable().bootouts.len(), 2, "{text}");
+        assert_eq!(parsed.runnable_as(RunAs::User).bootouts.len(), 2, "{text}");
     }
 
     #[test]

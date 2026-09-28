@@ -6,6 +6,8 @@ rust-version = "1.98.1"
 
 [dependencies]
 flate2 = "1"
+indicatif = { version = "0.18", default-features = false }
+rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
 tar = { version = "0.4", default-features = false }
 thiserror = "2"

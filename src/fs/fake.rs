@@ -24,13 +24,14 @@ use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
-use super::backend::{Argv, Backend, CommandOutput, FileKind, Metadata, SF_DATALESS};
+use super::backend::{
+    Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS,
+};
 use super::error::Op;
 use walk::{Creatable, FinalLink, Location, Tail};
 
 /// The uid the fake runs as, and owns fixtures by default.
 pub const USER_UID: u32 = 501;
-pub const ROOT_UID: u32 = 0;
 
 const ROOT_DEV: u64 = 1;
 const BLOCK_SIZE: u64 = 4096;
@@ -53,6 +54,8 @@ pub enum Call {
     SetMode(PathBuf, u32),
     Rename(PathBuf, PathBuf),
     Run(Argv),
+    /// `sudo <argv>`, with what was piped to its stdin.
+    Sudo(Argv, Vec<u8>),
 }
 
 pub struct FakeBackend {
@@ -66,6 +69,7 @@ struct State {
     next_inode: u64,
     failures: HashMap<(PathBuf, Op), ErrorKind>,
     responses: Vec<(Argv, CommandOutput)>,
+    sudo_response: Option<CommandOutput>,
     calls: Vec<Call>,
 }
 
@@ -107,6 +111,7 @@ impl FakeBackend {
             next_inode: 2,
             failures: HashMap::new(),
             responses: Vec::new(),
+            sudo_response: None,
             calls: Vec::new(),
         };
         let root = Node::new(Body::Dir, ROOT_DEV, ROOT_UID, DIR_MODE);
@@ -129,6 +134,12 @@ impl FakeBackend {
         let mut state = self.lock();
         state.responses.retain(|(known, _)| *known != argv);
         state.responses.push((argv, output));
+    }
+
+    /// Sets what `sudo` returns, whatever it is asked to run; without it, sudo is not
+    /// found.
+    pub fn respond_to_sudo(&self, output: CommandOutput) {
+        self.lock().sudo_response = Some(output);
     }
 
     // inspection
@@ -295,6 +306,27 @@ impl Backend for FakeBackend {
             .iter()
             .find(|(known, _)| known == argv)
             .map(|(_, output)| output.clone())
+            .ok_or_else(|| io::Error::from(ErrorKind::NotFound))
+    }
+
+    /// Hands over the canned stdout lines, then the stderr lines.
+    fn run_streaming<F: FnMut(&str)>(&self, argv: &Argv, mut on_line: F) -> io::Result<Exit> {
+        let output = self.run(argv)?;
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        for line in stdout.lines().chain(stderr.lines()) {
+            on_line(line);
+        }
+        Ok(output.exit)
+    }
+
+    fn sudo(&self, argv: &Argv, stdin: &[u8]) -> io::Result<CommandOutput> {
+        let mut state = self.lock();
+        state.calls.push(Call::Sudo(argv.clone(), stdin.to_vec()));
+        state
+            .sudo_response
+            .clone()
             .ok_or_else(|| io::Error::from(ErrorKind::NotFound))
     }
 }
@@ -487,7 +519,6 @@ fn parent_of(path: &Path) -> io::Result<&Path> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::backend::Exit;
 
     #[test]
     fn resolves_case_insensitively_like_a_default_volume() {

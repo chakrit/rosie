@@ -9,15 +9,18 @@
 mod components;
 mod lexical;
 mod removal;
+mod root_control;
 
 use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 
-use super::backend::{Argv, Backend, CommandOutput, Metadata};
+use super::backend::{Argv, Backend, CommandOutput, Exit, Metadata};
 use super::error::{Error, Op};
+use removal::Entering;
 
 pub use lexical::resolve_dots;
+pub use root_control::Exposure;
 
 /// Everything the gate is bounded by, injected by the caller and never read from the
 /// environment.
@@ -78,19 +81,6 @@ impl<B: Backend> Gate<B> {
         self.io(Op::ReadFile, &path, self.backend.read_file(&path))
     }
 
-    // cleanup targets
-
-    /// Deletes a file, folder tree, or other entry that lies within the roots.
-    ///
-    /// Symlinks inside a folder are removed as links, never descended. User-owned
-    /// folders that are not writable are made writable on the way down. The delete stops
-    /// at the first failure and reports it; entries removed before it stay removed.
-    pub fn delete(&self, path: &Path) -> Result<(), Error> {
-        let path = self.confine_to_roots(path)?;
-        let meta = self.lstat_without_symlinks(&path)?;
-        self.remove_entry(&path, meta)
-    }
-
     // commands
 
     /// Runs a tool command. Commands are outside the roots gate; the plan lists each for
@@ -100,6 +90,28 @@ impl<B: Backend> Gate<B> {
             argv: argv.clone(),
             source,
         })
+    }
+
+    /// Runs a tool command like [`Gate::run`], handing each line of its output to
+    /// `on_line` as it arrives.
+    pub fn run_streaming<F: FnMut(&str)>(&self, argv: &Argv, on_line: F) -> Result<Exit, Error> {
+        self.backend
+            .run_streaming(argv, on_line)
+            .map_err(|source| Error::Command {
+                argv: argv.clone(),
+                source,
+            })
+    }
+
+    /// Runs `sudo <argv>` with plain `sudo`, piping `stdin` to it
+    /// (`docs/spec/safety.md#elevation`).
+    pub fn sudo(&self, argv: &Argv, stdin: &[u8]) -> Result<CommandOutput, Error> {
+        self.backend
+            .sudo(argv, stdin)
+            .map_err(|source| Error::Command {
+                argv: argv.clone(),
+                source,
+            })
     }
 
     // rosie's own data
@@ -199,14 +211,47 @@ impl<B: Backend> Gate<B> {
     }
 }
 
+impl<B: Backend + Sync> Gate<B> {
+    // cleanup targets
+
+    /// Deletes a file, folder tree, or other entry that lies within the roots, the
+    /// entries of each folder in parallel (`docs/spec/performance.md#run`).
+    ///
+    /// Symlinks inside a folder are removed as links, never descended. User-owned
+    /// folders that are not writable are made writable on the way down. A dataless
+    /// cloud placeholder is refused, never opened or unlinked. The delete stops at a
+    /// failure and reports it; entries removed before it stay removed.
+    pub fn delete(&self, path: &Path) -> Result<(), Error> {
+        let path = self.confine_to_roots(path)?;
+        let meta = self.lstat_without_symlinks(&path)?;
+        self.remove_entry_in_parallel(&path, meta, Entering::OpeningUsersFolders)
+    }
+
+    /// Deletes like [`Gate::delete`], acting as root for the user: only through
+    /// folders no one but root can change (see `root_control`), and without changing
+    /// any permissions.
+    ///
+    /// A folder above the item, the item, or a folder inside it that fails is reported
+    /// as [`Error::NotRootControlled`] before anything below it is touched; entries
+    /// removed before it stay removed. A folder above the item that cannot be
+    /// inspected is [`Error::AboveUnchecked`].
+    pub fn delete_as_root(&self, path: &Path) -> Result<(), Error> {
+        let path = self.confine_to_roots(path)?;
+        self.require_root_controlled_above(&path)?;
+        let meta = self.io(Op::Lstat, &path, self.backend.lstat(&path))?;
+        self.remove_entry_in_parallel(&path, meta, Entering::RootControlledOnly)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
     use std::io::ErrorKind;
 
     use super::*;
+    use crate::fs::ROOT_UID;
     use crate::fs::error::RealPath;
-    use crate::fs::fake::{Call, FakeBackend, ROOT_UID, USER_UID};
+    use crate::fs::fake::{Call, FakeBackend, USER_UID};
 
     const HOME: &str = "/Users/me";
     const CONFIG: &str = "/Users/me/.config/rosie";
@@ -540,6 +585,44 @@ mod tests {
             matches!(result, Err(Error::CrossesVolume { path }) if path == Path::new("/Users/me/code/app/build/mnt"))
         );
         assert!(fake.exists("/Users/me/code/app/build/mnt/disk.bin"));
+    }
+
+    #[test]
+    fn refuses_dataless_placeholders_without_opening_or_unlinking_them() {
+        let fake = FakeBackend::new();
+        fake.add_file("/Users/me/code/a/cloud-dir/x", "x");
+        fake.add_file("/Users/me/code/b/cloud-file", "x");
+        fake.make_dataless("/Users/me/code/a/cloud-dir");
+        fake.make_dataless("/Users/me/code/b/cloud-file");
+        let gate = gate(&fake, &["/Users/me/code"]);
+
+        let folder = gate.delete(path("/Users/me/code/a"));
+        let file = gate.delete(path("/Users/me/code/b/cloud-file"));
+
+        assert!(
+            matches!(folder, Err(Error::Placeholder { path }) if path == Path::new("/Users/me/code/a/cloud-dir"))
+        );
+        assert!(matches!(file, Err(Error::Placeholder { .. })));
+        assert!(fake.exists("/Users/me/code/a/cloud-dir/x"));
+        assert!(fake.exists("/Users/me/code/b/cloud-file"));
+        assert!(
+            !fake
+                .calls()
+                .contains(&Call::ReadDir(PathBuf::from("/Users/me/code/a/cloud-dir")))
+        );
+    }
+
+    #[test]
+    fn deletes_own_data_one_entry_at_a_time_with_the_same_refusals() {
+        let fake = FakeBackend::new();
+        fake.add_file("/Users/me/.local/share/rosie/packs/p/cloud/x", "x");
+        fake.make_dataless("/Users/me/.local/share/rosie/packs/p/cloud");
+        let gate = gate(&fake, &[]);
+
+        let result = gate.delete_own(path("/Users/me/.local/share/rosie/packs/p"));
+
+        assert!(matches!(result, Err(Error::Placeholder { .. })));
+        assert!(fake.exists("/Users/me/.local/share/rosie/packs/p/cloud/x"));
     }
 
     // typed paths

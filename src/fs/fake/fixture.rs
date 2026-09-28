@@ -79,6 +79,16 @@ impl FakeBackend {
         self.lock().fixture_node(path.as_ref()).uid = uid;
     }
 
+    /// Sets the owner of `path` and of every folder above it but `/`, such as a
+    /// root-owned system folder chain.
+    pub fn chown_with_ancestors(&self, path: impl AsRef<Path>, uid: u32) {
+        let path = path.as_ref();
+        let mut state = self.lock();
+        for entry in path.ancestors().filter(|entry| *entry != Path::new("/")) {
+            state.fixture_node(entry).uid = uid;
+        }
+    }
+
     pub fn chmod(&self, path: impl AsRef<Path>, mode: u32) {
         self.lock().fixture_node(path.as_ref()).mode = mode & 0o7777;
     }

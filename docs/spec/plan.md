@@ -10,7 +10,69 @@ confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or pipe
 
 ## Plan file
 
-The exact TOML layout is defined during implementation and written back here.
+The plan file is `version = 1` followed by one table per entry, grouped by action;
+deletes are in path order. Each entry except `[[report]]` is preceded by a comment with
+its size (`size unknown` for `[[tool]]` and `[[forget]]`) and, when blocked, the
+`rosie roots add <path>` hint; report entries have no comment. A launch job's bootout
+sits inside the delete that holds its plist:
+
+```toml
+# rosie plan. Only entries with status = "ticked" run.
+# Delete any entry you do not want, then: rosie run <this file>
+version = 1
+
+# 4.1 KB; blocked, outside roots. To allow it: rosie roots add /Library/LaunchDaemons/com.x.plist
+[[delete]]
+path = "/Library/LaunchDaemons/com.x.plist"
+type = "file"
+size = 4096
+rules = ["app/com.x"]
+status = "blocked"
+sudo = true
+
+[[delete.bootout]]
+plist = "/Library/LaunchDaemons/com.x.plist"
+domain = "system"
+
+# 1.2 GB
+[[delete]]
+path = "/Users/me/src/app/node_modules"
+type = "folder"
+size = 1234567890
+rules = ["rosie/node"]
+status = "ticked"
+
+# size unknown
+[[tool]]
+rules = ["rosie/docker", "user/docker"]
+cmd = ["docker", "system", "prune", "--force"]
+status = "ticked"
+
+# size unknown
+[[forget]]
+package = "com.x.pkg"
+status = "ticked"
+
+[[report]]
+subject = "login item X"
+steps = ["Open System Settings > General > Login Items", "Remove X"]
+```
+
+| Table                 | Fields                                                             |
+|-----------------------|--------------------------------------------------------------------|
+| top level             | `version`: the format version; any other version is refused        |
+| `[[delete]]`          | `path`, `type` (`file`/`folder`), `size` (allocated bytes),        |
+|                       | `rules`, `status`, `sudo` (present and `true` when not owned by    |
+|                       | the user)                                                          |
+| `[[delete.bootout]]`  | `plist` (the delete's `path` or inside it), `domain` (`system` or  |
+|                       | `gui/<uid>`); runs when its delete does, before any delete         |
+| `[[tool]]`            | `rules`, `cmd` (argv), `status`                                    |
+| `[[forget]]`          | `package` for `pkgutil --forget`, `status`                         |
+| `[[report]]`          | `subject`, `steps`; report-only, never run                         |
+
+- `status` is `ticked`, `unticked`, or `blocked`; `[[tool]]` and `[[forget]]` are never
+  `blocked`.
+- Unknown keys are refused.
 
 - A plan carries a format version.
 - A plan is a TOML file with one entry per item: target, path, size, action.

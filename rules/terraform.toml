@@ -1,0 +1,11 @@
+# Terraform.
+# Source: docs/vendor/dev-tool-artifacts.md#terraform
+#
+# The provider plugin cache is left out: its path is read from ~/.terraformrc or
+# $TF_PLUGIN_CACHE_DIR, not fixed. `.terraform.lock.hcl` sits beside the `*.tf` files
+# (and is committed), never inside `.terraform/`, so it is not an `inside` marker.
+
+[rules.terraform-working-dir]
+strategy = "marker"
+target = ".terraform"
+marker = ["*.tf"]

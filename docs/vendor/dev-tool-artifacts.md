@@ -173,7 +173,7 @@ Source: [RubyGems caching guide](https://guides.rubygems.org/caching-and-vendori
 
 | artifact       | path                                                       | detection marker                          | regenerable? | prefer native cleanup |
 |------------------|-----------------------------------------------------------------|-----------------------------------------------|---------------|--------------------------|
-| Caches           | `~/Library/Caches/JetBrains/<Product><Version>/`                 | versioned product subfolder under fixed parent | yes, re-indexes on next launch | no CLI; raw delete safe, but IDE should be closed |
+| Caches           | `~/Library/Caches/JetBrains/<Product><Version>/`                 | versioned product subfolder under fixed parent | mostly, re-indexes on next launch — but also holds `LocalHistory/`, the IDE's record of uncommitted edits, which is not regenerable | no CLI; raw delete safe for the cache itself, but IDE should be closed and Local History is lost |
 | Logs             | `~/Library/Logs/JetBrains/<Product><Version>/`                   | same pattern                                   | yes | raw delete safe |
 | Plugins/settings | `~/Library/Application Support/JetBrains/<Product><Version>/`    | same pattern — **not purely cache**, contains settings/plugins | no (user config) | exclude from cleanup rules by default |
 

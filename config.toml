@@ -1,0 +1,44 @@
+# Default rosie configuration. Downloaded to seed a fresh user config.toml.
+# See docs/spec/safety.md#roots and docs/spec/cli.md#configuration.
+
+roots = [
+  "/Applications",
+  "~/Applications",
+
+  # App-leftover folders under ~/Library and /Library.
+  # Source: docs/vendor/macos-filesystem-layout.md
+  "~/Library/Caches",
+  "~/Library/Application Support",
+  "~/Library/Preferences",
+  "~/Library/Containers",
+  "~/Library/Group Containers",
+  "~/Library/Saved Application State",
+  "~/Library/HTTPStorages",
+  "~/Library/WebKit",
+  "~/Library/Logs",
+  "~/Library/LaunchAgents",
+  "/Library/LaunchDaemons",
+  "/Library/PrivilegedHelperTools",
+  "/private/var/db/receipts",
+
+  # Tool cache folders named by the rosie pack (rules/*.toml), each the narrowest
+  # folder the pack cleans. Folders already under a root above are not repeated.
+  "~/.cargo/registry",
+  "~/.cargo/git",
+  "~/.npm",
+  "~/.yarn/berry/cache",
+  "~/.bun/install/cache",
+  "~/.bundle/cache",
+  "~/.gradle/caches/modules-2/files-2.1",
+  "~/.gradle/wrapper/dists",
+  "~/.m2/repository",
+  "~/.cocoapods/repos",
+  "~/.pub-cache",
+  "~/Library/Developer/Xcode/DerivedData",
+  "~/Library/Developer/Xcode/iOS DeviceSupport",
+  "~/Library/Developer/Xcode/watchOS DeviceSupport",
+  "~/Library/Developer/Xcode/tvOS DeviceSupport",
+  "~/Library/Developer/Xcode/UserData/Previews",
+  "~/Library/Developer/CoreSimulator/Caches",
+  "/Library/Logs/DiagnosticReports",
+]

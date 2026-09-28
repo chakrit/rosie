@@ -1,0 +1,17 @@
+# Cargo / Rust artifacts.
+# Source: docs/vendor/dev-tool-artifacts.md#cargo-rust
+
+[rules.cargo-target]
+strategy = "marker"
+target = "target"
+marker = ["Cargo.toml"]
+
+[rules.cargo-cache]
+strategy = "path"
+paths = [
+  "~/.cargo/registry/cache",
+  "~/.cargo/registry/src",
+  "~/.cargo/registry/index",
+  "~/.cargo/git/db",
+  "~/.cargo/git/checkouts",
+]

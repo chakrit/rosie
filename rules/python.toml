@@ -1,0 +1,43 @@
+# Python: pip / uv / poetry / conda / venvs.
+# Source: docs/vendor/dev-tool-artifacts.md#python-pip-uv-poetry-conda-venv
+
+[rules.python-venv]
+strategy = "marker"
+target = ".venv"
+marker = ["pyproject.toml", "requirements.txt"]
+inside = ["pyvenv.cfg"]
+
+[rules.python-venv-named]
+strategy = "marker"
+target = "venv"
+marker = ["pyproject.toml", "requirements.txt"]
+inside = ["pyvenv.cfg"]
+
+[rules.pycache]
+strategy = "name"
+target = "__pycache__"
+
+[rules.pip-cache]
+strategy = "path"
+paths = ["~/Library/Caches/pip"]
+
+[rules.uv-cache]
+strategy = "tool"
+cmd = "uv cache clean"
+cmd_aggressive = "uv cache clean"
+
+# `poetry cache clear` needs a per-source cache name, so the cache folders are deleted
+# directly. `virtualenvs/` beside them holds Poetry-managed venvs and is left alone.
+[rules.poetry-cache]
+strategy = "path"
+paths = [
+  "~/Library/Caches/pypoetry/cache",
+  "~/Library/Caches/pypoetry/artifacts",
+]
+
+# The conda base folder varies per install (`conda info --base`), so conda's own
+# cleanup is used. `--yes` keeps it from waiting on a confirmation prompt.
+[rules.conda-cache]
+strategy = "tool"
+cmd = "conda clean --all --yes"
+cmd_aggressive = "conda clean --all --yes"

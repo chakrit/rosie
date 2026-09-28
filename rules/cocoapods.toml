@@ -1,0 +1,17 @@
+# CocoaPods.
+# Source: docs/vendor/dev-tool-artifacts.md#cocoapods
+
+[rules.cocoapods-cache]
+strategy = "tool"
+cmd = "pod cache clean --all"
+cmd_aggressive = "pod cache clean --all"
+
+[rules.cocoapods-repos]
+strategy = "path"
+# Aggressive-only: re-clonable but costly to rebuild.
+paths_aggressive = ["~/.cocoapods/repos"]
+
+[rules.cocoapods-pods]
+strategy = "marker"
+target = "Pods"
+marker = ["Podfile.lock"]

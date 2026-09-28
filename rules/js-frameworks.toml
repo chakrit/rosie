@@ -1,0 +1,16 @@
+# JS/TS framework build outputs.
+# Source: docs/vendor/dev-tool-artifacts.md#jsts-framework-build-outputs
+#
+# Generic `dist/` is left out: the vendor doc calls it the riskiest generic name in the
+# catalog since many unrelated tools use that name; a sibling package.json alone isn't a
+# reliable enough signal.
+
+[rules.nextjs-build]
+strategy = "marker"
+target = ".next"
+marker = ["next.config.js", "next.config.mjs", "next.config.ts"]
+
+[rules.nuxt-build]
+strategy = "marker"
+target = ".nuxt"
+marker = ["nuxt.config.ts", "nuxt.config.js"]

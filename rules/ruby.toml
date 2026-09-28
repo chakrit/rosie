@@ -1,0 +1,15 @@
+# Ruby gems / Bundler.
+# Source: docs/vendor/dev-tool-artifacts.md#ruby-gems-bundler
+#
+# RubyGems' gemdir varies with rbenv/rvm/system Ruby, so `gem cleanup` is used rather
+# than a fixed path. Vendored bundles live at <project>/vendor/bundle, two levels below
+# the Gemfile.lock that marks them, which a sibling marker cannot express.
+
+[rules.rubygems-cleanup]
+strategy = "tool"
+cmd = "gem cleanup"
+cmd_aggressive = "gem cleanup"
+
+[rules.bundler-cache]
+strategy = "path"
+paths = ["~/.bundle/cache"]

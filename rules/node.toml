@@ -1,0 +1,27 @@
+# npm / pnpm / yarn / bun.
+# Source: docs/vendor/dev-tool-artifacts.md#npm-pnpm-yarn-bun-node_modules
+
+[rules.node-modules]
+strategy = "marker"
+target = "node_modules"
+marker = ["package.json"]
+
+[rules.npm-cache]
+strategy = "path"
+paths = ["~/.npm"]
+
+[rules.yarn-cache]
+strategy = "path"
+paths = ["~/Library/Caches/Yarn"]
+# Yarn berry's cache may back zero-installs (checked-in .yarn/cache); the global
+# berry cache itself is safe to clear but is more disruptive than the classic cache.
+paths_aggressive = ["~/.yarn/berry/cache"]
+
+[rules.pnpm-store]
+strategy = "tool"
+cmd = "pnpm store prune"
+cmd_aggressive = "pnpm store prune"
+
+[rules.bun-cache]
+strategy = "path"
+paths = ["~/.bun/install/cache"]

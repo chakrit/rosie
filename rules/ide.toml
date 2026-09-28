@@ -1,0 +1,25 @@
+# JetBrains IDEs and VS Code caches.
+# Source: docs/vendor/dev-tool-artifacts.md#jetbrains-ides,
+# docs/vendor/dev-tool-artifacts.md#vs-code
+#
+# JetBrains plugins/settings and VS Code's extensions dir are left out: they hold
+# installed extensions and settings, not cache.
+
+[rules.jetbrains-caches]
+strategy = "path"
+# Each <Product><Version>/ folder here also holds LocalHistory/, JetBrains' record of
+# uncommitted edits, which is not regenerable. Aggressive only.
+paths_aggressive = ["~/Library/Caches/JetBrains"]
+
+[rules.jetbrains-logs]
+strategy = "path"
+paths = ["~/Library/Logs/JetBrains"]
+
+[rules.vscode-cache]
+strategy = "path"
+paths = [
+  "~/Library/Application Support/Code/Cache",
+  "~/Library/Application Support/Code/CachedData",
+  "~/Library/Application Support/Code/logs",
+  "~/Library/Application Support/Code/CachedExtensionVSIXs",
+]

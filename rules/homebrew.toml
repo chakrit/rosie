@@ -1,0 +1,7 @@
+# Homebrew. Uses brew's own cleanup so the Cellar/cache DB stays in sync.
+# Source: docs/vendor/dev-tool-artifacts.md#homebrew
+
+[rules.homebrew]
+strategy = "tool"
+cmd = "brew cleanup"
+cmd_aggressive = "brew cleanup -s"

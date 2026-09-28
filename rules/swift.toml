@@ -1,0 +1,37 @@
+# SwiftPM and Xcode caches.
+# Source: docs/vendor/dev-tool-artifacts.md#swift-package-manager-swiftpm,
+# docs/vendor/dev-tool-artifacts.md#xcode
+#
+# Xcode Archives and Simulator devices are left out: Archives hold dSYMs needed to
+# symbolicate shipped-build crashes (not regenerable) and simulator devices need
+# `xcrun simctl` to stay consistent with CoreSimulator's own device registry.
+
+[rules.swiftpm-cache]
+strategy = "tool"
+cmd = "swift package purge-cache"
+cmd_aggressive = "swift package purge-cache"
+
+[rules.swiftpm-build]
+strategy = "marker"
+target = ".build"
+marker = ["Package.swift"]
+
+[rules.xcode-derived-data]
+strategy = "path"
+paths = ["~/Library/Developer/Xcode/DerivedData"]
+
+[rules.xcode-device-support]
+strategy = "path"
+paths = [
+  "~/Library/Developer/Xcode/iOS DeviceSupport",
+  "~/Library/Developer/Xcode/watchOS DeviceSupport",
+  "~/Library/Developer/Xcode/tvOS DeviceSupport",
+]
+
+[rules.xcode-simulator-caches]
+strategy = "path"
+paths = ["~/Library/Developer/CoreSimulator/Caches"]
+
+[rules.xcode-previews]
+strategy = "path"
+paths = ["~/Library/Developer/Xcode/UserData/Previews"]

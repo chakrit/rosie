@@ -1,0 +1,9 @@
+# Docker. Raw deletion of the VM disk image is unsafe by design; always prune via the
+# Docker CLI. OrbStack and Colima/Lima are left out: their cleanup needs a per-instance
+# profile name that a fixed cmd can't carry.
+# Source: docs/vendor/dev-tool-artifacts.md#docker-desktop-container-runtimes
+
+[rules.docker]
+strategy = "tool"
+cmd = "docker system prune --force"
+cmd_aggressive = "docker system prune --all --volumes --force"

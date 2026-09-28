@@ -1,0 +1,9 @@
+# System and user diagnostic logs.
+# Source: docs/vendor/dev-tool-artifacts.md#system-user-logs
+
+[rules.diagnostic-reports]
+strategy = "path"
+paths = [
+  "~/Library/Logs/DiagnosticReports",
+  "/Library/Logs/DiagnosticReports",
+]

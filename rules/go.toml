@@ -1,0 +1,15 @@
+# Go build and module caches.
+# Source: docs/vendor/dev-tool-artifacts.md#go
+#
+# Paths are env-overridable ($GOCACHE, $GOMODCACHE), so these are shelled out to the
+# go tool rather than expressed as fixed paths.
+
+[rules.go-build-cache]
+strategy = "tool"
+cmd = "go clean -cache"
+cmd_aggressive = "go clean -cache -testcache"
+
+[rules.go-mod-cache]
+strategy = "tool"
+cmd = "go clean -modcache"
+cmd_aggressive = "go clean -modcache"

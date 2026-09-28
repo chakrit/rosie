@@ -1,0 +1,19 @@
+# Gradle / Maven.
+# Source: docs/vendor/dev-tool-artifacts.md#gradle-maven-m2
+
+[rules.gradle-cache]
+strategy = "path"
+paths = [
+  "~/.gradle/caches/modules-2/files-2.1",
+  "~/.gradle/wrapper/dists",
+]
+
+[rules.gradle-build]
+strategy = "marker"
+target = "build"
+marker = ["build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"]
+
+[rules.maven-repo]
+strategy = "path"
+# Aggressive-only: may hold locally `mvn install`-ed artifacts not in any remote repo.
+paths_aggressive = ["~/.m2/repository"]

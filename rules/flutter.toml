@@ -1,0 +1,16 @@
+# Flutter / Dart.
+# Source: docs/vendor/dev-tool-artifacts.md#flutter-dart
+
+[rules.flutter-pub-cache]
+strategy = "path"
+paths = ["~/.pub-cache"]
+
+[rules.flutter-build]
+strategy = "marker"
+target = "build"
+marker = ["pubspec.yaml"]
+
+[rules.flutter-dart-tool]
+strategy = "marker"
+target = ".dart_tool"
+marker = ["pubspec.yaml"]

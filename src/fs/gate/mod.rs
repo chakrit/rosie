@@ -70,6 +70,13 @@ impl<B: Backend> Gate<B> {
         self.io(Op::Lstat, &path, self.backend.lstat(&path))
     }
 
+    /// `lstat`s a path of a scanned tree, such as a file a Lua rule tests for. A path with
+    /// a symlink in any component, the last included, is refused rather than followed.
+    pub fn lstat_link_free(&self, path: &Path) -> Result<Metadata, Error> {
+        let path = resolve_dots(path)?;
+        self.lstat_without_symlinks(&path)
+    }
+
     /// Reads a file of a scanned tree, such as a marker a Lua rule inspects. A path with
     /// a symlink in any component is refused rather than followed.
     pub fn read_file(&self, path: &Path) -> Result<Vec<u8>, Error> {
@@ -392,6 +399,36 @@ mod tests {
         assert!(
             matches!(result, Err(Error::Symlink { link, .. }) if link == Path::new("/Users/me/code/app/linked"))
         );
+    }
+
+    #[test]
+    fn refuses_to_lstat_through_or_at_a_symlink() {
+        let fake = FakeBackend::new();
+        fake.add_file("/Users/me/other/Cargo.toml", "x");
+        fake.add_symlink("/Users/me/code/app/linked", "/Users/me/other");
+        let gate = gate(&fake, &[]);
+
+        let through = gate.lstat_link_free(path("/Users/me/code/app/linked/Cargo.toml"));
+        let at = gate.lstat_link_free(path("/Users/me/code/app/linked"));
+        let plain = gate.lstat_link_free(path("/Users/me/other/Cargo.toml"));
+
+        for result in [through, at] {
+            assert!(
+                matches!(&result, Err(Error::Symlink { link, .. }) if link == Path::new("/Users/me/code/app/linked")),
+                "expected a symlink refusal, got {result:?}"
+            );
+        }
+        assert!(matches!(plain, Ok(meta) if meta.kind == crate::fs::FileKind::File));
+    }
+
+    #[test]
+    fn refuses_to_lstat_a_relative_path() {
+        let fake = FakeBackend::new();
+        let gate = gate(&fake, &[]);
+
+        let result = gate.lstat_link_free(path("rel/x"));
+
+        assert!(matches!(result, Err(Error::Relative { .. })));
     }
 
     #[test]

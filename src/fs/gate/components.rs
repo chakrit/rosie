@@ -68,9 +68,11 @@ impl<B: Backend> Gate<B> {
         Ok(path)
     }
 
-    /// `lstat`s every component of an already resolved, existing path from `/` down,
-    /// refusing the first symlink. Returns the metadata of the path itself.
-    pub(super) fn lstat_without_symlinks(&self, path: &Path) -> Result<Metadata, Error> {
+    /// `lstat`s every component of an existing path from `/` down, refusing the first
+    /// symlink, such as a fixed leftover folder a scan lists. Returns the metadata of the
+    /// path itself; a missing component is an `Io` error naming it.
+    pub fn lstat_without_symlinks(&self, path: &Path) -> Result<Metadata, Error> {
+        let path = &resolve_dots(path)?;
         match self.walk_components(path)? {
             Walk::Clear { meta, .. } => Ok(meta),
             Walk::Missing {

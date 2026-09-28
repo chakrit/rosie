@@ -59,6 +59,23 @@ pub enum Error {
     OwnFolderItself { path: PathBuf },
 }
 
+impl Error {
+    /// Whether this error says a path, or one of its parent folders, no longer exists: it
+    /// vanished between an earlier listing and this operation.
+    pub fn has_vanished(&self) -> bool {
+        matches!(
+            self,
+            Error::Io { source, .. }
+                if matches!(source.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
+        )
+    }
+
+    /// Whether this error is the system refusing rosie access to a path.
+    pub fn is_permission_denied(&self) -> bool {
+        matches!(self, Error::Io { source, .. } if source.kind() == io::ErrorKind::PermissionDenied)
+    }
+}
+
 /// The path a symlink refusal names instead: every link along it replaced by its
 /// target, or the reason that could not be done.
 #[derive(Debug, Error)]

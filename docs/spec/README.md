@@ -21,9 +21,9 @@ Keep one row per spec file. Update this table in the same change when adding, re
 retiring a file. Read it before adding a spec; amend the existing file when its subject
 already has a row.
 
-| File        | Covers                             | Status      |
-|-------------|------------------------------------|-------------|
-| `<slug>.md` | one line on what this file governs | implemented |
+| File          | Covers                                            | Status |
+|---------------|---------------------------------------------------|--------|
+| `overview.md` | working plan: rosie's scope, phases, and features | draft  |
 
 ## Format
 

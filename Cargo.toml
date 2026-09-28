@@ -7,8 +7,10 @@ rust-version = "1.98.1"
 [dependencies]
 flate2 = "1"
 indicatif = { version = "0.18", default-features = false }
+mlua = { version = "0.12.1", features = ["lua54", "vendored"] }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 tar = { version = "0.4", default-features = false }
 thiserror = "2"
 toml = "1"

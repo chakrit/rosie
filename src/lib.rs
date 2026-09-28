@@ -5,4 +5,5 @@ pub mod fs;
 pub mod packs;
 pub mod plan;
 pub mod process;
+pub mod rules;
 pub mod run;

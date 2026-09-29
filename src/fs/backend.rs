@@ -134,6 +134,9 @@ pub struct Metadata {
     pub allocated: u64,
     pub dev: u64,
     pub inode: u64,
+    /// Names the entry has (`st_nlink`). For a folder, the volume's own count: on APFS,
+    /// 2 plus the entries in it.
+    pub nlink: u64,
     pub uid: u32,
     /// Permission bits (`st_mode & 0o7777`).
     pub mode: u32,

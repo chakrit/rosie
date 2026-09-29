@@ -282,6 +282,18 @@ impl<T> Twin<T> {
         }
     }
 
+    /// The same twin with `convert` applied to each value set.
+    pub fn map<U>(&self, convert: impl Fn(&T) -> U) -> Twin<U> {
+        match self {
+            Twin::Normal(normal) => Twin::Normal(convert(normal)),
+            Twin::Aggressive(aggressive) => Twin::Aggressive(convert(aggressive)),
+            Twin::Both { normal, aggressive } => Twin::Both {
+                normal: convert(normal),
+                aggressive: convert(aggressive),
+            },
+        }
+    }
+
     /// Each value set, with the tier it belongs to.
     pub fn tiers(&self) -> impl Iterator<Item = (Tier, &T)> {
         let normal = self.normal().map(|value| (Tier::Normal, value));

@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, Gate, Op};
 use rosie::rules::{
-    Candidate, Error, LuaSandbox, Mode, Problem, RuleDirs, RuleId, RuleSet, Shape, Source, Tier,
-    Twin,
+    Candidate, Error, LuaSandbox, Mode, Name, Problem, RuleDirs, RuleId, RuleSet, Shape, Source,
+    Tier, Twin,
 };
 
 const HOME: &str = "/Users/me";
@@ -591,6 +591,72 @@ fn reports_a_failed_listing_against_the_rule_without_matching() {
             if *rule == id("rosie/pods") && path == Path::new("/Users/me/code/ios/Pods")),
         "{result:?}"
     );
+}
+
+// narrowing (`--only`)
+
+fn two_pack_fixture() -> FakeBackend {
+    let fake = project_fixture();
+    fake.add_file(
+        format!("{PACKS}/someone/extra-rules/more.toml"),
+        "[rules.pycache]\nstrategy = \"name\"\ntarget = \"pycache-alt\"\n\
+         [rules.go-build]\nstrategy = \"path\"\npaths = [\"~/Library/Caches/go-build\"]",
+    );
+    fake
+}
+
+fn rule_names(texts: &[&str]) -> Vec<Name> {
+    texts
+        .iter()
+        .map(|text| Name::parse(text).expect("valid rule name"))
+        .collect()
+}
+
+fn targeting_ids(rules: &RuleSet, name: &str) -> Vec<String> {
+    let mut ids: Vec<String> = rules
+        .targeting(OsStr::new(name))
+        .iter()
+        .map(|rule| rule.id().to_string())
+        .collect();
+    ids.sort();
+    ids
+}
+
+#[test]
+fn narrowing_keeps_the_named_rules_in_every_pack_and_reindexes_them() {
+    let fake = two_pack_fixture();
+
+    let rules = loaded(&fake)
+        .only(&rule_names(&["pycache", "go-build", "pycache"]))
+        .expect("known names");
+
+    assert_eq!(
+        ids(&rules),
+        [
+            "extra-rules/go-build",
+            "extra-rules/pycache",
+            "rosie/pycache"
+        ]
+    );
+    assert_eq!(targeting_ids(&rules, "__pycache__"), ["rosie/pycache"]);
+    assert_eq!(
+        targeting_ids(&rules, "pycache-alt"),
+        ["extra-rules/pycache"]
+    );
+    assert!(targeting_ids(&rules, "target").is_empty());
+    assert!(targeting_ids(&rules, "build").is_empty());
+}
+
+#[test]
+fn narrowing_to_a_name_no_rule_has_is_an_error_naming_it() {
+    let fake = two_pack_fixture();
+
+    let narrowed = loaded(&fake).only(&rule_names(&["pycache", "nope"]));
+
+    let Err(error @ Error::UnknownRule { .. }) = narrowed else {
+        panic!("an unknown rule error expected");
+    };
+    assert!(error.to_string().contains("`nope`"), "{error}");
 }
 
 // the built-in pack

@@ -183,12 +183,30 @@ impl<B: Backend> Gate<B> {
 
     // bounds
 
+    /// Whether a cleanup-target mutation of `path` passes the roots check: `.` and `..`
+    /// resolved by text, then compared component by component with every root
+    /// (`docs/spec/safety.md#cleanup-targets`). The disk is not consulted.
+    pub fn within_roots(&self, path: &Path) -> Result<bool, Error> {
+        let path = resolve_dots(path)?;
+        Ok(self.contains(&path))
+    }
+
+    /// The user rosie acts for.
+    pub fn user_uid(&self) -> u32 {
+        self.user_uid
+    }
+
     fn confine_to_roots(&self, path: &Path) -> Result<PathBuf, Error> {
         let path = resolve_dots(path)?;
-        match self.roots.iter().any(|root| path.starts_with(root)) {
+        match self.contains(&path) {
             true => Ok(path),
             false => Err(Error::OutsideRoots { path }),
         }
+    }
+
+    /// Whether an already resolved path lies within a root.
+    fn contains(&self, path: &Path) -> bool {
+        self.roots.iter().any(|root| path.starts_with(root))
     }
 
     fn confine_to_own(&self, path: &Path) -> Result<PathBuf, Error> {
@@ -366,6 +384,24 @@ mod tests {
 
         assert!(matches!(result, Err(Error::OutsideRoots { .. })));
         assert!(fake.exists("/foobar/keep.txt"));
+    }
+
+    #[test]
+    fn answers_whether_a_path_lies_within_the_roots_as_delete_decides_it() {
+        let fake = FakeBackend::new();
+        let gate = gate(&fake, &["/Users/me/code", "/Users/me/Library/Caches"]);
+
+        let within = |text| gate.within_roots(path(text)).expect("absolute path");
+
+        assert!(within("/Users/me/code"));
+        assert!(within("/Users/me/code/app/node_modules"));
+        assert!(within("/Users/me/Library/Caches/pip"));
+        assert!(!within("/Users/me/code2"));
+        assert!(!within("/Users/me/code/../Documents"));
+        assert!(matches!(
+            gate.within_roots(path("code")),
+            Err(Error::Relative { .. })
+        ));
     }
 
     #[test]

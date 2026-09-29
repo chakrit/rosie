@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::glob::GlobError;
-use super::name::{NameError, RuleId};
+use super::name::{Name, NameError, RuleId};
 use super::parse::COMMAND_PUNCTUATION;
 use crate::fs;
 
@@ -84,6 +84,9 @@ pub enum Error {
         #[source]
         source: Box<fs::Error>,
     },
+
+    #[error("no pack has a rule named `{name}`; `rosie rules` lists them")]
+    UnknownRule { name: Name },
 }
 
 /// Why one rule table is invalid.

@@ -33,6 +33,7 @@ impl Backend for RealBackend {
             allocated: meta.blocks() * BLOCK_UNIT,
             dev: meta.dev(),
             inode: meta.ino(),
+            nlink: meta.nlink(),
             uid: meta.uid(),
             mode: meta.mode() & 0o7777,
             flags: meta.st_flags(),

@@ -7,7 +7,7 @@ use std::path::Path;
 use super::error::Error;
 use super::layers::{self, RuleDirs};
 use super::lua::LuaSandbox;
-use super::name::RuleId;
+use super::name::{Name, RuleId};
 use super::rule::{Detection, Rule, Shape, Tier};
 use crate::fs::{Backend, Gate};
 
@@ -50,6 +50,28 @@ impl RuleSet {
             rules: rules.into(),
             by_target,
         }
+    }
+
+    /// Only the rules named in `names`, in whichever packs define them, with the
+    /// folder-name index rebuilt over them: a scan with the narrowed set never sees the
+    /// other rules, so none of them can match a folder and stop the walk above a
+    /// selected rule's match (`--only`, `docs/spec/cli.md#flags`). A name no loaded
+    /// rule has is an error naming it.
+    pub fn only(self, names: &[Name]) -> Result<RuleSet, Error> {
+        let unknown = names
+            .iter()
+            .find(|name| !self.rules.iter().any(|rule| rule.id.rule == **name));
+        if let Some(name) = unknown {
+            return Err(Error::UnknownRule { name: name.clone() });
+        }
+
+        let kept = self
+            .rules
+            .into_vec()
+            .into_iter()
+            .filter(|rule| names.contains(&rule.id.rule))
+            .collect();
+        Ok(RuleSet::index(kept))
     }
 
     /// Every rule, in `pack/rule` order, for `rosie rules`.

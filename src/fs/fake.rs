@@ -201,6 +201,7 @@ impl Backend for FakeBackend {
             allocated: node.allocated,
             dev: node.dev,
             inode,
+            nlink: state.link_count(&key),
             uid: node.uid,
             mode: node.mode,
             flags: node.flags,
@@ -372,6 +373,22 @@ impl State {
             .range::<Path, _>((Bound::Included(root), Bound::Unbounded))
             .take_while(move |(path, _)| path.starts_with(root))
             .map(|(path, inode)| (path.clone(), *inode))
+    }
+
+    /// `st_nlink` as APFS reports it: the names of a file, or 2 plus the entries of a
+    /// folder.
+    fn link_count(&self, key: &Path) -> u64 {
+        let names = match self.is_dir(key) {
+            true => 2 + self.children(key).count(),
+            false => {
+                let inode = self.entries[key];
+                self.entries
+                    .values()
+                    .filter(|&&other| other == inode)
+                    .count()
+            }
+        };
+        names as u64
     }
 
     fn node_at(&self, key: &Path) -> &Node {

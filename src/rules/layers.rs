@@ -5,10 +5,10 @@ use std::collections::BTreeMap;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
-use mlua::{Lua, LuaOptions, StdLib};
-
 use super::error::{Error, Problem};
+use super::lua::new_parser_state;
 use super::name::{Name, NameError, RuleId};
+use super::pack::load_pack;
 use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
 use crate::fs::{self, Backend, Bounds, FileKind, Gate};
@@ -31,35 +31,26 @@ impl RuleDirs {
     }
 }
 
-/// Every rule, keyed by identity, with the file that defined it.
-type Loaded = BTreeMap<RuleId, (Rule, PathBuf)>;
-
 pub(super) fn load<B: Backend>(gate: &Gate<B>, dirs: &RuleDirs) -> Result<Vec<Rule>, Error> {
-    let lua = Lua::new_with(StdLib::NONE, LuaOptions::default())
-        .map_err(|error| Error::LuaStart(error.to_string()))?;
-    let mut loaded = Loaded::new();
-
+    let mut loaded: BTreeMap<RuleId, Rule> = BTreeMap::new();
     for (pack, folder) in pack_folders(gate, dirs)? {
-        for file in rule_files(gate, &folder)? {
-            for parsed in read_rule_file(gate, &file, &lua)? {
-                let rule = pack_rule_name(&parsed, &file)?;
-                let id = RuleId {
-                    pack: pack.clone(),
-                    rule,
-                };
-                insert(&mut loaded, id, Source::Pack, parsed, &file)?;
-            }
+        let files = read_rule_files(gate, &folder)?;
+        let labeled = files
+            .iter()
+            .map(|(file, bytes)| (file.as_path(), bytes.as_slice()));
+        let rules = load_pack(&pack, labeled)?;
+        loaded.extend(rules.into_iter().map(|rule| (rule.id.clone(), rule)));
+    }
+
+    let lua = new_parser_state()?;
+    let mut user_layer = UserLayer::new();
+    for (file, bytes) in read_rule_files(gate, &dirs.user)? {
+        for parsed in parse_file(&bytes, &file, &lua)? {
+            apply_user_rule(&mut loaded, &mut user_layer, parsed, &file)?;
         }
     }
 
-    let mut overrides = BTreeMap::new();
-    for file in rule_files(gate, &dirs.user)? {
-        for parsed in read_rule_file(gate, &file, &lua)? {
-            apply_user_rule(&mut loaded, &mut overrides, parsed, &file)?;
-        }
-    }
-
-    Ok(loaded.into_values().map(|(rule, _)| rule).collect())
+    Ok(loaded.into_values().collect())
 }
 
 // packs
@@ -73,6 +64,9 @@ fn pack_folders<B: Backend>(
 
     for owner in subfolders(gate, &dirs.packs)? {
         for repo in subfolders(gate, &owner)? {
+            if is_copy_beside_pack(&repo) {
+                continue;
+            }
             let name = repo_name(&repo)?;
             let first = match name.is_user_pack() {
                 true => Some(dirs.user.clone()),
@@ -92,62 +86,42 @@ fn pack_folders<B: Backend>(
     Ok(packs.into_iter().collect())
 }
 
+/// Whether `repo` is a dot-prefixed staging or aside copy beside a pack (the copies
+/// documented on `Store` in `src/packs/store.rs`), rather than a pack folder: a valid
+/// pack name never starts with `.`, so those copies are never mistaken for one.
+fn is_copy_beside_pack(repo: &Path) -> bool {
+    repo.file_name()
+        .is_some_and(|name| name.to_string_lossy().starts_with('.'))
+}
+
+/// The repo folder's pack name.
 fn repo_name(repo: &Path) -> Result<Name, Error> {
     let text = repo
         .file_name()
         .map(|name| name.to_string_lossy())
         .unwrap_or_default();
+
     Name::parse(&text).map_err(|source| Error::PackName {
         folder: repo.into(),
         source,
     })
 }
 
-/// A rule name in a pack, which cannot override another pack's rule.
-fn pack_rule_name(parsed: &Parsed, file: &Path) -> Result<Name, Error> {
-    let problem = match Name::parse(&parsed.key) {
-        Ok(name) => return Ok(name),
-        Err(_) if parsed.key.contains('/') => Problem::OverrideInPack,
-        Err(error) => Problem::Name(error),
-    };
-    Err(Error::Rule {
-        file: file.into(),
-        rule: parsed.key.clone(),
-        problem,
-    })
-}
-
 // user rules
+
+/// The file that defined each rule of the user layer, its own rules and its overrides.
+type UserLayer = BTreeMap<RuleId, PathBuf>;
 
 /// Adds a user rule to the `user` pack, or replaces a pack's rule when its key is a
 /// qualified name.
 fn apply_user_rule(
-    loaded: &mut Loaded,
-    overrides: &mut BTreeMap<RuleId, PathBuf>,
+    loaded: &mut BTreeMap<RuleId, Rule>,
+    user_layer: &mut UserLayer,
     parsed: Parsed,
     file: &Path,
 ) -> Result<(), Error> {
-    let name_problem = |error: NameError| Error::Rule {
-        file: file.into(),
-        rule: parsed.key.clone(),
-        problem: Problem::Name(error),
-    };
-
-    if !parsed.key.contains('/') {
-        let rule = Name::parse(&parsed.key).map_err(name_problem)?;
-        let pack = Name::user_pack();
-        return insert(loaded, RuleId { pack, rule }, Source::Pack, parsed, file);
-    }
-
-    let id = RuleId::parse_qualified(&parsed.key).map_err(name_problem)?;
-    let from_a_pack = !id.pack.is_user_pack() && loaded.contains_key(&id);
-    if !from_a_pack {
-        return Err(Error::UnknownOverride {
-            file: file.into(),
-            rule: id,
-        });
-    }
-    if let Some(first) = overrides.insert(id.clone(), file.into()) {
+    let (id, source) = user_rule_identity(loaded, &parsed.key, file)?;
+    if let Some(first) = user_layer.insert(id.clone(), file.into()) {
         return Err(Error::DuplicateRule {
             rule: id,
             first,
@@ -157,46 +131,57 @@ fn apply_user_rule(
 
     let rule = Rule {
         id: id.clone(),
-        source: Source::UserOverride,
-        shape: parsed.shape,
-    };
-    loaded.insert(id, (rule, file.into()));
-    Ok(())
-}
-
-fn insert(
-    loaded: &mut Loaded,
-    id: RuleId,
-    source: Source,
-    parsed: Parsed,
-    file: &Path,
-) -> Result<(), Error> {
-    if let Some((_, first)) = loaded.get(&id) {
-        return Err(Error::DuplicateRule {
-            rule: id,
-            first: first.clone(),
-            second: file.into(),
-        });
-    }
-
-    let rule = Rule {
-        id: id.clone(),
         source,
         shape: parsed.shape,
     };
-    loaded.insert(id, (rule, file.into()));
+    loaded.insert(id, rule);
     Ok(())
+}
+
+/// The identity a user rule's key names: a rule of the `user` pack, or the pack rule a
+/// qualified key overrides.
+fn user_rule_identity(
+    loaded: &BTreeMap<RuleId, Rule>,
+    key: &str,
+    file: &Path,
+) -> Result<(RuleId, Source), Error> {
+    let name_problem = |error: NameError| Error::Rule {
+        file: file.into(),
+        rule: key.to_owned(),
+        problem: Problem::Name(error),
+    };
+
+    if !key.contains('/') {
+        let rule = Name::parse(key).map_err(name_problem)?;
+        let pack = Name::user_pack();
+        return Ok((RuleId { pack, rule }, Source::Pack));
+    }
+
+    let id = RuleId::parse_qualified(key).map_err(name_problem)?;
+    let from_a_pack = !id.pack.is_user_pack() && loaded.contains_key(&id);
+    match from_a_pack {
+        true => Ok((id, Source::UserOverride)),
+        false => Err(Error::UnknownOverride {
+            file: file.into(),
+            rule: id,
+        }),
+    }
 }
 
 // files
 
-fn read_rule_file<B: Backend>(
+/// Every `*.toml` file of `dir` with its contents, in name order.
+fn read_rule_files<B: Backend>(
     gate: &Gate<B>,
-    file: &Path,
-    lua: &Lua,
-) -> Result<Vec<Parsed>, Error> {
-    let bytes = gate.read_own_file(file)?;
-    parse_file(&bytes, file, lua)
+    dir: &Path,
+) -> Result<Vec<(PathBuf, Vec<u8>)>, Error> {
+    rule_files(gate, dir)?
+        .into_iter()
+        .map(|file| {
+            let bytes = gate.read_own_file(&file)?;
+            Ok((file, bytes))
+        })
+        .collect()
 }
 
 /// The folders in `dir`, in name order; none when `dir` is missing. Plain files such as

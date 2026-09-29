@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::source::Source;
-use crate::fs;
+use crate::{fs, rules};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -51,18 +51,8 @@ pub enum Error {
     #[error("the default config.toml is not UTF-8 text")]
     ConfigNotText,
 
-    #[error("the rule file {file} is not valid TOML: {source}")]
-    RuleFile {
-        file: String,
-        #[source]
-        source: Box<toml::de::Error>,
-    },
-
-    #[error("the rule file {file} is not UTF-8 text")]
-    RuleFileNotText { file: String },
-
-    #[error("the rule file {file} has a `rules` key that is not a table")]
-    RulesNotTable { file: String },
+    #[error("the pack's rules are invalid: {0}")]
+    InvalidRules(#[source] Box<rules::Error>),
 
     #[error(
         "{error}; moving the previous pack back also failed ({restore}); it is kept at {set_aside} and rosie puts it back on its next run",

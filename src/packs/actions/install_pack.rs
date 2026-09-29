@@ -121,6 +121,7 @@ mod tests {
     use crate::fs::fake::{FakeBackend, USER_UID};
     use crate::fs::{Bounds, Op};
 
+    const HOME: &str = "/Users/me";
     const DATA: &str = "/Users/me/.local/share/rosie";
     const PACK: &str = "/Users/me/.local/share/rosie/packs/chakrit/rosie";
     const STAGING: &str = "/Users/me/.local/share/rosie/packs/chakrit/.rosie.new";
@@ -146,7 +147,7 @@ mod tests {
         fake.add_file(format!("{PACK}/.pulled"), "1");
         fake.fail_on(STAGING, Op::Rename, ErrorKind::PermissionDenied);
         let gate = gate(&fake);
-        let store = Store::new(&gate, Path::new(DATA));
+        let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
         let source = Source::default();
         let rules = [rule("new.toml", "new")];
 
@@ -176,7 +177,7 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_file(format!("{STAGING}/stale.toml"), "stale");
         let gate = gate(&fake);
-        let store = Store::new(&gate, Path::new(DATA));
+        let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
         let source = Source::default();
         let rules = [rule("new.toml", "new")];
 

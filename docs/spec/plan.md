@@ -90,6 +90,7 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
   ([safety.md](safety.md#elevation)).
 - Walk skips are reported: the user is told what was skipped
   ([safety.md](safety.md#walk-skips)).
+- When things are being skipped, the log message briefly explains why.
 
 ## Stats
 

@@ -1,127 +1,182 @@
-//! Collects what an app or orphan scan found into a plan: each item sized, gated by
-//! `roots`, marked `sudo` when the user does not own it, and a launch plist carrying its
-//! bootout (`docs/spec/app.md`, `docs/spec/plan.md`).
+//! Collects what an app or orphan scan found into a plan: each item gated by `roots`,
+//! marked `sudo` when the user does not own it, a launch plist carrying its bootout,
+//! and sized by the scanner's sizer once the search is done (`docs/spec/app.md`,
+//! `docs/spec/plan.md`).
+//!
+//! No item is sized across into another volume: the sizer never leaves the volume of
+//! the item it starts from, and a matched entry that is itself on another volume than
+//! its leftover location is a mount, skipped rather than planned. A matched dataless
+//! placeholder is skipped too, never planned or opened.
 
 use std::path::PathBuf;
 
-use super::listing::{Listing, list_folder};
+use super::listing::{Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
 use super::{Error, Scanned};
-use crate::fs::{Backend, FileKind, Gate, Metadata};
+use crate::fs::{Backend, Gate, Home};
 use crate::plan::{
-    AggressiveItems, ItemKind, PathMatch, PlanBuilder, Reach, Report, RunAs, Twin, WalkSkip,
-    WalkSkips,
+    AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs, Twin,
+    WalkSkip,
 };
-use crate::sizing::Sizer;
+use crate::scan::{Entry, InFolder, Log, Mounts, NoProgress, Sizer};
 
-/// A file or folder a scan may list. Symlinks never match, so none is ever an entry.
-pub(super) struct Entry {
-    pub path: PathBuf,
+/// A file or folder a scan may match by name. Symlinks never match, so none is ever a
+/// candidate.
+pub(super) struct Candidate {
     /// The entry's name; names that are not UTF-8 match nothing and are left out.
     pub name: String,
-    meta: Metadata,
-    kind: ItemKind,
+    found: Found,
 }
 
-impl Entry {
-    /// The entry for a file or folder; nothing for a symlink or a special file.
-    pub(super) fn of(path: PathBuf, name: String, meta: Metadata) -> Option<Entry> {
-        let kind = match meta.kind {
-            FileKind::File => ItemKind::File,
-            FileKind::Dir => ItemKind::Folder,
-            FileKind::Symlink | FileKind::Other => return None,
-        };
-        Some(Entry {
-            path,
-            name,
-            meta,
-            kind,
-        })
+/// What a matched candidate becomes.
+enum Found {
+    Item {
+        entry: Entry,
+        kind: ItemKind,
+    },
+    /// A walk skip: the scan does not enter it, so it is never planned.
+    Skip {
+        path: PathBuf,
+        reason: WalkSkip,
+    },
+}
+
+impl Candidate {
+    /// The candidate for a file or folder; nothing for a special file.
+    pub(super) fn of(entry: Entry, name: String) -> Option<Candidate> {
+        let kind = entry.item_kind()?;
+        let found = Found::Item { entry, kind };
+        Some(Candidate { name, found })
     }
+
+    fn skipped(path: PathBuf, name: String, reason: WalkSkip) -> Candidate {
+        let found = Found::Skip { path, reason };
+        Candidate { name, found }
+    }
+}
+
+/// How a matched item is planned, apart from its size.
+struct Marks {
+    kind: ItemKind,
+    launch: Option<LaunchDomain>,
+    reach: Reach,
+    run_as: RunAs,
+    rule: String,
+    twin: Twin,
 }
 
 pub(super) struct Search<'g, B: Backend> {
     gate: &'g Gate<B>,
+    /// Home anchors the volume check of each leftover location.
+    home: &'g Home,
+    mounts: Mounts,
     builder: PlanBuilder,
-    sizer: Sizer,
-    skips: WalkSkips,
+    matched: Vec<(Entry, Marks)>,
+    log: Log,
 }
 
-impl<'g, B: Backend> Search<'g, B> {
-    pub(super) fn new(gate: &'g Gate<B>, aggressive: AggressiveItems) -> Self {
+impl<'g, B: Backend + Sync> Search<'g, B> {
+    pub(super) fn new(
+        gate: &'g Gate<B>,
+        home: &'g Home,
+        mounts: Mounts,
+        aggressive: AggressiveItems,
+    ) -> Self {
         Search {
             gate,
+            home,
+            mounts,
             builder: PlanBuilder::new(aggressive),
-            sizer: Sizer::new(),
-            skips: WalkSkips::default(),
+            matched: Vec::new(),
+            log: Log::default(),
         }
     }
 
-    /// The files and folders in a leftover location. Symlinks never match, so they are
-    /// left out; a location rosie may not list is a walk skip, and an entry that vanishes
-    /// between listing and `lstat` is gone.
-    pub(super) fn entries(&mut self, location: &Location) -> Result<Vec<Entry>, Error> {
-        let names = match list_folder(self.gate, &location.path)? {
-            Listing::Entries(names) => names,
-            Listing::NoFolder => return Ok(Vec::new()),
-            Listing::Denied(_) => {
-                self.skips.record(WalkSkip::Denied);
+    /// The candidates in a leftover location. Symlinks never match, so they are left
+    /// out; a location rosie may not list is a walk skip, and an entry that vanishes
+    /// between listing and `lstat` is gone. A location reached from home, or from `/`,
+    /// across another volume is a `Mount` skip without `enter_mounts`, as a fixed rule
+    /// path is in `caches`, and is not listed.
+    pub(super) fn candidates(&mut self, location: &Location) -> Result<Vec<Candidate>, Error> {
+        let Some(folder) = find_folder(self.gate, &location.path)? else {
+            return Ok(Vec::new());
+        };
+        if folder.is_behind_a_closed_mount(self.gate, self.home, self.mounts)? {
+            self.log.skip(location.path.clone(), WalkSkip::Mount);
+            return Ok(Vec::new());
+        }
+
+        let names = match list_found(self.gate, &folder)? {
+            Listed::Names(names) => names,
+            Listed::Denied(_) => {
+                self.log.skip(location.path.clone(), WalkSkip::Denied);
                 return Ok(Vec::new());
             }
         };
 
-        let mut entries = Vec::new();
-        for name in names {
-            let path = location.path.join(&name);
-            let meta = match self.gate.lstat(&path) {
-                Ok(meta) => meta,
+        let mut candidates = Vec::new();
+        for os_name in names {
+            let Some(name) = os_name.to_str().map(str::to_owned) else {
+                continue;
+            };
+            let found = match folder.entry(self.gate, &os_name) {
+                Ok(found) => found,
                 Err(error) if error.has_vanished() => continue,
                 Err(error) => return Err(error.into()),
             };
-            let Some(name) = name.to_str() else {
-                continue;
-            };
-            entries.extend(Entry::of(path, name.to_owned(), meta));
+            match found {
+                InFolder::Entry(entry) => candidates.extend(Candidate::of(entry, name)),
+                InFolder::Symlink(_) => {}
+                InFolder::Mount(path) => {
+                    candidates.push(Candidate::skipped(path, name, WalkSkip::Mount));
+                }
+                InFolder::Placeholder(path) => {
+                    candidates.push(Candidate::skipped(path, name, WalkSkip::Placeholder));
+                }
+            }
         }
-        Ok(entries)
+        Ok(candidates)
     }
 
-    /// Adds a matched file or folder found in a location holding `holds`.
+    /// Adds a matched candidate found in a location holding `holds`.
     pub(super) fn add(
         &mut self,
-        entry: Entry,
+        candidate: Candidate,
         holds: Holds,
         rule: &str,
         twin: Twin,
     ) -> Result<(), Error> {
-        let kind = entry.kind;
+        let (entry, kind) = match candidate.found {
+            Found::Item { entry, kind } => (entry, kind),
+            Found::Skip { path, reason } => {
+                self.log.skip(path, reason);
+                return Ok(());
+            }
+        };
         let user_uid = self.gate.user_uid();
 
-        let size = self
-            .sizer
-            .measure(self.gate, &entry.path, entry.meta, &mut self.skips)?;
-        let reach = match self.gate.within_roots(&entry.path)? {
+        let reach = match self.gate.within_roots(entry.path())? {
             true => Reach::InRoots,
             false => Reach::OutsideRoots,
         };
-        let run_as = match entry.meta.uid == user_uid {
+        let run_as = match entry.meta().uid == user_uid {
             true => RunAs::User,
             false => RunAs::Sudo,
         };
-        let found = PathMatch {
-            path: entry.path,
+        let launch = match kind {
+            ItemKind::File => holds.launch_domain(user_uid),
+            ItemKind::Folder => None,
+        };
+
+        let marks = Marks {
             kind,
-            size,
-            run_as,
+            launch,
             reach,
+            run_as,
             rule: rule.to_owned(),
             twin,
         };
-
-        match (kind, holds.launch_domain(user_uid)) {
-            (ItemKind::File, Some(domain)) => self.builder.add_launch_job(found, domain)?,
-            _ => self.builder.add_path(found)?,
-        }
+        self.matched.push((entry, marks));
         Ok(())
     }
 
@@ -134,42 +189,52 @@ impl<'g, B: Backend> Search<'g, B> {
         self.builder.add_report(report);
     }
 
-    pub(super) fn finish(self) -> Scanned {
-        Scanned {
-            plan: self.builder.build(),
-            skips: self.skips,
-        }
-    }
-}
+    /// Sizes every matched item in parallel and builds the plan. An error sizing an
+    /// item, other than a walk skip, fails the scan.
+    pub(super) fn finish(self) -> Result<Scanned, Error> {
+        let Search {
+            gate,
+            home: _,
+            mounts: _,
+            mut builder,
+            matched,
+            log,
+        } = self;
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn meta(kind: FileKind) -> Metadata {
-        Metadata {
-            kind,
-            allocated: 4096,
-            dev: 1,
-            inode: 2,
-            uid: 501,
-            mode: 0o644,
-            flags: 0,
-        }
-    }
-
-    /// Sockets, FIFOs, and device nodes are neither a file nor a folder a plan can hold,
-    /// so they are left out like symlinks.
-    #[test]
-    fn only_files_and_folders_are_entries() {
-        let kind_of = |kind| {
-            let path = PathBuf::from("/Users/me/Library/Caches/com.foo.Bar");
-            Entry::of(path, "com.foo.Bar".to_owned(), meta(kind)).map(|entry| entry.kind)
+        let sized = {
+            let sizer = Sizer::walking(gate, &NoProgress, &log);
+            rayon::scope(|scope| {
+                let started = matched.into_iter().map(|(entry, marks)| {
+                    let path = entry.path().to_path_buf();
+                    (path, marks, sizer.measure(scope, entry))
+                });
+                started.collect::<Vec<_>>()
+            })
         };
+        let (mut skipped, problems) = log.into_parts();
+        if let Some(problem) = problems.into_iter().next() {
+            return Err(Error::Sizing(problem));
+        }
 
-        assert_eq!(kind_of(FileKind::File), Some(ItemKind::File));
-        assert_eq!(kind_of(FileKind::Dir), Some(ItemKind::Folder));
-        assert_eq!(kind_of(FileKind::Symlink), None);
-        assert_eq!(kind_of(FileKind::Other), None);
+        for (path, marks, size) in sized {
+            let found = PathMatch {
+                path,
+                kind: marks.kind,
+                size: size.get(),
+                run_as: marks.run_as,
+                reach: marks.reach,
+                rule: marks.rule,
+                twin: marks.twin,
+            };
+            match marks.launch {
+                Some(domain) => builder.add_launch_job(found, domain)?,
+                None => builder.add_path(found)?,
+            }
+        }
+        skipped.sort_by(|a, b| a.path.cmp(&b.path));
+        Ok(Scanned {
+            plan: builder.build(),
+            skipped,
+        })
     }
 }

@@ -15,6 +15,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use thiserror::Error;
 
+use crate::fs::Home;
+
 /// The header format this rosie writes and reads.
 pub const HEADER_VERSION: u32 = 1;
 
@@ -89,7 +91,7 @@ fn nanos_since_epoch() -> u128 {
 pub struct Header {
     pub nonce: Nonce,
     /// The invoking user's home, where the child loads their config and roots from.
-    pub home: PathBuf,
+    pub home: Home,
 }
 
 impl Header {
@@ -128,6 +130,7 @@ impl Header {
 
         let home = PathBuf::from(home);
         home_text(&home)?;
+        let home = Home::new(&home).map_err(|_| Error::InvalidHome { home: home.clone() })?;
         let header = Header {
             nonce: Nonce::parse(nonce)?,
             home,
@@ -166,7 +169,7 @@ mod tests {
     fn header() -> Header {
         Header {
             nonce: Nonce::parse("0123456789abcdef0123456789abcdef").expect("valid nonce"),
-            home: PathBuf::from("/Users/me"),
+            home: Home::new(Path::new("/Users/me")).expect("absolute home"),
         }
     }
 
@@ -229,7 +232,7 @@ mod tests {
     #[test]
     fn refuses_to_write_a_home_that_would_break_the_header() {
         let header = Header {
-            home: PathBuf::from("/Users/me\nnonce x"),
+            home: Home::new(Path::new("/Users/me\nnonce x")).expect("absolute home"),
             ..header()
         };
 

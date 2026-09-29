@@ -17,14 +17,14 @@ use std::fs::File;
 use std::io::{self, Read as _, Write};
 use std::os::fd::AsFd;
 use std::os::unix::fs::FileTypeExt as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use thiserror::Error;
 
 use super::header::{self, Header, Nonce};
 use super::{ItemResult, OutputWindow, Reporter, Runner, outcomes};
 use crate::config;
-use crate::fs::{self, Argv, Backend, Bounds, Gate, ROOT_UID};
+use crate::fs::{self, Argv, Backend, Bounds, Gate, Home, ROOT_UID};
 use crate::plan::{self, Plan, RunStats};
 use crate::process::{self, Process, ProcessTable};
 
@@ -212,7 +212,7 @@ fn is_root_sudo(process: &Process) -> bool {
 /// A gate acting for the user whose home this is, bounded by the roots in their
 /// config. The user is the owner of the home folder. The child deletes through it only
 /// with `Gate::delete_as_root`, which changes no permissions.
-fn user_gate<'b, B: Backend>(backend: &'b B, home: &Path) -> Result<Gate<&'b B>, Error> {
+fn user_gate<'b, B: Backend>(backend: &'b B, home: &Home) -> Result<Gate<&'b B>, Error> {
     let bootstrap = Gate::new(backend, bounds(home, Vec::new(), ROOT_UID))?;
     let user_uid = bootstrap.lstat(home)?.uid;
     let (config_dir, _) = own_dirs(home);
@@ -222,7 +222,7 @@ fn user_gate<'b, B: Backend>(backend: &'b B, home: &Path) -> Result<Gate<&'b B>,
     Ok(Gate::new(backend, bounds(home, roots, user_uid))?)
 }
 
-fn bounds(home: &Path, roots: Vec<PathBuf>, user_uid: u32) -> Bounds {
+fn bounds(home: &Home, roots: Vec<PathBuf>, user_uid: u32) -> Bounds {
     let (config_dir, data_dir) = own_dirs(home);
     Bounds {
         roots,
@@ -233,7 +233,7 @@ fn bounds(home: &Path, roots: Vec<PathBuf>, user_uid: u32) -> Bounds {
 }
 
 /// The folders rosie keeps its own data in, under a user's home.
-fn own_dirs(home: &Path) -> (PathBuf, PathBuf) {
+fn own_dirs(home: &Home) -> (PathBuf, PathBuf) {
     (home.join(".config/rosie"), home.join(".local/share/rosie"))
 }
 

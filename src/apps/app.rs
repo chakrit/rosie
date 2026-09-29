@@ -10,16 +10,18 @@ use super::bundle::{
 use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
 use super::matching::{claimed_by_other, claims_by_id, claims_by_name};
-use super::search::{Entry, Search};
-use super::{Error, Scanned, run_for_text};
-use crate::fs::{Argv, Backend, FileKind, Gate};
+use super::search::{Candidate, Search};
+use super::{Error, Scanned};
+use crate::fs::{Backend, FileKind, Gate, Home, SystemArgv, SystemTool};
 use crate::plan::{AggressiveItems, Report, Twin};
-use crate::process::ProcessTable;
+use crate::process::{self, ProcessTable};
+use crate::scan::{Entry, Mounts};
 
 /// Scans for `app` and its leftovers in the user's `home` and the system folders.
 ///
-/// The app argument is a user-typed path: a symlink or misspelling in it is refused. The
-/// plan is refused while any process executes from the bundle. An installed app rosie
+/// The app argument is a user-typed path: a symlink or misspelling in it is refused, and
+/// so is a bundle that is the root of a mounted volume, since app mode never crosses
+/// volumes. The plan is refused while any process executes from the bundle. An installed app rosie
 /// cannot identify is reported, since leftovers the two apps share may be ticked.
 ///
 /// The app itself may have no bundle-ID key: it is the app the user asked to remove, not
@@ -29,22 +31,25 @@ use crate::process::ProcessTable;
 pub fn scan_app<B>(
     gate: &Gate<B>,
     app: &Path,
-    home: &Path,
+    home: &Home,
     aggressive: AggressiveItems,
+    mounts: Mounts,
 ) -> Result<Scanned, Error>
 where
     B: Backend + Sync,
 {
-    let home = &crate::fs::resolve_dots(home)?;
     let path = gate.check_typed_path(app)?;
-    let meta = gate.lstat(&path)?;
+    let entry = Entry::lstat(gate, &path)?;
+    if entry.is_mount(gate)? {
+        return Err(Error::Mount { path });
+    }
     let name = path
         .file_name()
         .unwrap_or_default()
         .to_string_lossy()
         .into();
-    let itself = match (meta.kind, is_app_path(&path)) {
-        (FileKind::Dir, true) => Entry::of(path.clone(), name, meta),
+    let itself = match (entry.meta().kind, is_app_path(&path)) {
+        (FileKind::Dir, true) => Candidate::of(entry, name),
         _ => None,
     };
     let Some(itself) = itself else {
@@ -64,23 +69,23 @@ where
         None => "app".to_owned(),
     };
 
-    let mut search = Search::new(gate, aggressive);
+    let mut search = Search::new(gate, home, mounts, aggressive);
     search.add(itself, Holds::Plain, &rule, Twin::Normal)?;
 
     for location in leftover_locations(home) {
-        for entry in search.entries(&location)? {
+        for candidate in search.candidates(&location)? {
             let id_twin = bundle
                 .id
                 .as_ref()
-                .filter(|id| claims_by_id(id, &entry.name, location.holds))
-                .map(|id| id_match_twin(id, &others, &entry.name, location.holds));
+                .filter(|id| claims_by_id(id, &candidate.name, location.holds))
+                .map(|id| id_match_twin(id, &others, &candidate.name, location.holds));
             let by_name = bundle
                 .name
                 .as_ref()
-                .is_some_and(|name| claims_by_name(name, &entry.name));
+                .is_some_and(|name| claims_by_name(name, &candidate.name));
             match (id_twin, by_name) {
-                (Some(twin), _) => search.add(entry, location.holds, &rule, twin)?,
-                (None, true) => search.add(entry, location.holds, &rule, Twin::Aggressive)?,
+                (Some(twin), _) => search.add(candidate, location.holds, &rule, twin)?,
+                (None, true) => search.add(candidate, location.holds, &rule, Twin::Aggressive)?,
                 (None, false) => {}
             }
         }
@@ -95,7 +100,7 @@ where
     for unidentified in &installed.unidentified {
         search.add_report(unidentified_report(unidentified, &bundle)?);
     }
-    Ok(search.finish())
+    search.finish()
 }
 
 /// A bundle-ID match is ticked, unless it also belongs to another installed app, `others`:
@@ -125,8 +130,8 @@ fn refuse_running<B: Backend>(gate: &Gate<B>, bundle: &Bundle) -> Result<(), Err
 
 // receipts
 
-pub(super) fn pkgs_argv() -> Argv {
-    Argv::new("pkgutil").arg("--pkgs")
+pub(super) fn pkgs_argv() -> SystemArgv {
+    SystemTool::PKGUTIL.argv().arg("--pkgs")
 }
 
 /// The installed package receipts whose IDs are bundle-ID matches of the app, each with
@@ -139,7 +144,7 @@ fn receipts<B: Backend>(
     let Some(id) = &bundle.id else {
         return Ok(Vec::new());
     };
-    let listed = run_for_text(gate, pkgs_argv())?;
+    let listed = process::run_tool_text(gate, &pkgs_argv())?;
     let matching = listed
         .lines()
         .filter(|package| claims_by_id(id, package, Holds::Plain))
@@ -272,6 +277,6 @@ mod tests {
     /// The fake answers by this same argv, so only this test pins what `pkgutil` is asked.
     #[test]
     fn pkgutil_is_asked_for_every_package_id() {
-        assert_eq!(pkgs_argv().to_string(), "pkgutil --pkgs");
+        assert_eq!(pkgs_argv().to_string(), "/usr/sbin/pkgutil --pkgs");
     }
 }

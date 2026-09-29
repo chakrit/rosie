@@ -1,6 +1,6 @@
 use super::*;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{Bounds, Exit};
+use crate::fs::{Bounds, CommandOutput};
 
 const PS: &[u8] = b"\
     1     0     0 /sbin/launchd

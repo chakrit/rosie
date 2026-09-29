@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::archive::{RULE_EXTENSION, RuleFile};
 use super::error::Error;
 use super::source::Source;
-use crate::fs::{self, Backend, FileKind, Gate};
+use crate::fs::{self, Backend, FileKind, Gate, Home};
 use crate::rules::Name;
 
 const PACKS_FOLDER: &str = "packs";
@@ -106,7 +106,7 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
 /// pack is installed. A crash while settling leaves a state from the tables above.
 pub struct Store<'g, B: Backend> {
     gate: &'g Gate<B>,
-    home: PathBuf,
+    home: Home,
     dir: PathBuf,
 }
 
@@ -120,10 +120,10 @@ pub struct Installed {
 impl<'g, B: Backend> Store<'g, B> {
     /// `home` is the injected home folder, which a rule's `~` stands for; `data_dir` is
     /// rosie's injected data folder, `~/.local/share/rosie`.
-    pub fn new(gate: &'g Gate<B>, home: &Path, data_dir: &Path) -> Self {
+    pub fn new(gate: &'g Gate<B>, home: &Home, data_dir: &Path) -> Self {
         Store {
             gate,
-            home: home.into(),
+            home: home.clone(),
             dir: data_dir.join(PACKS_FOLDER),
         }
     }
@@ -172,7 +172,7 @@ impl<'g, B: Backend> Store<'g, B> {
         self.gate
     }
 
-    pub(super) fn home(&self) -> &Path {
+    pub(super) fn home(&self) -> &Home {
         &self.home
     }
 

@@ -17,7 +17,8 @@ contract!(
     creating_a_file_refuses_a_symlink_without_following_it,
     lists_folder_entries_by_name,
     lstat_reports_the_entry_itself,
-    hardlinks_share_an_inode,
+    hardlinks_share_an_inode_and_count_their_names,
+    folders_count_two_names_plus_their_entries,
     read_link_returns_the_stored_target,
     removing_a_symlink_leaves_its_target,
     removes_only_empty_folders,
@@ -115,19 +116,44 @@ fn lstat_reports_the_entry_itself(h: &impl Harness) {
     assert!(!file_meta.is_dataless());
 }
 
-fn hardlinks_share_an_inode(h: &impl Harness) {
+fn hardlinks_share_an_inode_and_count_their_names(h: &impl Harness) {
     let first = h.root().join("first");
     let second = h.root().join("second");
     h.backend().write_file(&first, b"shared").expect("write");
+    let alone = h.backend().lstat(&first).expect("lstat before linking");
     h.hardlink(&first, &second);
 
     let first_meta = h.backend().lstat(&first).expect("lstat first");
     let second_meta = h.backend().lstat(&second).expect("lstat second");
 
+    assert_eq!(alone.nlink, 1);
     assert_eq!(
-        (first_meta.dev, first_meta.inode),
-        (second_meta.dev, second_meta.inode)
+        (first_meta.dev, first_meta.inode, first_meta.nlink),
+        (second_meta.dev, second_meta.inode, 2)
     );
+    assert_eq!(second_meta.nlink, 2);
+}
+
+/// APFS counts a folder's `.`, its name in its parent, and every entry in it.
+fn folders_count_two_names_plus_their_entries(h: &impl Harness) {
+    let folder = h.root().join("folder");
+    h.backend()
+        .create_dir_all(&folder.join("sub"))
+        .expect("mkdir");
+    h.backend()
+        .write_file(&folder.join("file"), b"x")
+        .expect("write");
+    h.backend()
+        .write_file(&folder.join("sub").join("inner"), b"y")
+        .expect("write");
+
+    // `sub` holds one entry (`inner`), so its own count must not grow with what
+    // is nested further inside it: 2 + 1 entry, not 2 + its descendants.
+    let sub = h.backend().lstat(&folder.join("sub")).expect("lstat sub");
+    let full = h.backend().lstat(&folder).expect("lstat folder");
+
+    assert_eq!(sub.nlink, 3);
+    assert_eq!(full.nlink, 4);
 }
 
 fn read_link_returns_the_stored_target(h: &impl Harness) {

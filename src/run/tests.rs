@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use super::header::{Header, Nonce};
 use super::*;
 use crate::fs::fake::{Call, FakeBackend, USER_UID};
-use crate::fs::{Bounds, CommandOutput, Op, ROOT_UID};
+use crate::fs::{Bounds, CommandOutput, Home, Op, ROOT_UID};
 use crate::plan::{Size, Tally};
 
 mod as_root;
@@ -27,7 +27,7 @@ fn gate<'a>(fake: &'a FakeBackend, roots: &[&str]) -> Gate<&'a FakeBackend> {
 fn elevation() -> Elevation {
     Elevation {
         exe: PathBuf::from(EXE),
-        home: PathBuf::from(HOME),
+        home: Home::new(Path::new(HOME)).expect("absolute home"),
     }
 }
 
@@ -462,7 +462,7 @@ fn pipes_the_sudo_items_behind_a_header_matching_the_argument() {
         Nonce::parse(&argv.args()[1].to_string_lossy()),
         Ok(header.nonce)
     );
-    assert_eq!(header.home, PathBuf::from(HOME));
+    assert_eq!(&*header.home, Path::new(HOME));
     let piped_paths: Vec<&Path> = piped.deletes().iter().map(|d| d.path.as_path()).collect();
     assert_eq!(piped_paths, vec![Path::new("/Library/Caches/root")]);
 }
@@ -649,10 +649,10 @@ fn refuses_a_report_naming_items_it_was_not_sent() {
 #[test]
 fn keeps_a_user_folder_when_the_elevated_child_never_launches() {
     let (fake, plan) = user_folder_with_system_plist();
-    // A relative home fails `Header::encode`, so `sudo` is never even called.
+    // A home holding a newline fails `Header::encode`, so `sudo` is never even called.
     let never_launches = Elevation {
         exe: PathBuf::from(EXE),
-        home: PathBuf::from("me"),
+        home: Home::new(Path::new("/Users/me\nnonce x")).expect("absolute home"),
     };
 
     let mut recorder = Recorder::default();

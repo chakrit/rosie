@@ -2,8 +2,9 @@
 //! under `~/Library` and `/Library` in `docs/vendor/macos-filesystem-layout.md`, the
 //! same ones a fresh `config.toml` seeds as roots (`docs/spec/safety.md#roots`).
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
+use crate::fs::Home;
 use crate::plan::LaunchDomain;
 
 /// What a leftover folder holds, which decides how its entries match and what a plan
@@ -53,7 +54,7 @@ const SYSTEM_FOLDERS: [(&str, Holds); 2] = [
     ("/Library/PrivilegedHelperTools", Holds::Plain),
 ];
 
-pub(super) fn leftover_locations(home: &Path) -> Vec<Location> {
+pub(super) fn leftover_locations(home: &Home) -> Vec<Location> {
     let user = USER_FOLDERS.iter().map(|(folder, holds)| Location {
         path: home.join(folder),
         holds: *holds,

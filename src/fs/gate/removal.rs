@@ -1,7 +1,8 @@
 //! The delete engines behind `Gate::delete`, `Gate::delete_as_root`, and
 //! `Gate::delete_own` (`docs/spec/safety.md#deletion`). Callers have already checked
-//! the top path; every path below it comes from a listing and is `lstat`ed, never
-//! followed.
+//! the top path for roots and symlinks; the engines refuse it when it is the root of a
+//! mounted volume. Every path below it comes from a listing and is `lstat`ed, never
+//! followed, and one on another volume is refused.
 //!
 //! Both engines share one step, [`Gate::open_dir_for_removal`]; they differ only in
 //! whether a folder's entries are removed one after another or in parallel
@@ -31,8 +32,30 @@ pub(super) enum Entering {
 }
 
 impl<B: Backend> Gate<B> {
-    /// Removes an entry and everything below it, one entry at a time, as the user.
-    pub(super) fn remove_entry(&self, path: &Path, meta: Metadata) -> Result<(), Error> {
+    /// Removes an item and everything below it, one entry at a time, as the user.
+    pub(super) fn remove_item(&self, path: &Path, meta: Metadata) -> Result<(), Error> {
+        self.refuse_mount_point(path, meta)?;
+        self.remove_entry(path, meta)
+    }
+
+    /// Refuses an item on another volume than the folder holding it: the root of a
+    /// mounted volume. Every entry inside shares the item's volume, so the check made
+    /// on each entry would not stop the whole volume being emptied. `/` has no folder
+    /// and is the root of its volume.
+    fn refuse_mount_point(&self, path: &Path, meta: Metadata) -> Result<(), Error> {
+        let on_folders_volume = match path.parent() {
+            Some(folder) => self.io(Op::Lstat, folder, self.backend.lstat(folder))?.dev == meta.dev,
+            None => false,
+        };
+        match on_folders_volume {
+            true => Ok(()),
+            false => Err(Error::CrossesVolume {
+                path: path.to_path_buf(),
+            }),
+        }
+    }
+
+    fn remove_entry(&self, path: &Path, meta: Metadata) -> Result<(), Error> {
         refuse_placeholder(path, meta)?;
         match meta.kind {
             FileKind::Dir => {
@@ -90,9 +113,19 @@ impl<B: Backend> Gate<B> {
 }
 
 impl<B: Backend + Sync> Gate<B> {
-    /// Removes an entry and everything below it, the entries of each folder in
+    /// Removes an item and everything below it, the entries of each folder in
     /// parallel. A folder is removed once all its entries are.
-    pub(super) fn remove_entry_in_parallel(
+    pub(super) fn remove_item_in_parallel(
+        &self,
+        path: &Path,
+        meta: Metadata,
+        entering: Entering,
+    ) -> Result<(), Error> {
+        self.refuse_mount_point(path, meta)?;
+        self.remove_entry_in_parallel(path, meta, entering)
+    }
+
+    fn remove_entry_in_parallel(
         &self,
         path: &Path,
         meta: Metadata,

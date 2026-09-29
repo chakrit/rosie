@@ -210,6 +210,16 @@ impl WalkSkips {
     }
 }
 
+impl FromIterator<WalkSkip> for WalkSkips {
+    fn from_iter<I: IntoIterator<Item = WalkSkip>>(skips: I) -> Self {
+        let mut counts = WalkSkips::default();
+        for skip in skips {
+            counts.record(skip);
+        }
+        counts
+    }
+}
+
 /// `walk skipped 3 bundles, 2 denied`; empty when nothing was skipped.
 impl fmt::Display for WalkSkips {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {

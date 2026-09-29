@@ -7,7 +7,7 @@ mod tarball;
 use std::path::{Path, PathBuf};
 
 use pack_fixture::{Canned, NODE_RULE, at, source, url_of};
-use rosie::fs::{Backend, Bounds, Gate, RealBackend};
+use rosie::fs::{Backend, Bounds, Gate, Home, RealBackend};
 use rosie::packs::{self, Error, Source, Store};
 use tarball::Tarball;
 use tempfile::TempDir;
@@ -52,7 +52,11 @@ impl RealHome {
 fn pull_refuses_a_pack_name_installed_under_another_unicode_form() {
     let home = RealHome::new();
     let gate = home.gate();
-    let store = Store::new(&gate, &home.root, &home.data());
+    let store = Store::new(
+        &gate,
+        &Home::new(&home.root).expect("absolute home"),
+        &home.data(),
+    );
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let composed = "someone/donn\u{e9}es";
     let decomposed = "other/donne\u{301}es";
@@ -73,7 +77,11 @@ fn pull_refuses_a_pack_name_installed_under_another_unicode_form() {
 fn pull_installs_under_an_owner_stored_in_another_unicode_form() {
     let home = RealHome::new();
     let gate = home.gate();
-    let store = Store::new(&gate, &home.root, &home.data());
+    let store = Store::new(
+        &gate,
+        &Home::new(&home.root).expect("absolute home"),
+        &home.data(),
+    );
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let composed = "donn\u{e9}es/rosie";
     let decomposed = "donne\u{301}es/rosie";
@@ -95,7 +103,11 @@ fn pull_installs_under_an_owner_stored_in_another_unicode_form() {
 fn pull_refuses_a_pack_the_volume_folds_onto_the_reserved_name_user() {
     let home = RealHome::new();
     let gate = home.gate();
-    let store = Store::new(&gate, &home.root, &home.data());
+    let store = Store::new(
+        &gate,
+        &Home::new(&home.root).expect("absolute home"),
+        &home.data(),
+    );
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let respelled = "someone/u\u{17f}er";
     let network = Canned::serving(&url_of(respelled), tarball);

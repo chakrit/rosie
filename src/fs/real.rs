@@ -11,7 +11,7 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::thread::{self, ScopedJoinHandle};
 
-use super::backend::{Argv, Backend, CommandOutput, Exit, FileKind, Metadata};
+use super::backend::{Argv, Backend, CommandOutput, Exit, FileKind, Metadata, SystemTool};
 
 /// `st_blocks` counts 512-byte units regardless of the volume's block size.
 const BLOCK_UNIT: u64 = 512;
@@ -33,6 +33,7 @@ impl Backend for RealBackend {
             allocated: meta.blocks() * BLOCK_UNIT,
             dev: meta.dev(),
             inode: meta.ino(),
+            nlink: meta.nlink(),
             uid: meta.uid(),
             mode: meta.mode() & 0o7777,
             flags: meta.st_flags(),
@@ -120,7 +121,7 @@ impl Backend for RealBackend {
     }
 
     fn sudo(&self, argv: &Argv, stdin: &[u8]) -> io::Result<CommandOutput> {
-        let mut child = Command::new("sudo")
+        let mut child = Command::new(SystemTool::SUDO.path())
             .arg(argv.program())
             .args(argv.args())
             .stdin(Stdio::piped())

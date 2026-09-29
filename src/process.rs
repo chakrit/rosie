@@ -4,6 +4,9 @@
 //!
 //! Shared by the scanner, app mode, and the runner: all of them refuse items a process
 //! executes from, and the elevated entry walks the parent chain to find `sudo`.
+//!
+//! [`run_tool`] and [`run_tool_text`] are the one way rosie reads a read-only system
+//! tool's output, here and in app mode (`plutil`, `pkgutil`).
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -13,15 +16,22 @@ use std::str::FromStr;
 
 use thiserror::Error;
 
-use crate::fs::{self, Argv, Backend, CommandOutput, Gate};
+use crate::fs::{self, Argv, Backend, Exit, Gate, SystemArgv, SystemTool};
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
     Fs(#[from] fs::Error),
 
-    #[error("`{argv}` failed: {stderr}")]
-    Failed { argv: Argv, stderr: String },
+    #[error("`{argv}` failed ({exit:?}): {stderr}")]
+    Failed {
+        argv: Argv,
+        exit: Exit,
+        stderr: String,
+    },
+
+    #[error("`{argv}` printed output that is not UTF-8")]
+    NotUtf8 { argv: Argv },
 
     #[error("cannot read `{argv}` output line {line:?}")]
     Unreadable { argv: Argv, line: String },
@@ -52,17 +62,17 @@ pub struct ProcessTable {
 }
 
 impl ProcessTable {
-    pub fn argv() -> Argv {
-        Argv::new("/bin/ps")
+    pub fn argv() -> SystemArgv {
+        SystemTool::PS
+            .argv()
             .arg("-axo")
             .arg("pid=,ppid=,uid=,comm=")
     }
 
     /// Reads the table with `ps`.
     pub fn query<B: Backend>(gate: &Gate<B>) -> Result<Self, Error> {
-        let argv = Self::argv();
-        let output = succeeded(&argv, gate.run(&argv)?)?;
-        Self::parse(&output.stdout)
+        let stdout = run_tool(gate, &Self::argv())?;
+        Self::parse(&stdout)
     }
 
     /// Parses `ps` output: three numbers, then the command, which is the rest of the
@@ -74,7 +84,7 @@ impl ProcessTable {
             .filter(|line| !line.trim_ascii().is_empty())
             .map(|line| {
                 parse_row(line).ok_or_else(|| Error::Unreadable {
-                    argv: Self::argv(),
+                    argv: Self::argv().into(),
                     line: String::from_utf8_lossy(line).into_owned(),
                 })
             })
@@ -141,24 +151,35 @@ fn number<T: FromStr>(field: &[u8]) -> Option<T> {
 
 /// The effective user id rosie runs as, from `id -u`.
 pub fn effective_uid<B: Backend>(gate: &Gate<B>) -> Result<u32, Error> {
-    let argv = Argv::new("/usr/bin/id").arg("-u");
-    let output = succeeded(&argv, gate.run(&argv)?)?;
-
-    let text = String::from_utf8_lossy(&output.stdout);
+    let argv = SystemTool::ID.argv().arg("-u");
+    let text = run_tool_text(gate, &argv)?;
     text.trim().parse().map_err(|_| Error::Unreadable {
-        argv,
-        line: text.into_owned(),
+        argv: argv.into(),
+        line: text,
     })
 }
 
-fn succeeded(argv: &Argv, output: CommandOutput) -> Result<CommandOutput, Error> {
+/// Runs a read-only system tool through the gate and returns its standard output. A
+/// non-zero exit fails with the tool's standard error.
+pub fn run_tool<B: Backend>(gate: &Gate<B>, argv: &SystemArgv) -> Result<Vec<u8>, Error> {
+    let argv = argv.as_argv();
+    let output = gate.run(argv)?;
     match output.exit.success() {
-        true => Ok(output),
+        true => Ok(output.stdout),
         false => Err(Error::Failed {
             argv: argv.clone(),
+            exit: output.exit,
             stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
         }),
     }
+}
+
+/// [`run_tool`] for a tool that prints text; output that is not UTF-8 fails.
+pub fn run_tool_text<B: Backend>(gate: &Gate<B>, argv: &SystemArgv) -> Result<String, Error> {
+    let stdout = run_tool(gate, argv)?;
+    String::from_utf8(stdout).map_err(|_| Error::NotUtf8 {
+        argv: argv.as_argv().clone(),
+    })
 }
 
 #[cfg(test)]

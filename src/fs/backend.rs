@@ -134,6 +134,9 @@ pub struct Metadata {
     pub allocated: u64,
     pub dev: u64,
     pub inode: u64,
+    /// Names the entry has (`st_nlink`). For a folder, the volume's own count: on APFS,
+    /// 2 plus the entries in it.
+    pub nlink: u64,
     pub uid: u32,
     /// Permission bits (`st_mode & 0o7777`).
     pub mode: u32,
@@ -203,6 +206,65 @@ impl std::fmt::Display for Argv {
             write!(f, " {}", arg.to_string_lossy())?;
         }
         Ok(())
+    }
+}
+
+/// A system tool rosie runs by its absolute path, so no `PATH` lookup can put another
+/// program in its place, in the elevated child least of all. Every tool is one of the
+/// constants below, and the constructor they share rejects a relative path while rosie
+/// compiles. A rule's tool command is a plain [`Argv`]: it is meant to use `PATH`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct SystemTool(&'static str);
+
+impl SystemTool {
+    pub const ID: SystemTool = SystemTool::at("/usr/bin/id");
+    pub const LAUNCHCTL: SystemTool = SystemTool::at("/bin/launchctl");
+    pub const PKGUTIL: SystemTool = SystemTool::at("/usr/sbin/pkgutil");
+    pub const PLUTIL: SystemTool = SystemTool::at("/usr/bin/plutil");
+    pub const PS: SystemTool = SystemTool::at("/bin/ps");
+    pub const SUDO: SystemTool = SystemTool::at("/usr/bin/sudo");
+
+    const fn at(path: &'static str) -> SystemTool {
+        assert!(
+            matches!(path.as_bytes(), [b'/', ..]),
+            "a system tool is named by its absolute path"
+        );
+        SystemTool(path)
+    }
+
+    pub fn path(self) -> &'static str {
+        self.0
+    }
+
+    /// The tool's command line, with no arguments yet.
+    pub fn argv(self) -> SystemArgv {
+        SystemArgv(Argv::new(self.0))
+    }
+}
+
+/// A command line whose program is a [`SystemTool`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SystemArgv(Argv);
+
+impl SystemArgv {
+    pub fn arg(self, arg: impl Into<OsString>) -> Self {
+        SystemArgv(self.0.arg(arg))
+    }
+
+    pub fn as_argv(&self) -> &Argv {
+        &self.0
+    }
+}
+
+impl From<SystemArgv> for Argv {
+    fn from(argv: SystemArgv) -> Argv {
+        argv.0
+    }
+}
+
+impl std::fmt::Display for SystemArgv {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        self.0.fmt(f)
     }
 }
 

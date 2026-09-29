@@ -7,7 +7,7 @@ use std::path::PathBuf;
 use super::header::{Header, Nonce};
 use super::outcomes::{self, Key, Record};
 use super::{ItemResult, Reporter, Runner, Subject, elevated, exit_reason, item_count, unrun};
-use crate::fs::{Argv, Backend};
+use crate::fs::{Argv, Backend, Home};
 use crate::plan::{Delete, ItemSize, Outcome, Plan, RunAs, Runnable, SkipReason};
 
 /// What launching the elevated child needs, injected by `main`.
@@ -16,7 +16,7 @@ pub struct Elevation {
     /// This rosie executable, as an absolute path: sudo's `PATH` may find another.
     pub exe: PathBuf,
     /// The invoking user's home, passed to the child in the stdin header.
-    pub home: PathBuf,
+    pub home: Home,
 }
 
 impl<B: Backend + Sync> Runner<B> {
@@ -110,7 +110,7 @@ const SUDO_REFUSED: Outcome = Outcome::Skipped(SkipReason::SudoRefused);
 /// elevated part. `None` when every one ran, done or failed.
 fn unbooted(delete: &Delete, elevated: &[ItemResult]) -> Option<String> {
     delete.bootouts.iter().find_map(|bootout| {
-        let argv = bootout.absolute_argv();
+        let argv: Argv = bootout.absolute_argv().into();
         let result = elevated.iter().find(
             |result| matches!(&result.subject, Subject::Command { argv: ran, .. } if *ran == argv),
         );

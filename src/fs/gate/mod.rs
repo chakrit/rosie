@@ -180,33 +180,34 @@ impl<B: Backend> Gate<B> {
     pub fn delete_own(&self, path: &Path) -> Result<(), Error> {
         let path = self.confine_below_own(path)?;
         let meta = self.lstat_without_symlinks(&path)?;
-        self.remove_entry(&path, meta)
+        self.remove_item(&path, meta)
     }
 
     // bounds
 
-    /// Whether a cleanup-target mutation of `path` would pass the roots check, so a scan
-    /// can list an item outside the roots as blocked (`docs/spec/safety.md#roots`).
+    /// Whether a cleanup-target mutation of `path` passes the roots check: `.` and `..`
+    /// resolved by text, then compared component by component with every root
+    /// (`docs/spec/safety.md#cleanup-targets`). The disk is not consulted.
     pub fn within_roots(&self, path: &Path) -> Result<bool, Error> {
         let path = resolve_dots(path)?;
-        Ok(self.is_within_roots(&path))
+        Ok(self.contains(&path))
     }
 
-    /// The user rosie acts for; a scan marks items they do not own `sudo`.
+    /// The user rosie acts for.
     pub fn user_uid(&self) -> u32 {
         self.user_uid
     }
 
     fn confine_to_roots(&self, path: &Path) -> Result<PathBuf, Error> {
         let path = resolve_dots(path)?;
-        match self.is_within_roots(&path) {
+        match self.contains(&path) {
             true => Ok(path),
             false => Err(Error::OutsideRoots { path }),
         }
     }
 
-    /// `path` has its `.` and `..` resolved already.
-    fn is_within_roots(&self, path: &Path) -> bool {
+    /// Whether an already resolved path lies within a root.
+    fn contains(&self, path: &Path) -> bool {
         self.roots.iter().any(|root| path.starts_with(root))
     }
 
@@ -245,12 +246,13 @@ impl<B: Backend + Sync> Gate<B> {
     ///
     /// Symlinks inside a folder are removed as links, never descended. User-owned
     /// folders that are not writable are made writable on the way down. A dataless
-    /// cloud placeholder is refused, never opened or unlinked. The delete stops at a
+    /// cloud placeholder is refused, never opened or unlinked, and so is an entry on
+    /// another volume than its folder, the item itself included. The delete stops at a
     /// failure and reports it; entries removed before it stay removed.
     pub fn delete(&self, path: &Path) -> Result<(), Error> {
         let path = self.confine_to_roots(path)?;
         let meta = self.lstat_without_symlinks(&path)?;
-        self.remove_entry_in_parallel(&path, meta, Entering::OpeningUsersFolders)
+        self.remove_item_in_parallel(&path, meta, Entering::OpeningUsersFolders)
     }
 
     /// Deletes like [`Gate::delete`], acting as root for the user: only through
@@ -265,7 +267,7 @@ impl<B: Backend + Sync> Gate<B> {
         let path = self.confine_to_roots(path)?;
         self.require_root_controlled_above(&path)?;
         let meta = self.io(Op::Lstat, &path, self.backend.lstat(&path))?;
-        self.remove_entry_in_parallel(&path, meta, Entering::RootControlledOnly)
+        self.remove_item_in_parallel(&path, meta, Entering::RootControlledOnly)
     }
 }
 
@@ -388,6 +390,24 @@ mod tests {
     }
 
     #[test]
+    fn answers_whether_a_path_lies_within_the_roots_as_delete_decides_it() {
+        let fake = FakeBackend::new();
+        let gate = gate(&fake, &["/Users/me/code", "/Users/me/Library/Caches"]);
+
+        let within = |text| gate.within_roots(path(text)).expect("absolute path");
+
+        assert!(within("/Users/me/code"));
+        assert!(within("/Users/me/code/app/node_modules"));
+        assert!(within("/Users/me/Library/Caches/pip"));
+        assert!(!within("/Users/me/code2"));
+        assert!(!within("/Users/me/code/../Documents"));
+        assert!(matches!(
+            gate.within_roots(path("code")),
+            Err(Error::Relative { .. })
+        ));
+    }
+
+    #[test]
     fn refuses_relative_paths() {
         let fake = FakeBackend::new();
         let gate = gate(&fake, &["/Users/me/code"]);
@@ -395,19 +415,6 @@ mod tests {
         let result = gate.delete(path("code/app"));
 
         assert!(matches!(result, Err(Error::Relative { .. })));
-    }
-
-    #[test]
-    fn within_roots_resolves_dots_before_checking() {
-        let fake = FakeBackend::new();
-        let gate = gate(&fake, &["/code"]);
-
-        assert!(gate.within_roots(path("/code/app/x")).expect("absolute"));
-        assert!(!gate.within_roots(path("/code/../etc/x")).expect("absolute"));
-        assert!(matches!(
-            gate.within_roots(path("code/app")),
-            Err(Error::Relative { .. })
-        ));
     }
 
     // symlinks
@@ -654,6 +661,55 @@ mod tests {
             matches!(result, Err(Error::CrossesVolume { path }) if path == Path::new("/Users/me/code/app/build/mnt"))
         );
         assert!(fake.exists("/Users/me/code/app/build/mnt/disk.bin"));
+    }
+
+    // A volume root is never a deletable item: every entry on it shares its volume, so
+    // the check made on each entry inside would let the whole volume be emptied. This
+    // holds for every delete entry point, including rosie's own data.
+    #[test]
+    fn refuses_to_delete_a_mount_point_without_touching_its_volume() {
+        let item = "/Users/me/code/disk";
+        let fake = FakeBackend::running_as(ROOT_UID);
+        fake.add_file(format!("{item}/data.bin"), "x");
+        fake.chown_with_ancestors(item, ROOT_UID);
+        fake.mount(item, 9);
+        let gate = gate(&fake, &["/Users/me"]);
+
+        let as_user = gate.delete(path(item));
+        let as_root = gate.delete_as_root(path(item));
+
+        for result in [as_user, as_root] {
+            assert!(
+                matches!(&result, Err(Error::CrossesVolume { path }) if path == Path::new(item)),
+                "expected a volume refusal, got {result:?}"
+            );
+        }
+        assert!(fake.exists(format!("{item}/data.bin")));
+        assert!(!fake.calls().iter().any(|call| matches!(
+            call,
+            Call::ReadDir(_) | Call::RemoveFile(_) | Call::RemoveEmptyDir(_) | Call::SetMode(..)
+        )));
+    }
+
+    #[test]
+    fn refuses_to_delete_a_mounted_pack_without_touching_its_volume() {
+        let own_item = "/Users/me/.local/share/rosie/packs/p";
+        let fake = FakeBackend::new();
+        fake.add_file(format!("{own_item}/data.bin"), "x");
+        fake.mount(own_item, 9);
+        let gate = gate(&fake, &[]);
+
+        let result = gate.delete_own(path(own_item));
+
+        assert!(
+            matches!(&result, Err(Error::CrossesVolume { path }) if path == Path::new(own_item)),
+            "expected a volume refusal, got {result:?}"
+        );
+        assert!(fake.exists(format!("{own_item}/data.bin")));
+        assert!(!fake.calls().iter().any(|call| matches!(
+            call,
+            Call::ReadDir(_) | Call::RemoveFile(_) | Call::RemoveEmptyDir(_) | Call::SetMode(..)
+        )));
     }
 
     #[test]

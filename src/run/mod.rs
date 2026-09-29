@@ -101,7 +101,7 @@ impl<B: Backend + Sync> Runner<B> {
         let mut results: Vec<ItemResult> = runnable
             .bootouts
             .iter()
-            .map(|bootout| self.run_command(bootout.absolute_argv(), reporter))
+            .map(|bootout| self.run_command(bootout.absolute_argv().into(), reporter))
             .collect();
 
         let processes = ProcessTable::query(&self.gate);
@@ -113,7 +113,7 @@ impl<B: Backend + Sync> Runner<B> {
                 runnable
                     .receipts
                     .iter()
-                    .map(|receipt| receipt.absolute_argv()),
+                    .map(|receipt| receipt.absolute_argv().into()),
             )
             .collect();
 
@@ -265,13 +265,19 @@ fn unrun(runnable: &Runnable, outcome: Outcome, reason: &str) -> Vec<ItemResult>
         )
     };
 
-    let bootouts = runnable.bootouts.iter().map(|b| command(b.absolute_argv()));
+    let bootouts = runnable
+        .bootouts
+        .iter()
+        .map(|b| command(b.absolute_argv().into()));
     let deletes = runnable
         .deletes
         .iter()
         .map(|d| (Subject::Path(d.path.clone()), ItemSize::Known(d.size)));
     let tools = runnable.tools.iter().map(|t| command(t.command.argv()));
-    let receipts = runnable.receipts.iter().map(|r| command(r.absolute_argv()));
+    let receipts = runnable
+        .receipts
+        .iter()
+        .map(|r| command(r.absolute_argv().into()));
 
     bootouts
         .chain(deletes)

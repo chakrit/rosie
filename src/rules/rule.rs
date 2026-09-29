@@ -3,11 +3,11 @@
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use super::glob::Glob;
 use super::name::RuleId;
-use crate::fs::Argv;
+use crate::fs::{Argv, Home};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
@@ -215,8 +215,9 @@ impl FixedPath {
         }
     }
 
-    /// The absolute path, with `~` taken as the injected home folder.
-    pub fn resolve(&self, home: &Path) -> PathBuf {
+    /// The absolute path, with `~` taken as the injected home folder. It has no `.` or
+    /// `..`: neither spelling admits one and home has its own resolved.
+    pub fn resolve(&self, home: &Home) -> PathBuf {
         match self {
             FixedPath::Absolute(path) => path.clone(),
             FixedPath::Home(rest) => home.join(rest),
@@ -279,6 +280,18 @@ impl<T> Twin<T> {
         match self {
             Twin::Aggressive(aggressive) | Twin::Both { aggressive, .. } => Some(aggressive),
             Twin::Normal(_) => None,
+        }
+    }
+
+    /// The same twin with `convert` applied to each value set.
+    pub fn map<U>(&self, convert: impl Fn(&T) -> U) -> Twin<U> {
+        match self {
+            Twin::Normal(normal) => Twin::Normal(convert(normal)),
+            Twin::Aggressive(aggressive) => Twin::Aggressive(convert(aggressive)),
+            Twin::Both { normal, aggressive } => Twin::Both {
+                normal: convert(normal),
+                aggressive: convert(aggressive),
+            },
         }
     }
 

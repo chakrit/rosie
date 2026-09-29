@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::{Config, ConfigFile, Error, document, store};
-use crate::fs::{Backend, Gate};
+use crate::fs::{Backend, Gate, Home};
 
 /// A config key, as `rosie config` and `config get` show it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -104,7 +104,7 @@ pub fn get(key: Key, config: &Config) -> String {
 pub fn set<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
     file: &ConfigFile,
     flag: WalkFlag,
     value: &str,
@@ -120,7 +120,7 @@ pub fn set<B: Backend>(
 pub fn unset<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
     file: &ConfigFile,
     flag: WalkFlag,
 ) -> Result<ConfigFile, Error> {
@@ -166,8 +166,8 @@ mod tests {
         Gate::new(fake, bounds).expect("absolute bounds")
     }
 
-    fn home() -> &'static Path {
-        Path::new(HOME)
+    fn home() -> Home {
+        Home::new(Path::new(HOME)).expect("absolute home")
     }
 
     fn config_dir() -> &'static Path {
@@ -206,12 +206,12 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_file(CONFIG_FILE, "roots = []\n");
         let gate = gate(&fake);
-        let file = load(&gate, config_dir(), home()).expect("load");
+        let file = load(&gate, config_dir(), &home()).expect("load");
 
         let updated = set(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &file,
             WalkFlag::EnterMounts,
             "true",
@@ -222,7 +222,7 @@ mod tests {
             get(Key::Walk(WalkFlag::EnterMounts), updated.config()),
             "true"
         );
-        let reloaded = load(&gate, config_dir(), home()).expect("reload");
+        let reloaded = load(&gate, config_dir(), &home()).expect("reload");
         assert!(reloaded.config().walk.enter_mounts);
     }
 
@@ -231,12 +231,12 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_file(CONFIG_FILE, "roots = []\n");
         let gate = gate(&fake);
-        let file = load(&gate, config_dir(), home()).expect("load");
+        let file = load(&gate, config_dir(), &home()).expect("load");
 
         let result = set(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &file,
             WalkFlag::EnterBundles,
             "yes",
@@ -254,14 +254,14 @@ mod tests {
             "roots = []\n[walk]\nenter_bundles = true\nenter_mounts = true\n",
         );
         let gate = gate(&fake);
-        let file = load(&gate, config_dir(), home()).expect("load");
+        let file = load(&gate, config_dir(), &home()).expect("load");
 
-        unset(&gate, config_dir(), home(), &file, WalkFlag::EnterBundles).expect("unset");
+        unset(&gate, config_dir(), &home(), &file, WalkFlag::EnterBundles).expect("unset");
 
         let text = file_text(&gate);
         assert!(!text.contains("enter_bundles"), "{text}");
         assert!(text.contains("enter_mounts = true"), "{text}");
-        let reloaded = load(&gate, config_dir(), home()).expect("reload");
+        let reloaded = load(&gate, config_dir(), &home()).expect("reload");
         assert!(!reloaded.config().walk.enter_bundles);
     }
 
@@ -272,12 +272,12 @@ mod tests {
         let original = "# my config\nroots = [\n  # apps\n  \"~/Applications\",\n]\n";
         fake.add_file(CONFIG_FILE, original);
         let gate = gate(&fake);
-        let file = load(&gate, config_dir(), home()).expect("load");
+        let file = load(&gate, config_dir(), &home()).expect("load");
 
         let set_file = set(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &file,
             WalkFlag::EnterBundles,
             "true",
@@ -287,7 +287,7 @@ mod tests {
         unset(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &set_file,
             WalkFlag::EnterBundles,
         )

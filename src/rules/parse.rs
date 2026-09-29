@@ -430,7 +430,7 @@ mod tests {
         let Shape::Paths(paths) = shape else {
             panic!("expected a path rule");
         };
-        let home = Path::new("/Users/me");
+        let home = &crate::fs::Home::new(Path::new("/Users/me")).expect("absolute home");
         let resolved: Vec<(Tier, Vec<PathBuf>)> = paths
             .tiers()
             .map(|(tier, paths)| (tier, paths.iter().map(|p| p.resolve(home)).collect()))

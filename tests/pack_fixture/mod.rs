@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Backend, Bounds, Gate};
+use rosie::fs::{Backend, Bounds, Gate, Home};
 use rosie::packs::{Network, Source};
 
 pub const HOME: &str = "/Users/me";
@@ -65,6 +65,11 @@ pub fn fake_home() -> FakeBackend {
     let fake = FakeBackend::new();
     fake.add_dir(HOME);
     fake
+}
+
+/// The fixture's home, which a rule's `~` stands for.
+pub fn home() -> Home {
+    Home::new(Path::new(HOME)).expect("absolute home")
 }
 
 pub fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {

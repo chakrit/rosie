@@ -8,9 +8,9 @@
 //! clash.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
-use crate::fs::Argv;
+use crate::fs::{Argv, Home};
 use crate::rules::{
     self, Detection, FixedPaths, FolderRule, Glob, Globs, Markers, Rule, RuleId, Shape, Twin,
 };
@@ -63,7 +63,7 @@ impl PackRules {
     }
 
     /// The rules of `self` that duplicate a rule of `other`, with `~` taken as `home`.
-    pub(super) fn conflicts_with(&self, other: &PackRules, home: &Path) -> Vec<Conflict> {
+    pub(super) fn conflicts_with(&self, other: &PackRules, home: &Home) -> Vec<Conflict> {
         self.rules
             .iter()
             .flat_map(|pulled| {
@@ -80,7 +80,7 @@ impl PackRules {
     }
 }
 
-fn clash(pulled: &Shape, installed: &Shape, home: &Path) -> bool {
+fn clash(pulled: &Shape, installed: &Shape, home: &Home) -> bool {
     match (pulled, installed) {
         (Shape::Folder(pulled), Shape::Folder(installed)) => folder_clash(pulled, installed),
         (Shape::Paths(pulled), Shape::Paths(installed)) => {
@@ -137,7 +137,7 @@ fn same_globs(pulled: Option<&Globs>, installed: Option<&Globs>) -> bool {
 }
 
 /// Every path of both tiers, with `~` taken as `home`.
-fn resolved(paths: &Twin<FixedPaths>, home: &Path) -> Vec<PathBuf> {
+fn resolved(paths: &Twin<FixedPaths>, home: &Home) -> Vec<PathBuf> {
     paths
         .tiers()
         .flat_map(|(_, paths)| paths.iter())

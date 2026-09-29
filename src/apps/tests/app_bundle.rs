@@ -1,6 +1,7 @@
 //! The scanned app's own bundle: how it is identified and named, and what refuses it.
 
 use super::*;
+use crate::fs::fake::Call;
 use crate::fs::{CommandOutput, Exit};
 use crate::process::{self, ProcessTable};
 
@@ -18,8 +19,9 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scanned, Error> {
     scan_app(
         &gate(fake, &ALL_ROOTS),
         Path::new(app),
-        home(),
+        &home(),
         AggressiveItems::Unticked,
+        Mounts::Skip,
     )
 }
 
@@ -34,7 +36,10 @@ fn a_scanned_app_whose_bundle_id_cannot_be_read_is_refused() {
 
     let result = app_scan(&fake, BAR);
 
-    assert!(matches!(result, Err(Error::Failed { .. })), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::Process(process::Error::Failed { .. }))),
+        "{result:?}"
+    );
 }
 
 #[test]
@@ -48,7 +53,10 @@ fn a_scanned_app_whose_bundle_name_cannot_be_read_is_refused() {
 
     let result = app_scan(&fake, BAR);
 
-    assert!(matches!(result, Err(Error::Failed { .. })), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::Process(process::Error::Failed { .. }))),
+        "{result:?}"
+    );
 }
 
 /// `plutil` ends a raw value with a newline; a value printed without one is still read
@@ -100,6 +108,31 @@ fn refuses_a_file_named_like_an_app() {
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
 }
 
+/// App mode never crosses volumes (`docs/spec/safety.md#walk-skips`), and a bundle
+/// that is a volume root would plan that whole volume.
+#[test]
+fn refuses_a_bundle_that_is_a_mounted_volume_before_reading_or_sizing_it() {
+    let fake = FakeBackend::new();
+    install_app(&fake, BAR, "com.foo.Bar", Some("Bar"));
+    quiet(&fake);
+    fake.mount(BAR, 7);
+
+    let result = app_scan(&fake, BAR);
+
+    assert!(
+        matches!(&result, Err(Error::Mount { path }) if path == Path::new(BAR)),
+        "{result:?}"
+    );
+    assert!(
+        !fake.calls().iter().any(|call| matches!(
+            call,
+            Call::ReadDir(path) | Call::ReadFile(path) if path.starts_with(BAR)
+        ) || matches!(call, Call::Run(_))),
+        "{:?}",
+        fake.calls()
+    );
+}
+
 // system commands
 
 #[test]
@@ -111,7 +144,12 @@ fn a_system_command_that_cannot_be_run_fails_the_scan() {
     let result = app_scan(&fake, BAR);
 
     assert!(
-        matches!(result, Err(Error::Fs(fs::Error::Command { .. }))),
+        matches!(
+            result,
+            Err(Error::Process(process::Error::Fs(
+                fs::Error::Command { .. }
+            )))
+        ),
         "{result:?}"
     );
 }
@@ -133,7 +171,10 @@ fn system_command_output_that_is_not_utf8_fails_the_scan() {
 
     let result = app_scan(&fake, BAR);
 
-    assert!(matches!(result, Err(Error::NotUtf8 { .. })), "{result:?}");
+    assert!(
+        matches!(result, Err(Error::Process(process::Error::NotUtf8 { .. }))),
+        "{result:?}"
+    );
 }
 
 #[test]

@@ -238,11 +238,18 @@ fn a_failing_receipt_listing_fails_the_scan() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        home(),
+        &home(),
         AggressiveItems::Unticked,
+        Mounts::Skip,
     );
 
-    assert!(matches!(result, Err(Error::Failed { .. })), "{result:?}");
+    assert!(
+        matches!(
+            result,
+            Err(Error::Process(crate::process::Error::Failed { .. }))
+        ),
+        "{result:?}"
+    );
 }
 
 #[test]
@@ -301,8 +308,9 @@ fn refuses_the_plan_while_the_app_is_running() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        home(),
+        &home(),
         AggressiveItems::Unticked,
+        Mounts::Skip,
     );
 
     assert!(
@@ -323,8 +331,9 @@ fn a_process_from_a_sibling_app_does_not_block_the_plan() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        home(),
+        &home(),
         AggressiveItems::Unticked,
+        Mounts::Skip,
     );
 
     assert!(result.is_ok(), "{result:?}");
@@ -339,8 +348,9 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new("/Users/me/code"),
-        home(),
+        &home(),
         AggressiveItems::Unticked,
+        Mounts::Skip,
     );
 
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
@@ -381,7 +391,7 @@ fn a_location_rosie_may_not_list_is_a_walk_skip() {
 
     let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
 
-    assert_eq!(scanned.skips.denied, 1);
+    assert_eq!(scanned.skip_counts().denied, 1);
     assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Ticked)]);
 }
 
@@ -399,8 +409,9 @@ fn another_installed_copy_with_the_same_id_keeps_shared_leftovers_unticked() {
     let scanned = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(beta),
-        home(),
+        &home(),
         AggressiveItems::Unticked,
+        Mounts::Skip,
     )
     .expect("app scan");
 
@@ -444,8 +455,9 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
         let result = scan_app(
             &gate(&fake, &ALL_ROOTS),
             Path::new(BAR),
-            home(),
+            &home(),
             AggressiveItems::Unticked,
+            Mounts::Skip,
         );
 
         assert!(matches!(result, Err(Error::Fs(_))), "{folder}: {result:?}");
@@ -565,8 +577,9 @@ fn a_package_id_a_plan_cannot_hold_fails_the_scan() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        home(),
+        &home(),
         AggressiveItems::Unticked,
+        Mounts::Skip,
     );
 
     assert!(matches!(result, Err(Error::Plan(_))), "{result:?}");

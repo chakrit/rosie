@@ -130,7 +130,8 @@ impl FakeBackend {
     }
 
     /// Sets the output a command returns; unknown commands fail as not found.
-    pub fn respond(&self, argv: Argv, output: CommandOutput) {
+    pub fn respond(&self, argv: impl Into<Argv>, output: CommandOutput) {
+        let argv = argv.into();
         let mut state = self.lock();
         state.responses.retain(|(known, _)| *known != argv);
         state.responses.push((argv, output));
@@ -201,6 +202,7 @@ impl Backend for FakeBackend {
             allocated: node.allocated,
             dev: node.dev,
             inode,
+            nlink: state.link_count(&key),
             uid: node.uid,
             mode: node.mode,
             flags: node.flags,
@@ -372,6 +374,22 @@ impl State {
             .range::<Path, _>((Bound::Included(root), Bound::Unbounded))
             .take_while(move |(path, _)| path.starts_with(root))
             .map(|(path, inode)| (path.clone(), *inode))
+    }
+
+    /// `st_nlink` as APFS reports it: the names of a file, or 2 plus the entries of a
+    /// folder.
+    fn link_count(&self, key: &Path) -> u64 {
+        let names = match self.is_dir(key) {
+            true => 2 + self.children(key).count(),
+            false => {
+                let inode = self.entries[key];
+                self.entries
+                    .values()
+                    .filter(|&&other| other == inode)
+                    .count()
+            }
+        };
+        names as u64
     }
 
     fn node_at(&self, key: &Path) -> &Node {
@@ -610,7 +628,9 @@ mod tests {
     #[test]
     fn commands_return_canned_output_and_are_recorded() {
         let fake = FakeBackend::new();
-        let ps = Argv::new("ps").arg("-axo").arg("pid=,ppid=,uid=,comm=");
+        let ps = Argv::new("/bin/ps")
+            .arg("-axo")
+            .arg("pid=,ppid=,uid=,comm=");
         let output = CommandOutput {
             exit: Exit::Code(0),
             stdout: b"  42     1   501 /Applications/Foo.app/Contents/MacOS/Foo\n".to_vec(),

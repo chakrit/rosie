@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use crate::fs::{self, Argv, Exit};
+use crate::fs;
+use crate::scan::{self, NotAnEntry};
 use crate::{plan, process};
 
 #[derive(Debug, Error)]
@@ -61,13 +62,25 @@ pub enum Error {
     )]
     Running { app: PathBuf, pid: u32 },
 
-    #[error("`{argv}` failed ({exit:?}): {stderr}")]
-    Failed {
-        argv: Argv,
-        exit: Exit,
-        stderr: String,
-    },
+    #[error("{path} is a dataless placeholder; rosie does not open it", path = path.display())]
+    Placeholder { path: PathBuf },
 
-    #[error("`{argv}` printed output that is not UTF-8")]
-    NotUtf8 { argv: Argv },
+    #[error(
+        "{path} is the root of a mounted volume; rosie does not scan or delete across volumes",
+        path = path.display()
+    )]
+    Mount { path: PathBuf },
+
+    /// Sizing a planned item met an error other than a walk skip.
+    #[error(transparent)]
+    Sizing(scan::Problem),
+}
+
+impl From<NotAnEntry> for Error {
+    fn from(refused: NotAnEntry) -> Self {
+        match refused {
+            NotAnEntry::Fs(error) => Error::Fs(error),
+            NotAnEntry::Placeholder { path } => Error::Placeholder { path },
+        }
+    }
 }

@@ -6,10 +6,11 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
+use super::Error;
 use super::listing::{Listing, list_folder};
-use super::{Error, run_for_text};
-use crate::fs::{self, Argv, Backend, FileKind, Gate};
+use crate::fs::{self, Backend, FileKind, Gate, Home, SystemArgv, SystemTool};
 use crate::plan::Report;
+use crate::process;
 
 const ID_KEY: &str = "CFBundleIdentifier";
 const NAME_KEY: &str = "CFBundleName";
@@ -170,8 +171,9 @@ fn locate_info_plist<B: Backend>(gate: &Gate<B>, bundle: &Path) -> Result<PathBu
 }
 
 /// `plutil -extract <key> raw -o - <plist>`, which prints the value and a newline.
-pub(super) fn extract_argv(plist: &Path, key: &str) -> Argv {
-    Argv::new("plutil")
+pub(super) fn extract_argv(plist: &Path, key: &str) -> SystemArgv {
+    SystemTool::PLUTIL
+        .argv()
         .arg("-extract")
         .arg(key)
         .arg("raw")
@@ -183,8 +185,8 @@ pub(super) fn extract_argv(plist: &Path, key: &str) -> Argv {
 /// One string value of an `Info.plist` found by [`locate_info_plist`]. A missing key is
 /// [`Error::MissingKey`].
 fn extract<B: Backend>(gate: &Gate<B>, plist: &Path, key: &'static str) -> Result<String, Error> {
-    let text = match run_for_text(gate, extract_argv(plist, key)) {
-        Err(Error::Failed { stderr, .. }) if stderr.contains(NO_VALUE) => {
+    let text = match process::run_tool_text(gate, &extract_argv(plist, key)) {
+        Err(process::Error::Failed { stderr, .. }) if stderr.contains(NO_VALUE) => {
             let plist = plist.to_path_buf();
             return Err(Error::MissingKey { plist, key });
         }
@@ -252,7 +254,7 @@ pub(super) struct Installed {
 }
 
 /// The installed apps and their bundle IDs, read in parallel.
-pub(super) fn installed_apps<B>(gate: &Gate<B>, home: &Path) -> Result<Installed, Error>
+pub(super) fn installed_apps<B>(gate: &Gate<B>, home: &Home) -> Result<Installed, Error>
 where
     B: Backend + Sync,
 {
@@ -429,7 +431,7 @@ mod tests {
 
         assert_eq!(
             argv.to_string(),
-            "plutil -extract CFBundleIdentifier raw -o - /Applications/Bar.app/Contents/Info.plist"
+            "/usr/bin/plutil -extract CFBundleIdentifier raw -o - /Applications/Bar.app/Contents/Info.plist"
         );
     }
 }

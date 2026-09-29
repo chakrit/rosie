@@ -18,7 +18,7 @@ mod stats;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::fs::{Argv, FileKind};
+use crate::fs::{Argv, FileKind, SystemArgv, SystemTool};
 
 pub use builder::{AggressiveItems, PathMatch, PlanBuilder, Reach, ToolCmds, Twin};
 pub use error::Error;
@@ -207,20 +207,20 @@ pub struct Bootout {
     pub domain: LaunchDomain,
 }
 
-/// The system tools a run executes, by absolute path, so the elevated child never looks
-/// one up in a `PATH` the user controls.
-const LAUNCHCTL: &str = "/bin/launchctl";
-const PKGUTIL: &str = "/usr/sbin/pkgutil";
-
 impl Bootout {
     /// The command as the plan and its shell export show it.
     pub fn argv(&self) -> Argv {
         self.argv_for("launchctl")
     }
 
-    /// The command as a run executes it.
-    pub fn absolute_argv(&self) -> Argv {
-        self.argv_for(LAUNCHCTL)
+    /// The command as a run executes it, typed as a system command so nothing but a
+    /// [`SystemTool`] can reach `Runner::run_command`.
+    pub fn absolute_argv(&self) -> SystemArgv {
+        SystemTool::LAUNCHCTL
+            .argv()
+            .arg("bootout")
+            .arg(self.domain.to_string())
+            .arg(&self.plist)
     }
 
     fn argv_for(&self, launchctl: &str) -> Argv {
@@ -261,9 +261,13 @@ impl Receipt {
         self.argv_for("pkgutil")
     }
 
-    /// The command as a run executes it.
-    pub fn absolute_argv(&self) -> Argv {
-        self.argv_for(PKGUTIL)
+    /// The command as a run executes it, typed as a system command so nothing but a
+    /// [`SystemTool`] can reach `Runner::run_command`.
+    pub fn absolute_argv(&self) -> SystemArgv {
+        SystemTool::PKGUTIL
+            .argv()
+            .arg("--forget")
+            .arg(self.package.as_str())
     }
 
     fn argv_for(&self, pkgutil: &str) -> Argv {

@@ -10,8 +10,9 @@ use super::fixture::{
 use super::*;
 use crate::fs::ROOT_UID;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{self, Op};
-use crate::plan::{AggressiveItems, Delete, LaunchDomain, RunAs, Status};
+use crate::fs::{self, Home, Op};
+use crate::plan::{AggressiveItems, Delete, LaunchDomain, RunAs, Size, Status, WalkSkip};
+use crate::scan::Mounts;
 
 mod app_bundle;
 mod app_scan;
@@ -25,11 +26,18 @@ const BAR: &str = "/Applications/Bar.app";
 const NPLAYER: &str = "/Applications/nPlayer.app";
 
 fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scanned {
-    scan_app(&gate(fake, roots), Path::new(BAR), home(), aggressive).expect("app scan")
+    scan_app(
+        &gate(fake, roots),
+        Path::new(BAR),
+        &home(),
+        aggressive,
+        Mounts::Skip,
+    )
+    .expect("app scan")
 }
 
 fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scanned {
-    scan_orphans(&gate(fake, &ALL_ROOTS), home(), aggressive).expect("orphan scan")
+    scan_orphans(&gate(fake, &ALL_ROOTS), &home(), aggressive, Mounts::Skip).expect("orphan scan")
 }
 
 /// `(path, status)` of every delete entry, in plan order.

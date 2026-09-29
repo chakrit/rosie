@@ -1,15 +1,14 @@
 //! `rosie clean orphans`: leftovers of apps no longer installed
 //! (`docs/spec/app.md#rosie-clean-orphans`).
 
-use std::path::Path;
-
 use super::bundle::{installed_apps, no_id_report};
 use super::locations::leftover_locations;
 use super::matching::{mentions_id, reads_as_bundle_id};
 use super::search::Search;
 use super::{Error, Scanned};
-use crate::fs::{Backend, Gate};
+use crate::fs::{Backend, Gate, Home};
 use crate::plan::{AggressiveItems, Twin};
+use crate::scan::Mounts;
 
 const RULE: &str = "orphans";
 
@@ -22,33 +21,33 @@ const RULE: &str = "orphans";
 /// only as a note, not a reason to fail the scan.
 pub fn scan_orphans<B>(
     gate: &Gate<B>,
-    home: &Path,
+    home: &Home,
     aggressive: AggressiveItems,
+    mounts: Mounts,
 ) -> Result<Scanned, Error>
 where
     B: Backend + Sync,
 {
-    let home = &crate::fs::resolve_dots(home)?;
     let installed = installed_apps(gate, home)?;
     if let Some(unidentified) = installed.unidentified.into_iter().next() {
         return Err(unidentified.into_error());
     }
 
-    let mut search = Search::new(gate, aggressive);
+    let mut search = Search::new(gate, home, mounts, aggressive);
     for path in &installed.no_id {
         search.add_report(no_id_report(path)?);
     }
     for location in leftover_locations(home) {
-        for entry in search.entries(&location)? {
-            let candidate = reads_as_bundle_id(&entry.name, location.holds);
+        for candidate in search.candidates(&location)? {
+            let reads_as_id = reads_as_bundle_id(&candidate.name, location.holds);
             let accounted = installed
                 .apps
                 .iter()
-                .any(|app| mentions_id(&app.id, &entry.name));
-            if candidate && !accounted {
-                search.add(entry, location.holds, RULE, Twin::Aggressive)?;
+                .any(|app| mentions_id(&app.id, &candidate.name));
+            if reads_as_id && !accounted {
+                search.add(candidate, location.holds, RULE, Twin::Aggressive)?;
             }
         }
     }
-    Ok(search.finish())
+    search.finish()
 }

@@ -21,7 +21,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use toml_edit::DocumentMut;
 
-use crate::fs::{self, Backend, Gate};
+use crate::fs::{self, Backend, Gate, Home};
 
 pub use keys::{Key, WalkFlag};
 
@@ -143,7 +143,7 @@ pub enum Error {
 pub fn load_or_seed<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
     default_text: &str,
 ) -> Result<ConfigFile, Error> {
     match load(gate, config_dir, home) {
@@ -157,7 +157,7 @@ pub fn load_or_seed<B: Backend>(
 pub fn load<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
     let raw = gate.read_own_file(&path).map_err(load_error)?;
@@ -176,7 +176,7 @@ pub fn load<B: Backend>(
 fn seed<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
     default_text: &str,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
@@ -192,7 +192,7 @@ fn seed<B: Backend>(
 fn store<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
     text: &str,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
@@ -229,7 +229,7 @@ fn parse<B: Backend>(
     text: &str,
     path: &Path,
     gate: &Gate<B>,
-    home: &Path,
+    home: &Home,
 ) -> Result<ConfigFile, Error> {
     let document = parse_syntax(text, path)?;
     validate_shape(&document, path)?;
@@ -323,7 +323,7 @@ fn config_path(config_dir: &Path) -> PathBuf {
 
 /// Expands a leading `~` component against the injected home. A path not starting with
 /// `~` is returned unchanged.
-fn expand_home(path: &Path, home: &Path) -> PathBuf {
+fn expand_home(path: &Path, home: &Home) -> PathBuf {
     match path.strip_prefix("~") {
         Ok(rest) => home.join(rest),
         Err(_) => path.to_path_buf(),
@@ -351,8 +351,8 @@ mod tests {
         Gate::new(fake, bounds).expect("absolute bounds")
     }
 
-    fn home() -> &'static Path {
-        Path::new(HOME)
+    fn home() -> Home {
+        Home::new(Path::new(HOME)).expect("absolute home")
     }
 
     fn config_dir() -> &'static Path {
@@ -369,7 +369,7 @@ mod tests {
         );
         let gate = gate(&fake);
 
-        let file = load(&gate, config_dir(), home()).expect("load config");
+        let file = load(&gate, config_dir(), &home()).expect("load config");
 
         assert_eq!(file.config().roots, vec![PathBuf::from("/Users/me/code")]);
         assert!(file.config().walk.enter_bundles);
@@ -381,7 +381,7 @@ mod tests {
         let fake = FakeBackend::new();
         let gate = gate(&fake);
 
-        let result = load(&gate, config_dir(), home());
+        let result = load(&gate, config_dir(), &home());
 
         assert!(matches!(result, Err(Error::NotFound)));
     }
@@ -395,7 +395,7 @@ mod tests {
         );
         let gate = gate(&fake);
 
-        let result = load(&gate, config_dir(), home());
+        let result = load(&gate, config_dir(), &home());
 
         let Err(error @ Error::Parse { .. }) = result else {
             panic!("expected a parse error, got {result:?}");
@@ -415,7 +415,7 @@ mod tests {
         );
         let gate = gate(&fake);
 
-        let file = load(&gate, config_dir(), home()).expect("load config");
+        let file = load(&gate, config_dir(), &home()).expect("load config");
 
         assert_eq!(
             file.config().roots,
@@ -432,7 +432,7 @@ mod tests {
         );
         let gate = gate(&fake);
 
-        let file = load(&gate, config_dir(), home()).expect("missing root is fine");
+        let file = load(&gate, config_dir(), &home()).expect("missing root is fine");
 
         assert_eq!(
             file.config().roots,
@@ -451,7 +451,7 @@ mod tests {
         );
         let gate = gate(&fake);
 
-        let result = load(&gate, config_dir(), home());
+        let result = load(&gate, config_dir(), &home());
 
         let Err(Error::Fs(fs::Error::Symlink { link, .. })) = result else {
             panic!("expected a symlink load error, got {result:?}");
@@ -466,7 +466,7 @@ mod tests {
         let gate = gate(&fake);
         let default_text = "roots = []\n[walk]\nenter_bundles = false\n";
 
-        let seeded = seed(&gate, config_dir(), home(), default_text).expect("seed config");
+        let seeded = seed(&gate, config_dir(), &home(), default_text).expect("seed config");
 
         assert_eq!(seeded.config(), &Config::default());
         assert_eq!(
@@ -481,7 +481,7 @@ mod tests {
         let fake = FakeBackend::new();
         let gate = gate(&fake);
 
-        let result = seed(&gate, config_dir(), home(), "not valid toml [[[");
+        let result = seed(&gate, config_dir(), &home(), "not valid toml [[[");
 
         assert!(matches!(result, Err(Error::InvalidDefault(_))));
         assert!(!fake.exists("/Users/me/.config/rosie/config.toml"));
@@ -496,24 +496,24 @@ mod tests {
         let comment_lines = |text: &str| text.lines().filter(|l| l.contains('#')).count();
         let tilde_entries = |text: &str| text.matches("\"~/").count();
 
-        let seeded = seed(&gate, config_dir(), home(), default_text).expect("seed");
-        let added = roots::add(&gate, config_dir(), home(), &seeded, Path::new("~/code"))
+        let seeded = seed(&gate, config_dir(), &home(), default_text).expect("seed");
+        let added = roots::add(&gate, config_dir(), &home(), &seeded, Path::new("~/code"))
             .expect("add a root");
         let set = keys::set(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &added,
             WalkFlag::EnterBundles,
             "true",
         )
         .expect("set a flag");
-        let unset = keys::unset(&gate, config_dir(), home(), &set, WalkFlag::EnterBundles)
+        let unset = keys::unset(&gate, config_dir(), &home(), &set, WalkFlag::EnterBundles)
             .expect("unset the flag");
         roots::remove(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &unset,
             Path::new("~/.cargo/registry"),
         )
@@ -540,7 +540,7 @@ mod tests {
         );
         let gate = gate(&fake);
 
-        let result = load(&gate, config_dir(), home());
+        let result = load(&gate, config_dir(), &home());
 
         assert!(
             matches!(result, Err(Error::InvalidShape { key: "walk", .. })),
@@ -554,7 +554,7 @@ mod tests {
         fake.add_file("/Users/me/.config/rosie/config.toml", "roots = \"nope\"\n");
         let gate = gate(&fake);
 
-        let result = load(&gate, config_dir(), home());
+        let result = load(&gate, config_dir(), &home());
 
         assert!(
             matches!(result, Err(Error::InvalidShape { key: "roots", .. })),
@@ -572,7 +572,7 @@ mod tests {
         );
         let gate = gate(&fake);
 
-        let result = load(&gate, config_dir(), home());
+        let result = load(&gate, config_dir(), &home());
 
         let Err(error @ Error::DuplicateRoot { .. }) = result else {
             panic!("expected a duplicate-root error, got {result:?}");
@@ -588,10 +588,10 @@ mod tests {
         fake.add_dir(HOME);
         let gate = gate(&fake);
 
-        let first = load_or_seed(&gate, config_dir(), home(), "roots = []\n").expect("seed once");
+        let first = load_or_seed(&gate, config_dir(), &home(), "roots = []\n").expect("seed once");
         gate.write_own_file(&config_path(config_dir()), b"roots = [\"/Users/me\"]\n")
             .expect("simulate a user edit");
-        let second = load_or_seed(&gate, config_dir(), home(), "roots = []\n")
+        let second = load_or_seed(&gate, config_dir(), &home(), "roots = []\n")
             .expect("load the edited file, not the default again");
 
         assert_eq!(first.config(), &Config::default());
@@ -618,7 +618,7 @@ mod tests {
         let result = store(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             "roots = []\n[walk]\nenter_bundles = false\n",
         );
 
@@ -637,7 +637,7 @@ mod tests {
         fake.add_dir(HOME);
         let gate = gate(&fake);
 
-        let result = seed(&gate, config_dir(), home(), "walk = [true]\n");
+        let result = seed(&gate, config_dir(), &home(), "walk = [true]\n");
 
         assert!(
             matches!(result, Err(Error::InvalidDefault(_))),
@@ -655,7 +655,7 @@ mod tests {
         let result = seed(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             "roots = [\"~/code\", \"/Users/me/code\"]\n",
         );
 
@@ -672,7 +672,7 @@ mod tests {
         fake.add_dir(HOME);
         let gate = gate(&fake);
 
-        seed(&gate, config_dir(), home(), "roots = []\n").expect("seed config");
+        seed(&gate, config_dir(), &home(), "roots = []\n").expect("seed config");
 
         assert!(!fake.exists(sibling_path(config_dir())));
     }

@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{Config, ConfigFile, Error, document, expand_home, store};
-use crate::fs::{Backend, Gate, resolve_dots};
+use crate::fs::{Backend, Gate, Home, resolve_dots};
 
 /// The current `roots` allowlist, for `rosie roots`.
 pub fn list(config: &Config) -> &[PathBuf] {
@@ -18,7 +18,7 @@ pub fn list(config: &Config) -> &[PathBuf] {
 pub fn add<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
     file: &ConfigFile,
     path: &Path,
 ) -> Result<ConfigFile, Error> {
@@ -41,7 +41,7 @@ pub fn add<B: Backend>(
 pub fn remove<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
-    home: &Path,
+    home: &Home,
     file: &ConfigFile,
     path: &Path,
 ) -> Result<ConfigFile, Error> {
@@ -58,7 +58,7 @@ pub fn remove<B: Backend>(
 }
 
 /// The checked path, written back under `~` when the user typed it that way.
-fn spelled_as_typed(typed: &Path, checked: &Path, home: &Path) -> PathBuf {
+fn spelled_as_typed(typed: &Path, checked: &Path, home: &Home) -> PathBuf {
     let typed_under_home = typed.starts_with("~");
     match (typed_under_home, checked.strip_prefix(home)) {
         (true, Ok(rest)) => Path::new("~").join(rest),
@@ -89,8 +89,8 @@ mod tests {
         Gate::new(fake, bounds).expect("absolute bounds")
     }
 
-    fn home() -> &'static Path {
-        Path::new(HOME)
+    fn home() -> Home {
+        Home::new(Path::new(HOME)).expect("absolute home")
     }
 
     fn config_dir() -> &'static Path {
@@ -98,7 +98,7 @@ mod tests {
     }
 
     fn loaded(gate: &Gate<&FakeBackend>) -> ConfigFile {
-        load(gate, config_dir(), home()).expect("load config")
+        load(gate, config_dir(), &home()).expect("load config")
     }
 
     fn file_text(gate: &Gate<&FakeBackend>) -> String {
@@ -118,7 +118,7 @@ mod tests {
         let updated = add(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &loaded(&gate),
             Path::new("/Users/me/code"),
         )
@@ -140,7 +140,7 @@ mod tests {
         let updated = add(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &loaded(&gate),
             Path::new("~/Library/Caches"),
         )
@@ -171,7 +171,7 @@ mod tests {
         let result = add(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &loaded(&gate),
             Path::new("/Users/me/code"),
         );
@@ -196,7 +196,7 @@ mod tests {
         let result = add(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &loaded(&gate),
             Path::new("/Users/me/code"),
         );
@@ -218,7 +218,7 @@ mod tests {
         let updated = add(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &loaded(&gate),
             Path::new("/Users/me/code"),
         )
@@ -238,7 +238,7 @@ mod tests {
         let updated = remove(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &loaded(&gate),
             Path::new("~/Applications"),
         )
@@ -268,7 +268,7 @@ mod tests {
         let result = remove(
             &gate,
             config_dir(),
-            home(),
+            &home(),
             &loaded(&gate),
             Path::new("/Users/me/other"),
         );

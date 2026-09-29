@@ -134,8 +134,9 @@ pub enum SkipReason {
     RunningProcess,
     /// Elevation for the `sudo` items was refused or failed.
     SudoRefused,
-    /// A folder above the item could be changed by someone other than root, so the
-    /// elevated child left it for the user to delete by hand.
+    /// The item, or a folder above or inside it, could be changed by someone other than
+    /// root, so the elevated child left it for the user to delete by hand (see
+    /// [`crate::fs::Error::NotRootControlled`]).
     UnsafeToElevate,
 }
 
@@ -162,8 +163,7 @@ pub enum WalkSkip {
 
 impl WalkSkip {
     /// Why the path was skipped, briefly, as the line naming it shows it
-    /// (`docs/spec/plan.md`). Says nothing about a flag: the mode that produced the
-    /// skip decides whether one applies (`docs/spec/cli.md#flags`).
+    /// (`docs/spec/plan.md`).
     pub fn reason(self) -> &'static str {
         match self {
             WalkSkip::Bundle => "bundle",

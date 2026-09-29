@@ -49,6 +49,20 @@ pub enum Error {
     #[error("plan format version {found} is not supported; this rosie reads version {supported}")]
     UnsupportedVersion { found: i64, supported: u32 },
 
+    #[error(
+        "delete {inner:?} is inside delete {outer:?}; a scan never writes this, so run \
+         cannot tell which order is safe",
+        inner = inner.display().to_string(),
+        outer = outer.display().to_string()
+    )]
+    NestedDeletes { outer: PathBuf, inner: PathBuf },
+
+    #[error(
+        "delete {path:?} is listed twice; a scan never writes this",
+        path = path.display().to_string()
+    )]
+    RepeatedDelete { path: PathBuf },
+
     #[error("[[{section}]] entry {number}: {problem}")]
     InvalidEntry {
         section: &'static str,

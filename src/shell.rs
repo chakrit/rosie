@@ -1,4 +1,5 @@
-//! Quoting for bash, used by the `--sh` export and the plan file's hint comments.
+//! Quoting for bash, used by the `--sh` export, the plan file's `rosie roots add` hints,
+//! and the command line that the refusal of `sudo rosie` suggests instead.
 //!
 //! A quoted word never contains a raw control character, so it always stays on one line:
 //! a commented-out command cannot spill an executable line, and a TOML comment cannot
@@ -60,7 +61,7 @@ fn needs_escape(c: char) -> bool {
 /// Printable runs go in single quotes, with `'` written as `'\''`. Control and hidden
 /// characters go byte by byte in `$'\ooo'` octal escapes, which the bash 3.2 that macOS
 /// ships reads.
-pub fn word(text: &str) -> String {
+pub fn quote_word(text: &str) -> String {
     let bare = !text.is_empty() && text.chars().all(is_bare) && !RESERVED_WORDS.contains(&text);
     if bare {
         return text.to_owned();
@@ -128,9 +129,9 @@ mod tests {
 
     use super::*;
 
-    /// What bash expands `word(text)` to, by printing its single argument.
+    /// What bash expands `quote_word(text)` to, by printing its single argument.
     fn bash_expansion(text: &str) -> String {
-        let script = format!("printf '%s' {}", word(text));
+        let script = format!("printf '%s' {}", quote_word(text));
         let output = Command::new("/bin/bash")
             .arg("-c")
             .arg(&script)
@@ -144,10 +145,10 @@ mod tests {
     #[test]
     fn plain_words_stay_bare() {
         assert_eq!(
-            word("/Users/me/src/app/node_modules"),
+            quote_word("/Users/me/src/app/node_modules"),
             "/Users/me/src/app/node_modules"
         );
-        assert_eq!(word("--force"), "--force");
+        assert_eq!(quote_word("--force"), "--force");
     }
 
     #[test]
@@ -173,7 +174,7 @@ mod tests {
         ];
 
         for text in hostile {
-            assert_eq!(bash_expansion(text), text, "quoted as {}", word(text));
+            assert_eq!(bash_expansion(text), text, "quoted as {}", quote_word(text));
         }
     }
 
@@ -186,7 +187,7 @@ mod tests {
 
     #[test]
     fn quoted_words_never_hold_a_control_or_hidden_character() {
-        let quoted = word(&format!("/w/new\nline\r\u{7f}\u{85}{HIDDEN}"));
+        let quoted = quote_word(&format!("/w/new\nline\r\u{7f}\u{85}{HIDDEN}"));
 
         assert!(is_shown_truthfully(&quoted), "{quoted:?}");
     }
@@ -207,7 +208,7 @@ mod tests {
 
     #[test]
     fn visible_unicode_stays_readable() {
-        assert_eq!(word("/w/日本/ünï"), "'/w/日本/ünï'");
+        assert_eq!(quote_word("/w/日本/ünï"), "'/w/日本/ünï'");
         assert_eq!(comment_text("日本 ünï"), "日本 ünï");
     }
 }

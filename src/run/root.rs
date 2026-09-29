@@ -7,6 +7,7 @@ use thiserror::Error;
 
 use crate::fs::{self, Backend, Gate};
 use crate::process;
+use crate::shell::quote_word;
 
 /// The refusal lines, one chosen per run.
 const LINES: [&str; 3] = [
@@ -44,11 +45,12 @@ impl RootRefusal {
     }
 }
 
-/// The line, then `run it again without sudo: rosie <the same arguments>`.
+/// The line, then `run it again without sudo: rosie <the same arguments>`, each argument
+/// shell-quoted so the line stays runnable however the user typed it.
 impl fmt::Display for RootRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let command = std::iter::once("rosie")
-            .chain(self.args.iter().map(String::as_str))
+        let command = std::iter::once("rosie".to_owned())
+            .chain(self.args.iter().map(|arg| quote_word(arg)))
             .collect::<Vec<_>>()
             .join(" ");
         write!(f, "{}\nrun it again without sudo: {command}", self.line)
@@ -123,6 +125,16 @@ mod tests {
         assert_eq!(
             refusal.to_string(),
             "Jane! Stop this crazy thing!\nrun it again without sudo: rosie clean tree ."
+        );
+    }
+
+    #[test]
+    fn quotes_a_repeated_argument_containing_spaces() {
+        let refusal = RootRefusal::new(0, vec!["scan".into(), "tree".into(), "my app".into()]);
+
+        assert!(
+            refusal.to_string().ends_with("rosie scan tree 'my app'"),
+            "{refusal}"
         );
     }
 

@@ -11,8 +11,8 @@ use std::collections::BTreeMap;
 use std::path::PathBuf;
 
 use super::{
-    Bootout, Command, Delete, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, Status, Tool, check_path,
+    Bootout, Command, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
+    Report, RunAs, Selection, Size, Status, Tool, check_path,
 };
 
 /// Whether `--aggressive` was given.
@@ -159,7 +159,7 @@ impl PlanBuilder {
 
     pub fn build(self) -> Plan {
         Plan {
-            deletes: collapse_nested(self.deletes),
+            deletes: Deletes::collapsing(self.deletes),
             tools: self.tools.into_iter().map(|(_, tool)| tool).collect(),
             receipts: self.receipts,
             reports: self.reports,
@@ -225,30 +225,6 @@ impl PlanBuilder {
             (Twin::Aggressive, AggressiveItems::Ticked) => Selection::Ticked,
             (Twin::Aggressive, AggressiveItems::Unticked) => Selection::Unticked,
         }
-    }
-}
-
-/// Keeps only the outermost of nested paths. `Path` orders by component, so every path
-/// inside another sorts directly after it.
-///
-/// The outer entry keeps its own rules, size, and status. It takes over the bootouts of
-/// the entries inside it, so their jobs are unloaded exactly when it is deleted, and runs
-/// elevated when any of them would.
-fn collapse_nested(deletes: BTreeMap<PathBuf, Delete>) -> Vec<Delete> {
-    let mut outermost: Vec<Delete> = Vec::with_capacity(deletes.len());
-    for delete in deletes.into_values() {
-        match outermost.last_mut() {
-            Some(outer) if delete.path.starts_with(&outer.path) => absorb(outer, delete),
-            _ => outermost.push(delete),
-        }
-    }
-    outermost
-}
-
-fn absorb(outer: &mut Delete, inner: Delete) {
-    outer.bootouts.extend(inner.bootouts);
-    if inner.run_as == RunAs::Sudo {
-        outer.run_as = RunAs::Sudo;
     }
 }
 

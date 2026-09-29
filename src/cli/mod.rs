@@ -76,31 +76,40 @@ pub struct App<B: Backend, N: Network, C: Console> {
     backend: B,
     network: N,
     console: C,
-    env: Env,
 }
 
 impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
-    pub fn new(backend: B, network: N, console: C, env: Env) -> Self {
+    pub fn new(backend: B, network: N, console: C) -> Self {
         App {
             backend,
             network,
             console,
-            env,
         }
     }
 
-    /// Runs one command line; `argv` starts with the program name.
-    pub fn run(&mut self, argv: impl IntoIterator<Item = OsString>) -> ExitStatus {
+    /// Runs one command line; `argv` starts with the program name. `env` is called only
+    /// once argument parsing finds a command that needs it, so `--help` and `--version`
+    /// never require an environment to be gathered at all.
+    pub fn run(
+        &mut self,
+        argv: impl IntoIterator<Item = OsString>,
+        env: impl FnOnce() -> Result<Env, String>,
+    ) -> ExitStatus {
         let argv: Vec<OsString> = argv.into_iter().collect();
         let cli = match Cli::try_parse_from(&argv) {
             Ok(cli) => cli,
             Err(error) => return self.show_parse_error(&error),
         };
 
+        let env = match env() {
+            Ok(env) => env,
+            Err(reason) => return self.show_env_error(&reason),
+        };
+
         let outcome = match cli.command {
-            Some(Command::Elevated { nonce }) => self.elevated(nonce),
-            Some(Command::User(command)) => self.command(command, typed_args(&argv)),
-            None => self.command(UserCommand::default(), typed_args(&argv)),
+            Some(Command::Elevated { nonce }) => self.elevated(&env, nonce),
+            Some(Command::User(command)) => self.command(&env, command, typed_args(&argv)),
+            None => self.command(&env, UserCommand::default(), typed_args(&argv)),
         };
         match outcome {
             Ok(status) => status,
@@ -108,24 +117,24 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
         }
     }
 
-    fn command(&mut self, command: UserCommand, typed: Vec<String>) -> Result<ExitStatus, Error> {
-        let mut session = Session::open(
-            &self.backend,
-            &self.network,
-            &mut self.console,
-            &self.env,
-            typed,
-        )?;
+    fn command(
+        &mut self,
+        env: &Env,
+        command: UserCommand,
+        typed: Vec<String>,
+    ) -> Result<ExitStatus, Error> {
+        let mut session =
+            Session::open(&self.backend, &self.network, &mut self.console, env, typed)?;
         session.dispatch(command)
     }
 
     /// The hidden entry the run launches through sudo; it passes its own four gates
     /// and never reaches the `sudo rosie` refusal.
-    fn elevated(&mut self, nonce: String) -> Result<ExitStatus, Error> {
+    fn elevated(&mut self, env: &Env, nonce: String) -> Result<ExitStatus, Error> {
         let invocation = Invocation {
             nonce,
             stdin: self.console.capture_stdin()?,
-            pid: self.env.pid,
+            pid: env.pid,
         };
 
         let mut reporter = self.console.reporter();
@@ -142,6 +151,14 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     }
 
     // errors
+
+    /// The environment could not be gathered (for example `$HOME` is not set); no
+    /// command needing it ever ran.
+    fn show_env_error(&mut self, reason: &str) -> ExitStatus {
+        match writeln!(self.console.stderr(), "rosie: {reason}") {
+            Ok(()) | Err(_) => ExitStatus::Failed,
+        }
+    }
 
     fn show_parse_error(&mut self, error: &clap::Error) -> ExitStatus {
         let text = error.to_string();

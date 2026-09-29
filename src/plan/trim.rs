@@ -59,12 +59,7 @@ impl Plan {
     pub fn keeping_ticked(&self, kept: &[Ticked<'_>]) -> Plan {
         let kept = Kept::from(kept);
 
-        let deletes = self
-            .deletes
-            .iter()
-            .filter(|delete| kept.keeps_delete(delete))
-            .cloned()
-            .collect();
+        let deletes = self.deletes.retaining(|delete| kept.keeps_delete(delete));
         let tools = self
             .tools
             .iter()
@@ -205,8 +200,8 @@ steps = ["Remove X"]
         assert_eq!(
             paths,
             [
-                "/Users/me/b/node_modules",
                 "/Library/Caches/x",
+                "/Users/me/b/node_modules",
                 "/Users/me/c/target"
             ]
         );

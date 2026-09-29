@@ -11,8 +11,8 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Bootout, Command, Delete, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, Status, Tool, blocked_hint, check_path,
+    Bootout, Command, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
+    Report, RunAs, Selection, Size, Status, Tool, blocked_hint, check_path,
 };
 
 pub const FORMAT_VERSION: u32 = 1;
@@ -27,7 +27,7 @@ impl Plan {
     pub fn to_toml(&self) -> Result<String, Error> {
         let mut text = format!("{PREAMBLE}version = {FORMAT_VERSION}\n");
 
-        for delete in &self.deletes {
+        for delete in self.deletes.iter() {
             let note = match delete.status {
                 Status::Blocked => format!("{}; {}", delete.size, blocked_hint(&delete.path)),
                 Status::Ticked | Status::Unticked => delete.size.to_string(),
@@ -60,6 +60,7 @@ impl Plan {
             Some(_) => {}
         }
 
+        // Read from the text, not from a parsed table, so errors keep their line and column.
         let file: PlanFile = toml::from_str(text)?;
         file.into_plan()
     }
@@ -222,8 +223,9 @@ fn path_text(path: &Path) -> String {
 
 impl PlanFile {
     fn into_plan(self) -> Result<Plan, Error> {
+        let deletes = numbered("delete", self.delete, DeleteTable::into_delete)?;
         Ok(Plan {
-            deletes: numbered("delete", self.delete, DeleteTable::into_delete)?,
+            deletes: Deletes::refusing_nested(deletes)?,
             tools: numbered("tool", self.tool, ToolTable::into_tool)?,
             receipts: numbered("forget", self.forget, ForgetTable::into_receipt)?,
             reports: numbered("report", self.report, ReportTable::into_report)?,
@@ -364,6 +366,7 @@ fn selection(text: &str) -> Result<Selection, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
     use crate::plan::{AggressiveItems, PathMatch, PlanBuilder, Reach, ToolCmds, Twin};
 
     fn found(path: &str, reach: Reach, twin: Twin) -> PathMatch {
@@ -515,6 +518,68 @@ mod tests {
     }
 
     #[test]
+    fn refuses_a_hand_written_plan_with_one_delete_inside_another() {
+        let text = "version = 1\n\
+                    [[delete]]\npath = \"/Users/me/Library/LaunchAgents\"\ntype = \"folder\"\n\
+                    size = 1\nstatus = \"ticked\"\n\n\
+                    [[delete]]\npath = \"/Users/me/Library/LaunchAgents/com.x.plist\"\n\
+                    type = \"file\"\nsize = 1\nstatus = \"ticked\"\nsudo = true\n";
+
+        let refused = parse_error(text);
+
+        assert_eq!(
+            refused.to_string(),
+            "delete \"/Users/me/Library/LaunchAgents/com.x.plist\" is inside delete \
+             \"/Users/me/Library/LaunchAgents\"; a scan never writes this, so run cannot \
+             tell which order is safe"
+        );
+    }
+
+    fn delete_table(path: &str) -> String {
+        format!(
+            "[[delete]]\npath = \"{path}\"\ntype = \"folder\"\nsize = 1\nstatus = \"ticked\"\n\n"
+        )
+    }
+
+    #[test]
+    fn refuses_a_nested_pair_that_other_entries_separate_in_the_file() {
+        let text = [
+            "version = 1\n".to_owned(),
+            delete_table("/w/app/node_modules/.cache"),
+            delete_table("/w/other"),
+            delete_table("/w/app/target"),
+            delete_table("/w/app/node_modules"),
+        ]
+        .concat();
+
+        let refused = parse_error(&text);
+
+        assert!(
+            matches!(&refused, Error::NestedDeletes { outer, inner }
+                if outer == Path::new("/w/app/node_modules")
+                    && inner == Path::new("/w/app/node_modules/.cache")),
+            "{refused}"
+        );
+    }
+
+    #[test]
+    fn refuses_a_delete_listed_twice() {
+        let text = [
+            "version = 1\n".to_owned(),
+            delete_table("/w/a"),
+            delete_table("/w/a"),
+        ]
+        .concat();
+
+        let refused = parse_error(&text);
+
+        assert!(
+            matches!(&refused, Error::RepeatedDelete { path } if path == Path::new("/w/a")),
+            "{refused}"
+        );
+    }
+
+    #[test]
     fn writes_the_format_version_and_readable_tables() {
         let text = every_kind().to_toml().expect("serializable");
 
@@ -594,6 +659,29 @@ mod tests {
         let refused = parse_error("version = 1\nroots = [\"/\"]\n");
 
         assert!(matches!(refused, Error::Parse(_)), "{refused:?}");
+    }
+
+    /// Plans are edited by hand and can hold thousands of entries, so a key or value the
+    /// format does not admit is reported with the line it is on.
+    #[test]
+    fn a_malformed_entry_is_reported_with_its_line() {
+        let text = [
+            "version = 1\n".to_owned(),
+            delete_table("/w/a"),
+            delete_table("/w/b"),
+            "[[delete]]\npath = \"/w/c\"\ntype = \"folder\"\nsize = 1\nbogus = 3\n".to_owned(),
+        ]
+        .concat();
+        let bogus_line = text
+            .lines()
+            .position(|line| line == "bogus = 3")
+            .expect("present")
+            + 1;
+
+        let refused = parse_error(&text).to_string();
+
+        assert!(refused.contains(&format!("line {bogus_line}")), "{refused}");
+        assert!(refused.contains("bogus"), "{refused}");
     }
 
     #[test]

@@ -8,9 +8,9 @@
 //! executed.
 
 mod builder;
+mod deletes;
 mod error;
 mod file;
-mod quote;
 mod script;
 mod size;
 mod stats;
@@ -20,6 +20,9 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::fs::{Argv, FileKind, SystemArgv, SystemTool};
+use crate::shell;
+
+use deletes::Deletes;
 
 pub use builder::{AggressiveItems, PathMatch, PlanBuilder, Reach, ToolCmds, Twin};
 pub use error::Error;
@@ -31,9 +34,7 @@ pub use trim::Ticked;
 /// Everything one scan proposes, grouped by what each entry does.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct Plan {
-    /// A scan leaves these sorted by path, with no entry inside another; a plan file is
-    /// read back in its own order.
-    deletes: Vec<Delete>,
+    deletes: Deletes,
     tools: Vec<Tool>,
     receipts: Vec<Receipt>,
     reports: Vec<Report>,
@@ -96,8 +97,7 @@ impl Plan {
     pub fn ticked_for(&self, run_as: RunAs) -> Plan {
         let deletes = self
             .deletes
-            .iter()
-            .filter(|delete| delete.status.is_ticked() && delete.phase() == run_as);
+            .retaining(|delete| delete.status.is_ticked() && delete.phase() == run_as);
         let tools = self
             .tools
             .iter()
@@ -108,7 +108,7 @@ impl Plan {
             .filter(|receipt| receipt.selection.is_ticked() && receipt.run_as() == run_as);
 
         Plan {
-            deletes: deletes.cloned().collect(),
+            deletes,
             tools: tools.cloned().collect(),
             receipts: receipts.cloned().collect(),
             reports: Vec::new(),
@@ -124,7 +124,7 @@ impl Plan {
 /// What a blocked entry shows: `blocked, outside roots. To allow it: rosie roots add
 /// <path>`, with the path quoted to paste into a shell.
 fn blocked_hint(path: &Path) -> String {
-    let path = quote::word(&path.to_string_lossy());
+    let path = shell::quote_word(&path.to_string_lossy());
     format!("blocked, outside roots. To allow it: rosie roots add {path}")
 }
 

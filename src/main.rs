@@ -10,16 +10,8 @@ use rosie::fs::{Home, RealBackend};
 use rosie::packs::Https;
 
 fn main() -> ExitCode {
-    let env = match gather_env() {
-        Ok(env) => env,
-        Err(reason) => {
-            eprintln!("rosie: {reason}");
-            return ExitCode::FAILURE;
-        }
-    };
-
-    let mut app = App::new(RealBackend, Https::new(), SystemConsole::new(), env);
-    let status = app.run(env::args_os());
+    let mut app = App::new(RealBackend, Https::new(), SystemConsole::new());
+    let status = app.run(env::args_os(), gather_env);
     ExitCode::from(status.code())
 }
 

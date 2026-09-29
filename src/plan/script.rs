@@ -1,7 +1,7 @@
 //! The `--sh` export: the plan as a bash script the user inspects and runs with sudo
 //! themselves (`docs/spec/plan.md#shell-script-export`). Rosie cannot run it.
 //!
-//! - Every path and argument is quoted with [`quote::word`], so none can spill onto a
+//! - Every path and argument is quoted with [`shell::quote_word`], so none can spill onto a
 //!   line of its own, and every command is written as `( exec -- <words> ) </dev/null`,
 //!   so bash runs exactly its argv.
 //! - The entries sit inside a `main` function that the last line calls. Bash reads the
@@ -12,8 +12,9 @@
 
 use std::path::Path;
 
-use super::{Plan, Status, blocked_hint, quote};
+use super::{Plan, Status, blocked_hint};
 use crate::fs::Argv;
+use crate::shell;
 
 /// `:` keeps `main` valid bash when every entry in it is commented out.
 const HEADER: &str = "\
@@ -37,17 +38,17 @@ impl Plan {
     pub fn to_sh(&self) -> String {
         let mut script = HEADER.to_owned();
 
-        for delete in &self.deletes {
+        for delete in self.deletes.iter() {
             for bootout in &delete.bootouts {
                 let note = format!(
                     "unload {}",
-                    quote::comment_text(&bootout.domain.to_string())
+                    shell::comment_text(&bootout.domain.to_string())
                 );
                 let line = Line::of(delete.status, &delete.path, note);
                 script.push_str(&line.render(&command_line(&bootout.argv())));
             }
         }
-        for delete in &self.deletes {
+        for delete in self.deletes.iter() {
             let note = format!("{} · {}", delete.size, rules_text(&delete.rules));
             let line = Line::of(delete.status, &delete.path, note);
             script.push_str(&line.render(&command_line(&delete_argv(&delete.path))));
@@ -65,10 +66,10 @@ impl Plan {
         for report in &self.reports {
             script.push_str(&format!(
                 "\n# report only, do by hand: {}\n",
-                quote::comment_text(report.subject())
+                shell::comment_text(report.subject())
             ));
             for step in report.steps() {
-                script.push_str(&format!("#   {}\n", quote::comment_text(step)));
+                script.push_str(&format!("#   {}\n", shell::comment_text(step)));
             }
         }
 
@@ -116,7 +117,7 @@ impl Line {
 fn command_line(argv: &Argv) -> String {
     let words = std::iter::once(argv.program())
         .chain(argv.args().iter().map(|arg| arg.as_os_str()))
-        .map(|word| quote::word(&word.to_string_lossy()))
+        .map(|word| shell::quote_word(&word.to_string_lossy()))
         .collect::<Vec<_>>()
         .join(" ");
     format!("( exec -- {words} ) </dev/null")
@@ -129,18 +130,21 @@ fn delete_argv(path: &Path) -> Argv {
 }
 
 fn rules_text(rules: &[String]) -> String {
-    quote::comment_text(&rules.join(", "))
+    shell::comment_text(&rules.join(", "))
 }
 
 #[cfg(test)]
 mod tests {
     use std::path::PathBuf;
     use std::process::Command;
+    use std::sync::{Arc, Mutex, Weak};
+
+    use tempfile::TempDir;
 
     use super::*;
     use crate::plan::{
         AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
-        Size, ToolCmds, Twin, quote,
+        Size, ToolCmds, Twin,
     };
 
     const HOSTILE: &str = "/w/it's \"$HOME\"`id`\nrm -rf ~ #";
@@ -218,7 +222,24 @@ mod tests {
     /// Each appends its name to the file `$LOG`. The `docker` stub also reads its input a
     /// line at a time, logging each line as `read <line>`, and stops two bytes into the
     /// line after `# unticked:`, just past the `# ` that comments out the next command.
-    fn stubs() -> tempfile::TempDir {
+    ///
+    /// Tests running at the same time share one folder: macOS pays a first-execution cost
+    /// per fresh binary, so writing this folder anew in every test dominated their
+    /// runtime. The last test holding it removes it, so no run leaves it behind.
+    fn stubs() -> Arc<TempDir> {
+        static SHARED: Mutex<Weak<TempDir>> = Mutex::new(Weak::new());
+
+        let mut shared = SHARED.lock().expect("stub folder lock");
+        if let Some(live) = shared.upgrade() {
+            return live;
+        }
+
+        let fresh = Arc::new(build_stubs());
+        *shared = Arc::downgrade(&fresh);
+        fresh
+    }
+
+    fn build_stubs() -> TempDir {
         let bin = tempfile::tempdir().expect("temp folder");
         let logs_name = "#!/bin/bash\nprintf '%s\\n' \"${0##*/}\" >>\"$LOG\"\n";
         let reads_input = "while IFS= read -r line; do\n\
@@ -239,12 +260,14 @@ mod tests {
     }
 
     /// Runs `/bin/bash` with `args`, writing `input` to its stdin, `PATH` holding only
-    /// `bin`, and returns what the stubs logged.
+    /// `bin`, and returns what the stubs logged. The log lives outside `bin`, which
+    /// tests share, so concurrent runs never race on the same log file.
     fn run_bash(args: &[&Path], input: &[u8], bin: &Path) -> String {
         use std::io::Write;
         use std::process::Stdio;
 
-        let log = bin.join("log");
+        let log_dir = tempfile::tempdir().expect("temp folder");
+        let log = log_dir.path().join("log");
         std::fs::write(&log, "").expect("create log");
         let mut child = Command::new("/bin/bash")
             .args(args)
@@ -286,7 +309,7 @@ mod tests {
     #[test]
     fn exported_commands_read_no_input() {
         let bin = stubs();
-        let script = bin.path().join("plan.sh");
+        let script = bin.path().join("exported-commands-read-no-input.sh");
         std::fs::write(&script, plan().to_sh()).expect("write script");
 
         let log = run_bash(&[&script], b"y\ny\n", bin.path());
@@ -318,7 +341,7 @@ mod tests {
                 "( exec -- launchctl bootout system /Library/LaunchDaemons/com.x.plist ) </dev/null"
                     .to_owned(),
                 "( exec -- rm -rfx -- /Library/LaunchDaemons/com.x.plist ) </dev/null".to_owned(),
-                format!("( exec -- rm -rfx -- {} ) </dev/null", quote::word(HOSTILE)),
+                format!("( exec -- rm -rfx -- {} ) </dev/null", shell::quote_word(HOSTILE)),
                 "( exec -- docker system prune --force ) </dev/null".to_owned(),
                 "( exec -- pkgutil --forget com.x.pkg ) </dev/null".to_owned(),
             ],
@@ -333,14 +356,14 @@ mod tests {
         assert!(
             script.contains(&format!(
                 "\n# ( exec -- rm -rfx -- {} ) </dev/null\n",
-                quote::word(&format!("/x{HOSTILE}"))
+                shell::quote_word(&format!("/x{HOSTILE}"))
             )),
             "{script}"
         );
         assert!(
             script.contains(&format!(
                 "\n# ( exec -- rm -rfx -- {} ) </dev/null\n",
-                quote::word(&format!("/y{HOSTILE}"))
+                shell::quote_word(&format!("/y{HOSTILE}"))
             )),
             "{script}"
         );

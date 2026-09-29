@@ -163,7 +163,7 @@ impl Sandbox {
         let argv = std::iter::once("rosie")
             .chain(args.iter().copied())
             .map(OsString::from);
-        let status = App::new(&self.fake, &self.net, console, env).run(argv);
+        let status = App::new(&self.fake, &self.net, console).run(argv, || Ok(env));
 
         Ran {
             status,

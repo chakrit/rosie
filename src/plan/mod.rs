@@ -3,7 +3,7 @@
 //!
 //! A plan is built by [`PlanBuilder`] during a scan or parsed back from its TOML file
 //! ([`Plan::parse`]); nothing else can create one, and nothing can add entries to a
-//! parsed plan. Only [`Plan::runnable`] hands entries to a run, and it yields ticked
+//! parsed plan. Only [`Plan::runnable_as`] hands entries to a run, and it yields ticked
 //! entries alone: unticked and blocked entries are kept for the user to see, never
 //! executed.
 

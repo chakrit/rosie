@@ -90,7 +90,8 @@ impl<B: Backend> Gate<B> {
     }
 
     /// `lstat`s every component of an already resolved, existing path from `/` down,
-    /// refusing the first symlink. Returns the metadata of the path itself.
+    /// refusing the first symlink. Returns the metadata of the path itself; a missing
+    /// component is an `Io` error naming it.
     pub(super) fn lstat_without_symlinks(&self, path: &Path) -> Result<Metadata, Error> {
         match self.walk_components(path)? {
             Walk::Clear { meta, .. } => Ok(meta),

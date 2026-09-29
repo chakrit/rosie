@@ -12,7 +12,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsStr;
-use std::io::ErrorKind;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
@@ -248,7 +247,7 @@ fn error_line(error: &mlua::Error) -> String {
 fn exists<B: Backend>(gate: &Gate<B>, path: &Path) -> mlua::Result<bool> {
     match gate.lstat_link_free(path) {
         Ok(_) => Ok(true),
-        Err(error) if is_absent(&error) => Ok(false),
+        Err(error) if error.has_vanished() => Ok(false),
         Err(error) => Err(mlua::Error::runtime(error)),
     }
 }
@@ -274,7 +273,7 @@ fn glob<B: Backend>(gate: &Gate<B>, pattern: &Path) -> mlua::Result<Vec<PathBuf>
         .collect();
     let base_kind = match gate.lstat_link_free(&base) {
         Ok(meta) => meta.kind,
-        Err(error) if is_absent(&error) => return Ok(Vec::new()),
+        Err(error) if error.has_vanished() => return Ok(Vec::new()),
         Err(error) => return Err(mlua::Error::runtime(error)),
     };
 
@@ -350,7 +349,7 @@ fn children_matching<B: Backend>(
         match gate.lstat(&child) {
             Ok(meta) if meta.kind == FileKind::Symlink => {}
             Ok(meta) => children.push((child, meta.kind)),
-            Err(error) if is_absent(&error) => {}
+            Err(error) if error.has_vanished() => {}
             Err(error) => return Err(mlua::Error::runtime(error)),
         }
     }
@@ -359,15 +358,6 @@ fn children_matching<B: Backend>(
 
 fn read<B: Backend>(gate: &Gate<B>, path: &Path) -> mlua::Result<Vec<u8>> {
     gate.read_file(path).map_err(mlua::Error::runtime)
-}
-
-/// A missing entry, or a path continuing below a file.
-fn is_absent(error: &fs::Error) -> bool {
-    matches!(
-        error,
-        fs::Error::Io { source, .. }
-            if matches!(source.kind(), ErrorKind::NotFound | ErrorKind::NotADirectory)
-    )
 }
 
 // values
@@ -456,6 +446,7 @@ mod tests {
     use crate::fs::Op;
     use crate::fs::fake::{FakeBackend, USER_UID};
     use crate::rules::name::Name;
+    use std::io::ErrorKind;
 
     const APP: &str = "/Users/me/code/app/build";
 

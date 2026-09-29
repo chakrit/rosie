@@ -73,8 +73,10 @@ impl<B: Backend> Gate<B> {
         self.io(Op::Lstat, &path, self.backend.lstat(&path))
     }
 
-    /// `lstat`s a path of a scanned tree, such as a file a Lua rule tests for. A path with
-    /// a symlink in any component, the last included, is refused rather than followed.
+    /// `lstat`s a path of a scanned tree, such as a file a Lua rule tests for or a fixed
+    /// leftover folder app mode lists. A path with a symlink in any component, the last
+    /// included, is refused rather than followed; a missing component is an `Io` error
+    /// naming it.
     pub fn lstat_link_free(&self, path: &Path) -> Result<Metadata, Error> {
         let path = resolve_dots(path)?;
         self.lstat_without_symlinks(&path)
@@ -183,12 +185,29 @@ impl<B: Backend> Gate<B> {
 
     // bounds
 
+    /// Whether a cleanup-target mutation of `path` would pass the roots check, so a scan
+    /// can list an item outside the roots as blocked (`docs/spec/safety.md#roots`).
+    pub fn within_roots(&self, path: &Path) -> Result<bool, Error> {
+        let path = resolve_dots(path)?;
+        Ok(self.is_within_roots(&path))
+    }
+
+    /// The user rosie acts for; a scan marks items they do not own `sudo`.
+    pub fn user_uid(&self) -> u32 {
+        self.user_uid
+    }
+
     fn confine_to_roots(&self, path: &Path) -> Result<PathBuf, Error> {
         let path = resolve_dots(path)?;
-        match self.roots.iter().any(|root| path.starts_with(root)) {
+        match self.is_within_roots(&path) {
             true => Ok(path),
             false => Err(Error::OutsideRoots { path }),
         }
+    }
+
+    /// `path` has its `.` and `..` resolved already.
+    fn is_within_roots(&self, path: &Path) -> bool {
+        self.roots.iter().any(|root| path.starts_with(root))
     }
 
     fn confine_to_own(&self, path: &Path) -> Result<PathBuf, Error> {
@@ -376,6 +395,19 @@ mod tests {
         let result = gate.delete(path("code/app"));
 
         assert!(matches!(result, Err(Error::Relative { .. })));
+    }
+
+    #[test]
+    fn within_roots_resolves_dots_before_checking() {
+        let fake = FakeBackend::new();
+        let gate = gate(&fake, &["/code"]);
+
+        assert!(gate.within_roots(path("/code/app/x")).expect("absolute"));
+        assert!(!gate.within_roots(path("/code/../etc/x")).expect("absolute"));
+        assert!(matches!(
+            gate.within_roots(path("code/app")),
+            Err(Error::Relative { .. })
+        ));
     }
 
     // symlinks

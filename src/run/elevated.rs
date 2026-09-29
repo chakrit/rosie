@@ -206,7 +206,7 @@ fn admit<'a, B: Backend>(
 /// A `sudo` process running as root. Any user can start a process whose `ps` name is
 /// `sudo`; only root can make it run as root.
 fn is_root_sudo(process: &Process) -> bool {
-    process.uid.cast_unsigned() == ROOT_UID && process.comm.file_name() == Some("sudo".as_ref())
+    process.uid == ROOT_UID && process.comm.file_name() == Some("sudo".as_ref())
 }
 
 /// A gate acting for the user whose home this is, bounded by the roots in their

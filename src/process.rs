@@ -6,7 +6,10 @@
 //! executes from, and the elevated entry walks the parent chain to find `sudo`.
 
 use std::collections::{HashMap, HashSet};
+use std::ffi::OsStr;
+use std::os::unix::ffi::OsStrExt as _;
 use std::path::{Path, PathBuf};
+use std::str::FromStr;
 
 use thiserror::Error;
 
@@ -29,11 +32,17 @@ pub enum Error {
 pub struct Process {
     pub pid: u32,
     pub ppid: u32,
-    /// `ps` prints this as `uid_t` reinterpreted signed, so `nobody` (-2) parses as a
-    /// negative number rather than failing the row.
-    pub uid: i32,
-    /// The executable as `ps` prints it: a full path, or a bare name.
+    pub uid: u32,
+    /// The executable as `ps` prints it, byte for byte: a full path, or a bare name.
     pub comm: PathBuf,
+}
+
+impl Process {
+    /// Whether this process executes from `path` or from inside it, compared component
+    /// by component as written. A bare name never matches.
+    pub fn executes_from(&self, path: &Path) -> bool {
+        self.comm.is_absolute() && self.comm.starts_with(path)
+    }
 }
 
 /// Every process running when the table was read.
@@ -53,30 +62,31 @@ impl ProcessTable {
     pub fn query<B: Backend>(gate: &Gate<B>) -> Result<Self, Error> {
         let argv = Self::argv();
         let output = succeeded(&argv, gate.run(&argv)?)?;
-        Self::parse(&String::from_utf8_lossy(&output.stdout))
+        Self::parse(&output.stdout)
     }
 
-    /// Parses `ps` output: three numbers, then the command, which may hold spaces.
-    pub fn parse(text: &str) -> Result<Self, Error> {
+    /// Parses `ps` output: three numbers, then the command, which is the rest of the
+    /// line and may hold spaces. The command keeps its exact bytes, so a path that is
+    /// not UTF-8 still matches the item it runs from.
+    pub fn parse(text: &[u8]) -> Result<Self, Error> {
         let processes = text
-            .lines()
-            .filter(|line| !line.trim().is_empty())
+            .split(|&byte| byte == b'\n')
+            .filter(|line| !line.trim_ascii().is_empty())
             .map(|line| {
                 parse_row(line).ok_or_else(|| Error::Unreadable {
                     argv: Self::argv(),
-                    line: line.to_owned(),
+                    line: String::from_utf8_lossy(line).into_owned(),
                 })
             })
             .collect::<Result<_, _>>()?;
         Ok(ProcessTable { processes })
     }
 
-    /// A process whose executable is `path` or lies inside it, compared component by
-    /// component as written. Bare names match nothing.
+    /// A process whose executable is `path` or lies inside it.
     pub fn executing_from(&self, path: &Path) -> Option<&Process> {
         self.processes
             .iter()
-            .find(|process| process.comm.is_absolute() && process.comm.starts_with(path))
+            .find(|process| process.executes_from(path))
     }
 
     /// The parent of `pid`, its parent, and so on up the chain, nearest first. A chain
@@ -98,27 +108,35 @@ impl ProcessTable {
     }
 }
 
-fn parse_row(line: &str) -> Option<Process> {
-    let mut rest = line.trim_start();
-    let mut field = || {
-        let end = rest.find(char::is_whitespace)?;
-        let text = &rest[..end];
-        rest = rest[end..].trim_start();
-        Some(text)
-    };
-    let pid = field()?.parse().ok()?;
-    let ppid = field()?.parse().ok()?;
-    let uid = field()?.parse().ok()?;
-
-    match rest.is_empty() {
-        true => None,
-        false => Some(Process {
-            pid,
-            ppid,
-            uid,
-            comm: PathBuf::from(rest),
-        }),
+fn parse_row(line: &[u8]) -> Option<Process> {
+    let (pid, rest) = next_field(line)?;
+    let (ppid, rest) = next_field(rest)?;
+    let (uid, comm) = next_field(rest)?;
+    if comm.is_empty() {
+        return None;
     }
+
+    // `ps` prints `uid_t` reinterpreted signed, so a uid outside `int32` range, such as
+    // `nobody` (4294967294), shows as a negative number.
+    let uid: i32 = number(uid)?;
+    Some(Process {
+        pid: number(pid)?,
+        ppid: number(ppid)?,
+        uid: uid.cast_unsigned(),
+        comm: PathBuf::from(OsStr::from_bytes(comm)),
+    })
+}
+
+/// The first whitespace-separated field of `text` and what follows it, with the
+/// whitespace between them removed.
+fn next_field(text: &[u8]) -> Option<(&[u8], &[u8])> {
+    let text = text.trim_ascii_start();
+    let end = text.iter().position(u8::is_ascii_whitespace)?;
+    Some((&text[..end], text[end..].trim_ascii_start()))
+}
+
+fn number<T: FromStr>(field: &[u8]) -> Option<T> {
+    std::str::from_utf8(field).ok()?.parse().ok()
 }
 
 /// The effective user id rosie runs as, from `id -u`.
@@ -144,115 +162,4 @@ fn succeeded(argv: &Argv, output: CommandOutput) -> Result<CommandOutput, Error>
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::fs::fake::FakeBackend;
-    use crate::fs::{Bounds, Exit};
-
-    const PS: &str = "\
-    1     0     0 /sbin/launchd
-  310     1   501 /Applications/Google Chrome.app/Contents/MacOS/Google Chrome
-  400   310   501 node
-  500     1     0 /usr/bin/sudo
-  501   500     0 /Users/me/.cargo/bin/rosie
-";
-
-    fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
-        let bounds = Bounds {
-            roots: vec![],
-            config_dir: PathBuf::from("/Users/me/.config/rosie"),
-            data_dir: PathBuf::from("/Users/me/.local/share/rosie"),
-            user_uid: 501,
-        };
-        Gate::new(fake, bounds).expect("absolute bounds")
-    }
-
-    fn output(stdout: &str) -> CommandOutput {
-        CommandOutput {
-            exit: Exit::Code(0),
-            stdout: stdout.as_bytes().to_vec(),
-            stderr: Vec::new(),
-        }
-    }
-
-    #[test]
-    fn parses_commands_holding_spaces() {
-        let table = ProcessTable::parse(PS).expect("valid ps output");
-
-        let chrome = table
-            .executing_from(Path::new("/Applications/Google Chrome.app"))
-            .expect("chrome runs from its bundle");
-
-        assert_eq!(chrome.pid, 310);
-        assert_eq!(chrome.uid, 501);
-    }
-
-    #[test]
-    fn matches_executables_by_component_not_by_prefix() {
-        let table = ProcessTable::parse(PS).expect("valid ps output");
-
-        let exact = table.executing_from(Path::new("/usr/bin/sudo"));
-        let sibling = table.executing_from(Path::new("/Applications/Google"));
-        let bare = table.executing_from(Path::new("node"));
-
-        assert_eq!(exact.map(|p| p.pid), Some(500));
-        assert_eq!(sibling, None);
-        assert_eq!(bare, None);
-    }
-
-    #[test]
-    fn walks_the_parent_chain_nearest_first() {
-        let table = ProcessTable::parse(PS).expect("valid ps output");
-
-        let pids: Vec<u32> = table.ancestors(501).iter().map(|p| p.pid).collect();
-
-        assert_eq!(pids, vec![500, 1]);
-    }
-
-    #[test]
-    fn stops_a_looping_parent_chain() {
-        let table = ProcessTable::parse("  7  8  0 a\n  8  7  0 b\n").expect("valid");
-
-        let pids: Vec<u32> = table.ancestors(7).iter().map(|p| p.pid).collect();
-
-        assert_eq!(pids, vec![8]);
-    }
-
-    #[test]
-    fn parses_a_negative_uid_from_a_nobody_owned_process() {
-        let table = ProcessTable::parse("51253     1    -2 /usr/libexec/dhcp6d\n")
-            .expect("ps prints negative uids for `nobody`");
-
-        let process = table
-            .executing_from(Path::new("/usr/libexec/dhcp6d"))
-            .expect("dhcp6d is in the table");
-        assert_eq!(process.uid, -2);
-    }
-
-    #[test]
-    fn refuses_an_unreadable_row() {
-        let parsed = ProcessTable::parse("  12  1  x /bin/zsh\n");
-
-        assert!(matches!(parsed, Err(Error::Unreadable { .. })));
-    }
-
-    #[test]
-    fn queries_ps_through_the_gate() {
-        let fake = FakeBackend::new();
-        fake.respond(ProcessTable::argv(), output(PS));
-
-        let table = ProcessTable::query(&gate(&fake)).expect("canned ps");
-
-        assert_eq!(table.ancestors(400).len(), 2);
-    }
-
-    #[test]
-    fn reads_the_effective_uid() {
-        let fake = FakeBackend::new();
-        fake.respond(Argv::new("/usr/bin/id").arg("-u"), output("0\n"));
-
-        let uid = effective_uid(&gate(&fake)).expect("canned id");
-
-        assert_eq!(uid, 0);
-    }
-}
+mod tests;

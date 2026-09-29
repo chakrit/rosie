@@ -315,7 +315,8 @@ fn load_error(source: fs::Error) -> Error {
     }
 }
 
-fn config_path(config_dir: &Path) -> PathBuf {
+/// The user's `config.toml` inside rosie's config folder.
+pub fn config_path(config_dir: &Path) -> PathBuf {
     config_dir.join(FILE_NAME)
 }
 

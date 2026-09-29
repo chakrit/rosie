@@ -17,14 +17,13 @@ use std::fs::File;
 use std::io::{self, Read as _, Write};
 use std::os::fd::AsFd;
 use std::os::unix::fs::FileTypeExt as _;
-use std::path::PathBuf;
 
 use thiserror::Error;
 
 use super::header::{self, Header, Nonce};
 use super::{ItemResult, OutputWindow, Reporter, Runner, outcomes};
 use crate::config;
-use crate::fs::{self, Argv, Backend, Bounds, Gate, Home, ROOT_UID};
+use crate::fs::{self, Argv, Backend, Gate, Home, ROOT_UID};
 use crate::plan::{self, Plan, RunStats};
 use crate::process::{self, Process, ProcessTable};
 
@@ -186,7 +185,7 @@ fn admit<'a, B: Backend>(
         return Err(Error::NonceMismatch);
     }
 
-    let gate = Gate::new(backend, bounds(&header.home, Vec::new(), ROOT_UID))?;
+    let gate = Gate::new(backend, header.home.bounds(Vec::new(), ROOT_UID))?;
     let uid = process::effective_uid(&gate)?;
     if uid != ROOT_UID {
         return Err(Error::NotRoot { uid });
@@ -213,28 +212,12 @@ fn is_root_sudo(process: &Process) -> bool {
 /// config. The user is the owner of the home folder. The child deletes through it only
 /// with `Gate::delete_as_root`, which changes no permissions.
 fn user_gate<'b, B: Backend>(backend: &'b B, home: &Home) -> Result<Gate<&'b B>, Error> {
-    let bootstrap = Gate::new(backend, bounds(home, Vec::new(), ROOT_UID))?;
+    let bootstrap = Gate::new(backend, home.bounds(Vec::new(), ROOT_UID))?;
     let user_uid = bootstrap.lstat(home)?.uid;
-    let (config_dir, _) = own_dirs(home);
-    let file = config::load(&bootstrap, &config_dir, home)?;
+    let file = config::load(&bootstrap, &home.config_dir(), home)?;
 
     let roots = file.config().roots.clone();
-    Ok(Gate::new(backend, bounds(home, roots, user_uid))?)
-}
-
-fn bounds(home: &Home, roots: Vec<PathBuf>, user_uid: u32) -> Bounds {
-    let (config_dir, data_dir) = own_dirs(home);
-    Bounds {
-        roots,
-        config_dir,
-        data_dir,
-        user_uid,
-    }
-}
-
-/// The folders rosie keeps its own data in, under a user's home.
-fn own_dirs(home: &Home) -> (PathBuf, PathBuf) {
-    (home.join(".config/rosie"), home.join(".local/share/rosie"))
+    Ok(Gate::new(backend, home.bounds(roots, user_uid))?)
 }
 
 #[cfg(test)]

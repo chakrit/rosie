@@ -104,6 +104,8 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
 ///
 /// Settles every source with a copy beside it, then pulls the default source when no
 /// pack is installed. A crash while settling leaves a state from the tables above.
+/// `seed_config` settles the same way and, when no pack is installed, installs the
+/// default source from the one download it also reads the config from.
 pub struct Store<'g, B: Backend> {
     gate: &'g Gate<B>,
     home: Home,

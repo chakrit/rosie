@@ -1,4 +1,5 @@
-//! Rule packs: pull, remove, first-run pull, and age (`docs/spec/rules.md#packs`).
+//! Rule packs: pull, remove, first-run pull, config seeding, and age
+//! (`docs/spec/rules.md#packs`).
 //!
 //! A pack is pulled from a GitHub `owner/repo` as a tarball, checked entry by entry in
 //! memory, and installed through the gate's own-data methods
@@ -48,6 +49,14 @@ pub enum FirstRun {
     Pulled(Pulled),
 }
 
+/// What [`seed_config`] downloaded.
+#[derive(Debug)]
+pub struct Seed {
+    /// The default source's root `config.toml`.
+    pub config: String,
+    pub first_run: FirstRun,
+}
+
 /// `rosie rules pull [<source>]`: downloads the source's pack and installs it, replacing
 /// any installed copy wholesale.
 ///
@@ -62,23 +71,10 @@ pub fn pull<B: Backend, N: Network>(
 ) -> Result<Pulled, Error> {
     SettlePacks.run(store)?;
     let source = &store.resolve(requested)?;
-    let installed = store.sources()?;
     refuse_name_taken(store, source)?;
 
     let archive = DownloadArchive { source }.run(network)?;
-    let pulled_rules = PackRules::load(source, archive.rules())?;
-    let conflicts = conflicts_with_others(store, source, &pulled_rules, &installed)?;
-
-    InstallPack {
-        source,
-        rules: archive.rules(),
-        pulled_at: now,
-    }
-    .run(store)?;
-    Ok(Pulled {
-        source: source.clone(),
-        conflicts,
-    })
+    install(store, source, &archive, now)
 }
 
 /// Pulls the default source when no pack is installed. An offline failure is returned
@@ -96,11 +92,55 @@ pub fn first_run<B: Backend, N: Network>(
     pull(store, network, &Source::default(), now).map(FirstRun::Pulled)
 }
 
-/// The default source's root `config.toml`, to seed a fresh user config.
-pub fn default_config<N: Network>(network: &N) -> Result<String, Error> {
-    let source = Source::default();
-    let archive = DownloadArchive { source: &source }.run(network)?;
-    archive.config().map(str::to_owned)
+/// Downloads the default source once for a fresh user config: returns its root
+/// `config.toml`, and installs its pack from the same download when no pack is
+/// installed, as [`first_run`] would.
+pub fn seed_config<B: Backend, N: Network>(
+    store: &Store<B>,
+    network: &N,
+    now: SystemTime,
+) -> Result<Seed, Error> {
+    SettlePacks.run(store)?;
+    let first_run_due = store.sources()?.is_empty();
+    let source = &match first_run_due {
+        true => store.resolve(&Source::default())?,
+        false => Source::default(),
+    };
+    if first_run_due {
+        refuse_name_taken(store, source)?;
+    }
+
+    let archive = DownloadArchive { source }.run(network)?;
+    let config = archive.config()?.to_owned();
+    let first_run = match first_run_due {
+        true => FirstRun::Pulled(install(store, source, &archive, now)?),
+        false => FirstRun::Ready,
+    };
+
+    Ok(Seed { config, first_run })
+}
+
+/// Checks a downloaded pack against the other installed packs, then installs it.
+fn install<B: Backend>(
+    store: &Store<B>,
+    source: &Source,
+    archive: &Archive,
+    now: SystemTime,
+) -> Result<Pulled, Error> {
+    let installed = store.sources()?;
+    let pulled_rules = PackRules::load(source, archive.rules())?;
+    let conflicts = conflicts_with_others(store, source, &pulled_rules, &installed)?;
+
+    InstallPack {
+        source,
+        rules: archive.rules(),
+        pulled_at: now,
+    }
+    .run(store)?;
+    Ok(Pulled {
+        source: source.clone(),
+        conflicts,
+    })
 }
 
 /// Two packs with one name would give their rules the same `pack/rule` identities, and a

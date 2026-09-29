@@ -161,6 +161,18 @@ pub enum WalkSkip {
 }
 
 impl WalkSkip {
+    /// Why the path was skipped, briefly, as the line naming it shows it
+    /// (`docs/spec/plan.md`). Says nothing about a flag: the mode that produced the
+    /// skip decides whether one applies (`docs/spec/cli.md#flags`).
+    pub fn reason(self) -> &'static str {
+        match self {
+            WalkSkip::Bundle => "bundle",
+            WalkSkip::Mount => "another volume",
+            WalkSkip::Placeholder => "cloud placeholder, not downloaded",
+            WalkSkip::Denied => "permission denied",
+        }
+    }
+
     /// `3 bundles`, `1 mount`, `2 denied`.
     fn counted(self, count: usize) -> String {
         let (one, many) = match self {

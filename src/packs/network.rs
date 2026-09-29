@@ -16,6 +16,12 @@ pub trait Network {
     fn get(&self, url: &str) -> io::Result<Vec<u8>>;
 }
 
+impl<N: Network + ?Sized> Network for &N {
+    fn get(&self, url: &str) -> io::Result<Vec<u8>> {
+        (**self).get(url)
+    }
+}
+
 /// The real network, through `ureq` with native TLS and the system's trust store
 /// (`docs/spec/stack.md#crates`).
 pub struct Https {

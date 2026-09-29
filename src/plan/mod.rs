@@ -14,6 +14,7 @@ mod quote;
 mod script;
 mod size;
 mod stats;
+mod trim;
 
 use std::fmt;
 use std::path::{Path, PathBuf};
@@ -25,6 +26,7 @@ pub use error::Error;
 pub use file::FORMAT_VERSION;
 pub use size::Size;
 pub use stats::{ItemSize, Outcome, PlanStats, RunStats, SkipReason, Tally, WalkSkip, WalkSkips};
+pub use trim::Ticked;
 
 /// Everything one scan proposes, grouped by what each entry does.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

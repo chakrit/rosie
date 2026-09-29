@@ -768,17 +768,63 @@ fn pull_refuses_while_another_installed_pack_fails_to_load() {
     assert!(!fake.exists(ROSIE_PACK));
 }
 
-// default config
+// seeding a config
 
 #[test]
-fn downloads_the_default_config_from_the_default_source() {
+fn seeding_without_packs_installs_the_default_pack_from_the_one_download() {
+    let fake = fake_home();
+    let gate = gate(&fake);
+    let store = Store::new(&gate, &home(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let network = Canned::serving(ROSIE_URL, tarball);
 
-    let config = packs::default_config(&network).expect("config downloaded");
+    let seed = packs::seed_config(&store, &network, at(5)).expect("seeded");
 
-    assert_eq!(config, "roots = []\n");
+    assert_eq!(seed.config, "roots = []\n");
+    assert!(
+        matches!(&seed.first_run, FirstRun::Pulled(pulled) if pulled.source == Source::default()),
+        "got {:?}",
+        seed.first_run
+    );
+    assert_eq!(
+        contents(&fake, format!("{ROSIE_PACK}/node.toml")),
+        NODE_RULE
+    );
     assert_eq!(network.requested(), vec![ROSIE_URL]);
+}
+
+#[test]
+fn seeding_with_a_pack_installed_leaves_the_packs_alone() {
+    let fake = fake_home();
+    let gate = gate(&fake);
+    let store = Store::new(&gate, &home(), Path::new(DATA));
+    let old = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
+    packs::pull(
+        &store,
+        &Canned::serving(ROSIE_URL, old),
+        &Source::default(),
+        at(1),
+    )
+    .expect("pull");
+    let newer = Tarball::pack(&[("other.toml", "")]).gzip();
+
+    let seed =
+        packs::seed_config(&store, &Canned::serving(ROSIE_URL, newer), at(5)).expect("seeded");
+
+    assert_eq!(seed.config, "roots = []\n");
+    assert!(
+        matches!(seed.first_run, FirstRun::Ready),
+        "got {:?}",
+        seed.first_run
+    );
+    assert!(!fake.exists(format!("{ROSIE_PACK}/other.toml")));
+    assert_eq!(
+        store.installed().expect("list packs"),
+        vec![Installed {
+            source: Source::default(),
+            pulled_at: at(1),
+        }]
+    );
 }
 
 // remove

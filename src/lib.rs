@@ -1,6 +1,7 @@
 //! Rosie, a macOS cleanup CLI for developers. See `docs/spec/overview.md`.
 
 pub mod apps;
+pub mod cli;
 pub mod config;
 pub mod fs;
 pub mod packs;

@@ -99,6 +99,10 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
 - A pack is a folder of `*.toml` rule files. The pack name is the repository name.
 - The `rosie` pack lives in the public repository github.com/chakrit/rosie and is the
   CLI's default source.
+- The `rosie` pack is `rules/*.toml` at the root of github.com/chakrit/rosie; the
+  built-in rules live there.
+- A default config file at the root of github.com/chakrit/rosie is downloaded and used to
+  seed a fresh user config.
 - `rosie rules pull [<source>]` takes a GitHub `owner/repo` and downloads the pack as a
   tarball over HTTPS; git is not needed. Unpacking follows
   [safety.md](safety.md#rosies-own-data).

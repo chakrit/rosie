@@ -9,6 +9,13 @@ the right strategy or script for each rule.
 - Tests must not depend on locally installed tools. A tool absent from the machine (for
   example Gradle) is still tested.
 
+## Priorities
+
+- 100% coverage is a non-goal.
+- All tests must be prioritized, safety first.
+- Make bugs impossible by construction instead of exhaustively testing every nook and
+  cranny.
+
 ## Tiers
 
 | Tier              | Runs in        | Proves                                                   |

@@ -24,7 +24,6 @@ paths = ["~/Library/Caches/pip"]
 [rules.uv-cache]
 strategy = "tool"
 cmd = "uv cache clean"
-cmd_aggressive = "uv cache clean"
 
 # `poetry cache clear` needs a per-source cache name, so the cache folders are deleted
 # directly. `virtualenvs/` beside them holds Poetry-managed venvs and is left alone.
@@ -40,4 +39,3 @@ paths = [
 [rules.conda-cache]
 strategy = "tool"
 cmd = "conda clean --all --yes"
-cmd_aggressive = "conda clean --all --yes"

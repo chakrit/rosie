@@ -1,18 +1,12 @@
 //! Fixture tier for other volumes in both scan modes (`docs/spec/safety.md#walk-skips`).
-//!
-//! A mount root meets the checks that need only its `lstat` and name first: symlink,
-//! placeholder, bundle, then volume. Without `enter_mounts` it ends there, so no rule
-//! detection reads inside it. It is never a target, a match on it is a logged `Mount`
-//! skip, and `enter_mounts` only lets the walk enter it where it would enter the same
-//! folder on the home volume. A fixed rule path behind another volume is not planned
-//! unless `enter_mounts` is on.
 
 mod scan_fixture;
 
 use std::path::{Path, PathBuf};
 
+use rosie::config::Walk;
 use rosie::fs::fake::{Call, FakeBackend};
-use rosie::plan::WalkSkip;
+use rosie::plan::{Needs, WalkSetting, WalkSkip};
 use scan_fixture::*;
 
 const NPM_CACACHE: &str =
@@ -38,6 +32,13 @@ fn mounts(enter_mounts: bool) -> Options {
     options
 }
 
+/// [`mounts`], plus another walk flag set on top.
+fn walk_flags_and_mounts(enter_mounts: bool, set: impl FnOnce(&mut Walk)) -> Options {
+    let mut options = mounts(enter_mounts);
+    set(&mut options.walk);
+    options
+}
+
 // the tree walk
 
 #[test]
@@ -50,14 +51,22 @@ fn other_volumes_are_not_crossed_unless_enter_mounts() {
     let crossed = tree_with(&fake, CODE, mounts(true));
 
     assert!(paths(&closed).is_empty());
-    assert_eq!(skipped(&closed), [("/Users/me/code/ext", WalkSkip::Mount)]);
+    assert_eq!(
+        skipped(&closed),
+        [("/Users/me/code/ext", WalkSkip::Closed(Needs::MOUNTS))]
+    );
     assert_eq!(paths(&crossed), ["/Users/me/code/ext/app/node_modules"]);
     assert!(skipped(&crossed).is_empty());
 }
 
+/// Without `enter_mounts` the walk cannot read inside the mount root to detect a match,
+/// so the skip is one the flag could open; with it, the match is known and final.
 #[test]
 fn a_matched_mount_root_is_a_logged_skip_and_is_not_descended() {
-    for enter_mounts in [false, true] {
+    for (enter_mounts, skip) in [
+        (false, WalkSkip::Closed(Needs::MOUNTS)),
+        (true, WalkSkip::SealedMount),
+    ] {
         let fake = node_home();
         node_project(&fake, "/Users/me/code/app");
         node_project(&fake, "/Users/me/code/app/node_modules/pkg");
@@ -68,7 +77,7 @@ fn a_matched_mount_root_is_a_logged_skip_and_is_not_descended() {
         assert!(paths(&scan).is_empty(), "enter_mounts = {enter_mounts}");
         assert_eq!(
             skipped(&scan),
-            [("/Users/me/code/app/node_modules", WalkSkip::Mount)],
+            [("/Users/me/code/app/node_modules", skip)],
             "enter_mounts = {enter_mounts}"
         );
         assert!(!listed(&fake, "/Users/me/code/app/node_modules"));
@@ -97,8 +106,11 @@ fn rule_detection_never_reads_inside_a_mount_root_the_walk_may_not_enter() {
     assert_eq!(
         skipped(&scan),
         [
-            ("/Users/me/code/app/node_modules", WalkSkip::Mount),
-            ("/Users/me/code/web/dist", WalkSkip::Mount),
+            (
+                "/Users/me/code/app/node_modules",
+                WalkSkip::Closed(Needs::MOUNTS)
+            ),
+            ("/Users/me/code/web/dist", WalkSkip::Closed(Needs::MOUNTS)),
         ]
     );
     assert!(!looked_inside(&fake, "/Users/me/code/app/node_modules"));
@@ -107,7 +119,10 @@ fn rule_detection_never_reads_inside_a_mount_root_the_walk_may_not_enter() {
 
 #[test]
 fn a_mounted_bundle_is_not_entered_without_enter_bundles() {
-    for enter_mounts in [false, true] {
+    // Without `enter_mounts` neither flag alone crosses it, so its skip needs both; with
+    // it, only `enter_bundles` is missing.
+    let mounted_bundle = Needs::MOUNTS.and(Some(WalkSetting::Bundles));
+    for (enter_mounts, needs) in [(false, mounted_bundle), (true, Needs::BUNDLES)] {
         let fake = node_home();
         node_project(&fake, "/Users/me/code/Tool.app/Contents/app");
         fake.mount("/Users/me/code/Tool.app", 8);
@@ -117,16 +132,29 @@ fn a_mounted_bundle_is_not_entered_without_enter_bundles() {
         assert!(paths(&scan).is_empty(), "enter_mounts = {enter_mounts}");
         assert_eq!(
             skipped(&scan),
-            [("/Users/me/code/Tool.app", WalkSkip::Bundle)],
+            [("/Users/me/code/Tool.app", WalkSkip::Closed(needs))],
             "enter_mounts = {enter_mounts}"
         );
         assert!(!listed(&fake, "/Users/me/code/Tool.app"));
     }
+
+    let both = walk_flags_and_mounts(true, |walk| walk.enter_bundles = true);
+    let fake = node_home();
+    node_project(&fake, "/Users/me/code/Tool.app/Contents/app");
+    fake.mount("/Users/me/code/Tool.app", 8);
+    let entered = tree_with(&fake, CODE, both);
+    assert_eq!(
+        paths(&entered),
+        ["/Users/me/code/Tool.app/Contents/app/node_modules"]
+    );
+    assert!(entered.skipped.is_empty());
 }
 
 #[test]
 fn a_mounted_placeholder_is_not_opened_without_enter_placeholders() {
-    for enter_mounts in [false, true] {
+    // Its skip carries every flag still needed to open it.
+    let mounted_placeholder = Needs::PLACEHOLDERS.and(Some(WalkSetting::Mounts));
+    for (enter_mounts, needs) in [(false, mounted_placeholder), (true, Needs::PLACEHOLDERS)] {
         let fake = node_home();
         node_project(&fake, "/Users/me/code/cloud/app");
         fake.mount("/Users/me/code/cloud", 9);
@@ -137,7 +165,7 @@ fn a_mounted_placeholder_is_not_opened_without_enter_placeholders() {
         assert!(paths(&scan).is_empty(), "enter_mounts = {enter_mounts}");
         assert_eq!(
             skipped(&scan),
-            [("/Users/me/code/cloud", WalkSkip::Placeholder)],
+            [("/Users/me/code/cloud", WalkSkip::Closed(needs))],
             "enter_mounts = {enter_mounts}"
         );
         assert!(!listed(&fake, "/Users/me/code/cloud"));
@@ -161,7 +189,7 @@ fn a_fixed_path_that_is_a_mount_root_is_never_planned_by_the_walk() {
         assert!(paths(&scan).is_empty(), "enter_mounts = {enter_mounts}");
         assert_eq!(
             skipped(&scan),
-            [("/Users/me/.npm", WalkSkip::Mount)],
+            [("/Users/me/.npm", WalkSkip::SealedMount)],
             "enter_mounts = {enter_mounts}"
         );
     }
@@ -181,7 +209,10 @@ fn the_walk_reaches_a_fixed_path_inside_a_mounted_folder_only_with_enter_mounts(
     let crossed = tree_with(&scenario(), HOME, mounts(true));
 
     assert!(paths(&closed).is_empty());
-    assert_eq!(skipped(&closed), [("/Users/me/.npm", WalkSkip::Mount)]);
+    assert_eq!(
+        skipped(&closed),
+        [("/Users/me/.npm", WalkSkip::Closed(Needs::MOUNTS))]
+    );
     assert_eq!(paths(&crossed), ["/Users/me/.npm/_cacache"]);
 }
 
@@ -204,7 +235,7 @@ fn a_fixed_path_that_is_a_mount_root_is_never_planned() {
         assert!(paths(&scan).is_empty(), "enter_mounts = {enter_mounts}");
         assert_eq!(
             skipped(&scan),
-            [("/Users/me/.npm", WalkSkip::Mount)],
+            [("/Users/me/.npm", WalkSkip::SealedMount)],
             "enter_mounts = {enter_mounts}"
         );
     }
@@ -226,7 +257,7 @@ fn a_fixed_path_inside_a_mounted_folder_is_planned_only_with_enter_mounts() {
     assert!(paths(&closed).is_empty());
     assert_eq!(
         skipped(&closed),
-        [("/Users/me/.npm/_cacache", WalkSkip::Mount)]
+        [("/Users/me/.npm/_cacache", WalkSkip::Closed(Needs::MOUNTS))]
     );
     assert_eq!(paths(&crossed), ["/Users/me/.npm/_cacache"]);
     assert!(skipped(&crossed).is_empty());
@@ -255,8 +286,8 @@ fn a_mount_anywhere_between_the_anchor_and_a_fixed_path_is_a_crossing() {
     assert_eq!(
         skipped(&closed),
         [
-            ("/Library/Caches/Tool", WalkSkip::Mount),
-            ("/Users/me/vol/a/b/cache", WalkSkip::Mount),
+            ("/Library/Caches/Tool", WalkSkip::Closed(Needs::MOUNTS)),
+            ("/Users/me/vol/a/b/cache", WalkSkip::Closed(Needs::MOUNTS)),
         ]
     );
     assert_eq!(

@@ -1,4 +1,4 @@
-//! What root may delete on another user's behalf (`docs/spec/safety.md#elevation`).
+//! What root may delete on another user's behalf.
 //!
 //! Root acts on paths, and the kernel follows a symlink in any folder of a path. So
 //! root enters a folder only when no one but root can change it: a folder that

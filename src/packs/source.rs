@@ -38,9 +38,22 @@ impl Source {
     pub(super) fn from_names(owner: &str, repo: &str) -> Option<Source> {
         let owner = Name::parse(owner).ok()?;
         let repo = Name::parse(repo).ok()?;
-        (!repo.is_user_pack()).then_some(Source { owner, repo })
+        Source::from_valid_names(owner, repo).ok()
+    }
+
+    /// A source from names already parsed, refused when the pack name is the reserved
+    /// `user`.
+    pub(super) fn from_valid_names(owner: Name, repo: Name) -> Result<Source, ReservedPackName> {
+        match repo.is_user_pack() {
+            true => Err(ReservedPackName),
+            false => Ok(Source { owner, repo }),
+        }
     }
 }
+
+/// A pack name that is the reserved `user`, which only the user's own rules carry.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub(super) struct ReservedPackName;
 
 /// The CLI's default source, github.com/chakrit/rosie.
 impl Default for Source {
@@ -108,7 +121,7 @@ mod tests {
         }
     }
 
-    /// `docs/spec/rules.md#layers` names the user-rules layer's pack `user`. Other
+    /// `docs/spec/rules.md#layers-and-overrides` names the user-rules layer's pack `user`. Other
     /// spellings are refused at install, by the volume (`tests/packs.rs`).
     #[test]
     fn refuses_a_pack_named_user() {

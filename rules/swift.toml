@@ -9,7 +9,6 @@
 [rules.swiftpm-cache]
 strategy = "tool"
 cmd = "swift package purge-cache"
-cmd_aggressive = "swift package purge-cache"
 
 [rules.swiftpm-build]
 strategy = "marker"

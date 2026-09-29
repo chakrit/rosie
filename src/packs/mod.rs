@@ -18,16 +18,16 @@ use std::time::SystemTime;
 
 use actions::download_archive::DownloadArchive;
 use actions::install_pack::InstallPack;
-use actions::settle_packs::SettlePacks;
 use conflict::PackRules;
 
 use crate::fs::Backend;
 
 pub use actions::remove_pack::RemovePack;
+pub use actions::settle_packs::{SettlePacks, Settled};
 pub use age::{AgeWarning, MONTH, age_warning};
 pub use archive::{Archive, RuleFile};
 pub use conflict::Conflict;
-pub use error::{Error, Refusal};
+pub use error::{Error, Refusal, Stray};
 pub use network::{Https, Network};
 pub use source::Source;
 pub use store::{Installed, Store};
@@ -69,12 +69,12 @@ pub fn pull<B: Backend, N: Network>(
     requested: &Source,
     now: SystemTime,
 ) -> Result<Pulled, Error> {
-    SettlePacks.run(store)?;
+    let settled = SettlePacks.run(store)?;
     let source = &store.resolve(requested)?;
-    refuse_name_taken(store, source)?;
+    refuse_name_taken(&settled, source)?;
 
     let archive = DownloadArchive { source }.run(network)?;
-    install(store, source, &archive, now)
+    install(&settled, source, &archive, now)
 }
 
 /// Pulls the default source when no pack is installed. An offline failure is returned
@@ -84,8 +84,7 @@ pub fn first_run<B: Backend, N: Network>(
     network: &N,
     now: SystemTime,
 ) -> Result<FirstRun, Error> {
-    SettlePacks.run(store)?;
-    if !store.sources()?.is_empty() {
+    if !SettlePacks.run(store)?.sources()?.is_empty() {
         return Ok(FirstRun::Ready);
     }
 
@@ -100,20 +99,20 @@ pub fn seed_config<B: Backend, N: Network>(
     network: &N,
     now: SystemTime,
 ) -> Result<Seed, Error> {
-    SettlePacks.run(store)?;
-    let first_run_due = store.sources()?.is_empty();
+    let settled = SettlePacks.run(store)?;
+    let first_run_due = settled.sources()?.is_empty();
     let source = &match first_run_due {
         true => store.resolve(&Source::default())?,
         false => Source::default(),
     };
     if first_run_due {
-        refuse_name_taken(store, source)?;
+        refuse_name_taken(&settled, source)?;
     }
 
     let archive = DownloadArchive { source }.run(network)?;
     let config = archive.config()?.to_owned();
     let first_run = match first_run_due {
-        true => FirstRun::Pulled(install(store, source, &archive, now)?),
+        true => FirstRun::Pulled(install(&settled, source, &archive, now)?),
         false => FirstRun::Ready,
     };
 
@@ -122,12 +121,13 @@ pub fn seed_config<B: Backend, N: Network>(
 
 /// Checks a downloaded pack against the other installed packs, then installs it.
 fn install<B: Backend>(
-    store: &Store<B>,
+    settled: &Settled<B>,
     source: &Source,
     archive: &Archive,
     now: SystemTime,
 ) -> Result<Pulled, Error> {
-    let installed = store.sources()?;
+    let store = settled.store();
+    let installed = settled.sources()?;
     let pulled_rules = PackRules::load(source, archive.rules())?;
     let conflicts = conflicts_with_others(store, source, &pulled_rules, &installed)?;
 
@@ -147,8 +147,8 @@ fn install<B: Backend>(
 /// source the volume folds onto an installed pack would respell that pack and its rules.
 /// So a source is refused when the volume finds another installed source under its pack
 /// name; the refusal names that pack as it is spelled on disk.
-fn refuse_name_taken<B: Backend>(store: &Store<B>, source: &Source) -> Result<(), Error> {
-    let named = store.sources_named(source.pack().as_str())?;
+fn refuse_name_taken<B: Backend>(settled: &Settled<B>, source: &Source) -> Result<(), Error> {
+    let named = settled.sources_named(source.pack().as_str())?;
     let taken = named.into_iter().find(|other| other != source);
 
     match taken {

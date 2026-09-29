@@ -55,14 +55,23 @@ pub enum Error {
     InvalidRules(#[source] Box<rules::Error>),
 
     #[error(
-        "{error}; moving the previous pack back also failed ({restore}); it is kept at {set_aside} and rosie puts it back on its next run",
+        "{error}; putting the previous pack back also failed ({restore}); it is kept at {set_aside} and rosie tries again the next time it reads its packs",
         set_aside = set_aside.display(),
     )]
     Restore {
         #[source]
         error: Box<fs::Error>,
-        restore: Box<fs::Error>,
+        restore: Box<Error>,
         set_aside: PathBuf,
+    },
+
+    #[error(
+        "{error}; the previous pack is back in place, but clearing the copies beside it failed ({clear}); rosie tries again the next time it reads its packs"
+    )]
+    Leftover {
+        #[source]
+        error: Box<fs::Error>,
+        clear: Box<Error>,
     },
 
     #[error("the pull time {path} is unreadable; run rosie rules pull to refresh the pack", path = path.display())]
@@ -80,11 +89,36 @@ pub enum Error {
     )]
     StrayOwnerFolder { owner: String, path: PathBuf },
 
+    #[error(
+        "{path} is in the packs folder but is not a pack: {problem}; move it out of there",
+        path = path.display(),
+    )]
+    StrayEntry { path: PathBuf, problem: Stray },
+
+    #[error("{path} is a {found}, not a folder", path = path.display())]
+    NotAFolder { path: PathBuf, found: &'static str },
+
     #[error("no pack named {pack} is installed")]
     NotInstalled { pack: String },
 
     #[error("several installed packs are named {pack}: {sources}", sources = join(sources))]
     Ambiguous { pack: String, sources: Vec<Source> },
+}
+
+/// Why an entry of the packs folder is not a pack (`docs/spec/rules.md#packs`).
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum Stray {
+    #[error("its name is not UTF-8")]
+    NotUtf8,
+
+    #[error("its name is not a valid pack name: {0}")]
+    BadName(rules::NameError),
+
+    #[error("the pack name `user` is reserved for your own rules")]
+    ReservedName,
+
+    #[error("it is a {}, not a folder", .0.label())]
+    NotAFolder(fs::FileKind),
 }
 
 /// Why an archive entry is refused (`docs/spec/safety.md#rosies-own-data`).

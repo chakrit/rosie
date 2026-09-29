@@ -1,8 +1,9 @@
+use std::panic::{self, AssertUnwindSafe};
 use std::path::{Path, PathBuf};
 
 use super::*;
 use crate::fs::fake::{Call, FakeBackend};
-use crate::fs::{Argv, CommandOutput, Exit};
+use crate::fs::{Argv, CommandOutput, Exit, Op};
 use crate::plan::{Outcome, Size, Tally};
 use crate::run::outcomes::{Key, Record};
 use crate::run::{ItemResult, OutputWindow};
@@ -90,6 +91,13 @@ fn items() -> String {
          [[delete]]\npath = \"{PLIST}\"\ntype = \"file\"\nsize = 4096\nrules = [\"app/x\"]\nstatus = \"ticked\"\nsudo = true\n\
          [[delete.bootout]]\nplist = \"{PLIST}\"\ndomain = \"system\"\n\
          [[delete]]\npath = \"/Library/Caches/other\"\ntype = \"folder\"\nsize = 7\nrules = [\"r\"]\nstatus = \"ticked\"\nsudo = true\n"
+    )
+}
+
+/// A `sudo` delete of a file, for the child.
+fn root_file(path: &str) -> String {
+    format!(
+        "[[delete]]\npath = \"{path}\"\ntype = \"file\"\nsize = 4096\nrules = [\"r\"]\nstatus = \"ticked\"\nsudo = true\n"
     )
 }
 
@@ -187,7 +195,7 @@ fn runs_system_tools_by_absolute_path() {
 }
 
 #[test]
-fn reports_each_item_to_the_run_before_the_next_one_acts() {
+fn reports_a_bootout_to_the_run_before_the_deletes_act() {
     let fake = machine("0", SUDO_CHAIN);
     let mut out = Snapshots {
         fake: &fake,
@@ -236,6 +244,44 @@ impl Write for Snapshots<'_> {
     fn flush(&mut self) -> io::Result<()> {
         Ok(())
     }
+}
+
+#[test]
+fn a_child_that_crashes_mid_part_reports_the_deletes_it_finished_as_done() {
+    let fake = machine("0", SUDO_CHAIN);
+    let finished = "/Library/LaunchDaemons/a.plist";
+    let crashing = "/Library/LaunchDaemons/b.plist";
+    for path in [finished, crashing] {
+        fake.add_file(path, "<plist/>");
+        fake.chown_with_ancestors(path, ROOT_UID);
+    }
+    fake.crash_on(crashing, Op::RemoveFile);
+    let plan = format!(
+        "version = 1\n{}{}",
+        root_file(finished),
+        root_file(crashing)
+    );
+
+    let mut out = Vec::new();
+    let crashed = panic::catch_unwind(AssertUnwindSafe(|| {
+        run_elevated(
+            &fake,
+            invocation(pipe_plan(&plan)),
+            &mut Recorder::default(),
+            &mut out,
+        )
+    }));
+
+    assert!(crashed.is_err(), "the child crashed");
+    assert!(!fake.exists(finished));
+    let reported = outcomes::decode(&out).expect("the records written before the crash");
+    assert_eq!(
+        reported,
+        vec![Record {
+            key: Key::Path(PathBuf::from(finished)),
+            outcome: Outcome::Done,
+        }]
+    );
 }
 
 #[test]

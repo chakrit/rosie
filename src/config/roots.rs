@@ -13,7 +13,8 @@ pub fn list(config: &Config) -> &[PathBuf] {
 
 /// `roots add <path>`: refuses a path with a symlink component or a spelling that does
 /// not match the disk, naming the real path (`docs/spec/safety.md#symlinks`). The entry
-/// is written as typed, keeping a leading `~`. Adding an already-listed root writes
+/// written is the checked path, with `.` and `..` resolved, spelled under `~` when the
+/// user typed `~` and the path is still under home. Adding an already-listed root writes
 /// nothing.
 pub fn add<B: Backend>(
     gate: &Gate<B>,

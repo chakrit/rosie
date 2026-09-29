@@ -217,7 +217,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
 }
 
 #[test]
-fn a_wrapper_holding_several_apps_has_no_id() {
+fn a_wrapper_holding_several_apps_has_no_info_plist() {
     let fake = FakeBackend::new();
     install_wrapped_app(&fake, NPLAYER, "com.newin.nplayer", "nPlayer");
     fake.add_file(
@@ -331,7 +331,7 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
     );
 }
 
-fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scanned, Error> {
+fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scan, Error> {
     scan_app(
         &gate(fake, &ALL_ROOTS),
         Path::new(NPLAYER),
@@ -358,7 +358,7 @@ fn entries_other_than_apps_in_a_wrapper_do_not_count_as_wrapped_apps() {
 }
 
 #[test]
-fn a_wrapped_app_without_an_info_plist_has_no_id() {
+fn a_wrapped_app_without_an_info_plist_fails_the_scan() {
     let fake = FakeBackend::new();
     fake.add_sized_file(format!("{NPLAYER}/Wrapper/nPlayer.app/nPlayer"), 1 << 20);
     quiet(&fake);

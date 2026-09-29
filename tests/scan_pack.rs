@@ -61,7 +61,7 @@ fn workspace() -> FakeBackend {
     fake.add_file("/Users/me/code/loose/requirements.txt", "");
     fake.add_file("/Users/me/code/loose/venv/bin/python", "x");
 
-    // caches the pack names by fixed path, one of them under the scanned folder.
+    // caches the pack names by fixed path.
     fake.add_file("/Users/me/.npm/_cacache/index", "x");
     fake.add_file("/Users/me/.cargo/registry/cache/crate.crate", "x");
     fake.add_file("/Users/me/Library/Caches/pip/http/x", "x");

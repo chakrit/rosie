@@ -1,7 +1,8 @@
 //! `Sizer` is public so another mode can size an entry it found by its own means,
 //! without going through `scan::Scanner`. This builds one from outside the `scan`
 //! module, the way such a caller would: the entry comes from `Entry::lstat`, the only
-//! public way to get one, which refuses what must never be sized.
+//! public way to get one, which refuses what must never be sized: a path through a
+//! symlink, a dataless placeholder, and the root of a mounted volume.
 
 mod scan_fixture;
 
@@ -46,6 +47,21 @@ fn a_placeholder_entry_is_refused() {
     assert!(
         matches!(&result, Err(NotAnEntry::Placeholder { path }) if path == Path::new(&format!("{HOME}/cloud"))),
         "expected a placeholder refusal, got {result:?}"
+    );
+}
+
+#[test]
+fn a_mount_root_entry_is_refused_so_no_whole_volume_is_sized() {
+    let fake = fake_home();
+    fake.add_sized_file(format!("{HOME}/disk/big"), 5000);
+    fake.mount(format!("{HOME}/disk"), 7);
+    let gate = gate(&fake);
+
+    let result = Entry::lstat(&gate, Path::new(&format!("{HOME}/disk")));
+
+    assert!(
+        matches!(&result, Err(NotAnEntry::Mount { path }) if path == Path::new(&format!("{HOME}/disk"))),
+        "expected a mount refusal, got {result:?}"
     );
 }
 

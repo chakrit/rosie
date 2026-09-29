@@ -47,8 +47,7 @@ fn writes_reads_and_overwrites_files(h: &impl Harness) {
     assert_eq!(h.backend().read_file(&file).expect("read"), b"second");
 }
 
-// Create-new writes let rosie notice two archive names the volume folds into one
-// (`docs/spec/safety.md#rosies-own-data`).
+// Create-new writes let rosie notice two archive names the volume folds into one.
 
 fn creating_a_file_refuses_a_name_taken_under_another_case(h: &impl Harness) {
     let first = h.root().join("ok.toml");
@@ -272,8 +271,9 @@ fn gate_deletes_a_tree_with_links_and_read_only_folders(h: &impl Harness) {
     };
     let gate = Gate::new(backend, bounds).expect("gate");
 
-    gate.delete(&target).expect("delete tree");
-    let refused = gate.delete(&outside);
+    let admitted = gate.admit_delete(&target).expect("admit tree");
+    gate.delete(admitted).expect("delete tree");
+    let refused = gate.admit_delete(&outside);
 
     assert_eq!(error_kind(backend.lstat(&target)), ErrorKind::NotFound);
     assert_eq!(
@@ -283,8 +283,8 @@ fn gate_deletes_a_tree_with_links_and_read_only_folders(h: &impl Harness) {
     assert!(matches!(refused, Err(Error::OutsideRoots { .. })));
 }
 
-// Paths through symlinks. The gate refuses them for mutation, but reads and the
-// backend itself pass them to the kernel, which follows every non-final link.
+// Paths through symlinks. The backend passes them to the kernel, which follows every
+// non-final link.
 
 fn paths_through_a_linked_folder_reach_its_target(h: &impl Harness) {
     let backend = h.backend();

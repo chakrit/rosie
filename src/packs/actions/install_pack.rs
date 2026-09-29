@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use super::clear_copy::{ClearCopy, Discarded};
-use super::settle_pack::SettlePack;
+use super::settle_pack::{SettlePack, Unsettled};
 use crate::fs::{self, Backend, Gate};
 use crate::packs::archive::RuleFile;
 use crate::packs::error::Error;
@@ -14,8 +14,9 @@ use crate::packs::store::{self, Store};
 ///
 /// The files are written to a staging folder beside the pack, then swapped in by two
 /// renames: the old pack aside, the new pack in. The pack folder never holds a mix of
-/// old and new files; between the renames it is briefly absent, and a failed second
-/// rename moves the old pack back. Every crash point is listed on [`Store`].
+/// old and new files; between the renames it is briefly absent, and when the second
+/// rename fails after the first, settling the pack moves the old pack back before it
+/// clears the staging folder. Every crash point is listed on [`Store`].
 pub struct InstallPack<'a> {
     pub source: &'a Source,
     pub rules: &'a [RuleFile],
@@ -32,11 +33,12 @@ impl InstallPack<'_> {
         let staging = store.staging_dir(self.source);
         self.stage(store.gate(), &staging)?;
         self.refuse_reserved(store)?;
-        self.swap_in(store, &staging)?;
+        self.swap_in(store, &settle, &staging)?;
 
         // The swap leaves the old pack set aside beside the new one; settling discards
         // it through the never-restored name.
-        settle.run(store)
+        settle.run(store)?;
+        Ok(())
     }
 
     /// Writes the rule files and the pull time into the fresh `staging` folder, each as
@@ -72,7 +74,12 @@ impl InstallPack<'_> {
         })
     }
 
-    fn swap_in<B: Backend>(&self, store: &Store<B>, staging: &Path) -> Result<(), Error> {
+    fn swap_in<B: Backend>(
+        &self,
+        store: &Store<B>,
+        settle: &SettlePack,
+        staging: &Path,
+    ) -> Result<(), Error> {
         let gate = store.gate();
         let pack = store.pack_dir(self.source);
         let set_aside = store.set_aside_dir(self.source);
@@ -85,12 +92,17 @@ impl InstallPack<'_> {
         match (installed, replacing) {
             (Ok(()), _) => Ok(()),
             (Err(error), false) => Err(error.into()),
-            (Err(error), true) => match gate.rename_own(&set_aside, &pack) {
+            // With the pack folder absent, settling puts `.old` back, then clears `.new`.
+            (Err(error), true) => match settle.run(store) {
                 Ok(()) => Err(error.into()),
-                Err(restore) => Err(Error::Restore {
+                Err(Unsettled::Restore(restore)) => Err(Error::Restore {
                     error: Box::new(error),
                     restore: Box::new(restore),
                     set_aside,
+                }),
+                Err(Unsettled::Clear(clear)) => Err(Error::Leftover {
+                    error: Box::new(error),
+                    clear: Box::new(clear),
                 }),
             },
         }

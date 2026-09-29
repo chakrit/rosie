@@ -1,19 +1,20 @@
 //! `rosie clean orphans`: leftovers of apps no longer installed
 //! (`docs/spec/app.md#rosie-clean-orphans`).
 
+use super::Error;
 use super::bundle::{installed_apps, no_id_report};
 use super::locations::leftover_locations;
 use super::matching::{mentions_id, reads_as_bundle_id};
 use super::search::Search;
-use super::{Error, Scanned};
 use crate::fs::{Backend, Gate, Home};
 use crate::plan::{AggressiveItems, Twin};
-use crate::scan::Mounts;
+use crate::process::ProcessTable;
+use crate::scan::{Mounts, Scan};
 
 const RULE: &str = "orphans";
 
 /// Scans the leftover locations for entries named by the bundle ID of an app that is not
-/// installed. Every orphan is aggressive.
+/// installed. Every orphan is aggressive; one a process executes from is refused.
 ///
 /// An installed app rosie cannot identify fails the scan: its leftovers would otherwise
 /// be listed as orphans. An installed app with no bundle-ID key cannot be matched to its
@@ -24,7 +25,7 @@ pub fn scan_orphans<B>(
     home: &Home,
     aggressive: AggressiveItems,
     mounts: Mounts,
-) -> Result<Scanned, Error>
+) -> Result<Scan, Error>
 where
     B: Backend + Sync,
 {
@@ -33,7 +34,8 @@ where
         return Err(unidentified.into_error());
     }
 
-    let mut search = Search::new(gate, home, mounts, aggressive);
+    let processes = ProcessTable::query(gate)?;
+    let mut search = Search::new(gate, home, mounts, &processes, aggressive);
     for path in &installed.no_id {
         search.add_report(no_id_report(path)?);
     }

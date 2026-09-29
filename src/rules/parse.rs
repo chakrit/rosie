@@ -173,14 +173,7 @@ fn folder(raw: &RawRule, detection: Detection) -> Result<Shape, Problem> {
         .transpose()?;
     let target = Twin::from_parts(normal, aggressive)
         .ok_or(Problem::Missing("`target` or `target_aggressive`"))?;
-    if let Twin::Both { normal, aggressive } = &target
-        && normal == aggressive
-    {
-        return Err(Problem::TwinOverlap {
-            normal: "target",
-            aggressive: "target_aggressive",
-        });
-    }
+    refuse_equal_twins(&target, "target", "target_aggressive")?;
     Ok(Shape::Folder(FolderRule { target, detection }))
 }
 
@@ -249,7 +242,22 @@ fn tool(raw: &RawRule) -> Result<Shape, Problem> {
         .transpose()?;
     let cmd = Twin::from_parts(normal, aggressive)
         .ok_or(Problem::Missing("`cmd` or `cmd_aggressive`"))?;
+    refuse_equal_twins(&cmd, "cmd", "cmd_aggressive")?;
     Ok(Shape::Tool(cmd))
+}
+
+fn refuse_equal_twins<T: PartialEq>(
+    twin: &Twin<T>,
+    normal: &'static str,
+    aggressive: &'static str,
+) -> Result<(), Problem> {
+    match twin {
+        Twin::Both {
+            normal: value,
+            aggressive: other,
+        } if value == other => Err(Problem::TwinOverlap { normal, aggressive }),
+        _ => Ok(()),
+    }
 }
 
 // fields
@@ -304,7 +312,7 @@ fn fixed_paths(field: &'static str, texts: &[String]) -> Result<FixedPaths, Prob
 
 /// Splits a command on spaces into argv (`docs/spec/rules.md#tool-strategy`). It runs
 /// without a shell, so only characters that mean the same with or without one are
-/// admitted; this is the one check of a rule's command.
+/// admitted. This is the one parser of a rule's command: the plan takes the argv as is.
 fn command(field: &'static str, text: &str) -> Result<Argv, Problem> {
     let foreign = text
         .chars()
@@ -778,6 +786,14 @@ mod tests {
 
         let text = "[rules.r]\nstrategy = \"path\"\npaths = [\"~/a\", \"~/b\"]\n\
                      paths_aggressive = [\"~/c\", \"~/a\"]";
+        assert!(
+            matches!(problem(text), Problem::TwinOverlap { .. }),
+            "{}",
+            problem(text)
+        );
+
+        let text = "[rules.r]\nstrategy = \"tool\"\ncmd = \"x  prune\"\n\
+                     cmd_aggressive = \"x prune \"";
         assert!(
             matches!(problem(text), Problem::TwinOverlap { .. }),
             "{}",

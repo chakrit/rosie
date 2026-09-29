@@ -67,7 +67,7 @@ pub(super) fn without_root(document: &DocumentMut, index: usize) -> DocumentMut 
 }
 
 /// The prefix a new last entry takes: a line of its own at the last entry's indent in a
-/// multi-line array, a single space otherwise.
+/// multi-line array, nothing in an empty array, a single space otherwise.
 fn next_entry_prefix(roots: &Array) -> String {
     let last_prefix = roots.iter().last().map(prefix_of);
     match last_prefix

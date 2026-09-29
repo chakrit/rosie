@@ -1,9 +1,12 @@
 //! Builds a plan from what a scan found (`docs/spec/plan.md#plan-file`).
 //!
-//! - Path entries are keyed by path and list every rule that matched that path.
+//! - Path entries are keyed by path and list every rule that matched that path. Each
+//!   path is an [`IdlePath`], one the process table admitted: no plan this builder
+//!   makes holds an item a process executes from
+//!   (`docs/spec/safety.md#running-processes`).
 //! - Nested matches collapse into the outer one, which takes over their launch-job
 //!   bootouts and runs elevated when any of them would.
-//! - Tool rules with an identical trimmed `cmd` dedupe into one entry.
+//! - Tool rules with an identical argv dedupe into one entry.
 //! - Aggressive items are unticked unless `--aggressive` is given, which also makes a
 //!   rule's `cmd_aggressive` replace its `cmd`; items outside the roots are blocked.
 
@@ -14,6 +17,8 @@ use super::{
     Bootout, Command, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
     Report, RunAs, Selection, Size, Status, Tool, check_path,
 };
+use crate::fs::Argv;
+use crate::process::IdlePath;
 
 /// Whether `--aggressive` was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,14 +34,15 @@ pub enum Twin {
     Aggressive,
 }
 
-/// A tool rule's commands, as its `cmd` and `cmd_aggressive` fields give them.
+/// A tool rule's commands, as its `cmd` and `cmd_aggressive` fields give them, split
+/// into argv by the rule parser.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolCmds<'a> {
-    Normal(&'a str),
-    Aggressive(&'a str),
+    Normal(&'a Argv),
+    Aggressive(&'a Argv),
     Twins {
-        cmd: &'a str,
-        cmd_aggressive: &'a str,
+        cmd: &'a Argv,
+        cmd_aggressive: &'a Argv,
     },
 }
 
@@ -50,7 +56,7 @@ pub enum Reach {
 /// One rule matching one path during a scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathMatch {
-    pub path: PathBuf,
+    pub path: IdlePath,
     pub kind: ItemKind,
     pub size: Size,
     pub run_as: RunAs,
@@ -62,8 +68,7 @@ pub struct PathMatch {
 pub struct PlanBuilder {
     aggressive: AggressiveItems,
     deletes: BTreeMap<PathBuf, Delete>,
-    /// Keyed by the trimmed `cmd` text.
-    tools: Vec<(String, Tool)>,
+    tools: Vec<Tool>,
     receipts: Vec<Receipt>,
     reports: Vec<Report>,
 }
@@ -91,7 +96,7 @@ impl PlanBuilder {
         // Until `build` collapses nested entries, an entry holds only its own plist's bootout.
         let known = self
             .deletes
-            .get(&plist.path)
+            .get(plist.path.as_path())
             .and_then(|entry| entry.bootouts.first());
         if let Some(bootout) = known
             && bootout.domain != domain
@@ -113,34 +118,31 @@ impl PlanBuilder {
 
     /// Adds a tool rule's commands. Without `--aggressive` its `cmd` is ticked and its
     /// `cmd_aggressive` listed unticked; with it, `cmd_aggressive` replaces `cmd`. A
-    /// command whose trimmed text an earlier rule already added gains the rule instead of
-    /// a second entry.
+    /// command whose argv an earlier rule already added gains the rule instead of a
+    /// second entry.
     pub fn add_tool(&mut self, rule: &str, cmds: ToolCmds<'_>) -> Result<(), Error> {
-        let fields = match cmds {
-            ToolCmds::Normal(cmd) => vec![(cmd, Twin::Normal)],
-            ToolCmds::Aggressive(cmd) => vec![(cmd, Twin::Aggressive)],
-            ToolCmds::Twins {
-                cmd,
-                cmd_aggressive,
-            } => vec![(cmd, Twin::Normal), (cmd_aggressive, Twin::Aggressive)],
-        };
-        let replaced = match (cmds, self.aggressive) {
-            (ToolCmds::Twins { .. }, AggressiveItems::Ticked) => Some(Twin::Normal),
-            _ => None,
+        let fields = match (cmds, self.aggressive) {
+            (ToolCmds::Normal(cmd), _) => vec![(cmd, Twin::Normal)],
+            (ToolCmds::Aggressive(cmd), _) => vec![(cmd, Twin::Aggressive)],
+            (ToolCmds::Twins { cmd_aggressive, .. }, AggressiveItems::Ticked) => {
+                vec![(cmd_aggressive, Twin::Aggressive)]
+            }
+            (
+                ToolCmds::Twins {
+                    cmd,
+                    cmd_aggressive,
+                },
+                AggressiveItems::Unticked,
+            ) => vec![(cmd, Twin::Normal), (cmd_aggressive, Twin::Aggressive)],
         };
 
-        // Every field is checked, including one `--aggressive` replaces, so a broken rule
-        // fails the same way with or without the flag.
         let commands = fields
             .into_iter()
-            .map(|(cmd, twin)| Command::split(rule, cmd).map(|command| (cmd.trim(), command, twin)))
+            .map(|(argv, twin)| Command::from_argv(argv).map(|command| (command, twin)))
             .collect::<Result<Vec<_>, _>>()?;
 
-        let listed = commands
-            .into_iter()
-            .filter(|(_, _, twin)| Some(*twin) != replaced);
-        for (key, command, twin) in listed {
-            self.add_command(rule, key, command, twin);
+        for (command, twin) in commands {
+            self.add_command(rule, command, twin);
         }
         Ok(())
     }
@@ -160,7 +162,7 @@ impl PlanBuilder {
     pub fn build(self) -> Plan {
         Plan {
             deletes: Deletes::collapsing(self.deletes),
-            tools: self.tools.into_iter().map(|(_, tool)| tool).collect(),
+            tools: self.tools,
             receipts: self.receipts,
             reports: self.reports,
         }
@@ -169,11 +171,12 @@ impl PlanBuilder {
     // entries
 
     fn add_delete(&mut self, found: PathMatch) -> Result<&mut Delete, Error> {
-        check_path(&found.path)?;
+        check_path(found.path.as_path())?;
 
         let status = self.path_status(found.reach, found.twin);
-        let entry = self.deletes.entry(found.path.clone()).or_insert(Delete {
-            path: found.path,
+        let path = found.path.into_path();
+        let entry = self.deletes.entry(path.clone()).or_insert(Delete {
+            path,
             kind: found.kind,
             size: found.size,
             rules: Vec::new(),
@@ -190,11 +193,10 @@ impl PlanBuilder {
         Ok(entry)
     }
 
-    /// `key` is the trimmed `cmd` text that tools dedupe on.
-    fn add_command(&mut self, rule: &str, key: &str, command: Command, twin: Twin) {
+    fn add_command(&mut self, rule: &str, command: Command, twin: Twin) {
         let selection = self.selection(twin);
 
-        if let Some((_, tool)) = self.tools.iter_mut().find(|(seen, _)| seen == key) {
+        if let Some(tool) = self.tools.iter_mut().find(|tool| tool.command == command) {
             tool.selection = strongest_selection(tool.selection, selection);
             if !tool.rules.iter().any(|seen| seen == rule) {
                 tool.rules.push(rule.to_owned());
@@ -202,12 +204,11 @@ impl PlanBuilder {
             return;
         }
 
-        let tool = Tool {
+        self.tools.push(Tool {
             rules: vec![rule.to_owned()],
             command,
             selection,
-        };
-        self.tools.push((key.to_owned(), tool));
+        });
     }
 
     // ticking
@@ -248,10 +249,11 @@ fn strongest_selection(current: Selection, added: Selection) -> Selection {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::plan::{Runnable, argv};
 
     fn found(path: &str, rule: &str, twin: Twin) -> PathMatch {
         PathMatch {
-            path: PathBuf::from(path),
+            path: crate::plan::idle(path),
             kind: ItemKind::Folder,
             size: Size::bytes(1000),
             run_as: RunAs::User,
@@ -283,12 +285,16 @@ mod tests {
             .collect()
     }
 
-    /// The plists a run boots out, in order.
+    /// The plists a run boots out: the user's part, then the elevated part.
     fn runnable_bootouts(plan: &Plan) -> Vec<&str> {
-        plan.runnable_as(RunAs::User)
-            .bootouts
-            .iter()
-            .map(|bootout| bootout.plist.to_str().expect("utf-8"))
+        [RunAs::User, RunAs::Sudo]
+            .into_iter()
+            .flat_map(|run_as| {
+                plan.runnable_as(run_as)
+                    .bootouts()
+                    .map(|bootout| bootout.plist.to_str().expect("utf-8"))
+                    .collect::<Vec<_>>()
+            })
             .collect()
     }
 
@@ -487,12 +493,12 @@ mod tests {
                 found("/w/x\0.plist", "rosie/launch", Twin::Normal),
                 LaunchDomain::System,
             ),
-            builder.add_tool("rosie/tool", ToolCmds::Normal("tool clean\0 --all")),
+            builder.add_tool("rosie/tool", ToolCmds::Normal(&argv("tool clean\0 --all"))),
             builder.add_tool(
                 "rosie/tool",
                 ToolCmds::Twins {
-                    cmd: "tool clean",
-                    cmd_aggressive: "tool\0 clean --all",
+                    cmd: &argv("tool clean"),
+                    cmd_aggressive: &argv("tool\0 clean --all"),
                 },
             ),
             builder.add_receipt("com.x\0.pkg", Twin::Normal),
@@ -533,6 +539,44 @@ mod tests {
                 domain: LaunchDomain::Gui(501),
             }]
         );
+    }
+
+    // A user's folder holding a `system` job's plist belongs to the elevated part: the
+    // user's process neither boots that job out, which needs root, nor deletes the
+    // folder before the elevated part has.
+    #[test]
+    fn a_user_runnable_never_carries_a_system_bootout() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        builder
+            .add_path(found("/U/app", "app/x", Twin::Normal))
+            .expect("valid match");
+        builder
+            .add_launch_job(
+                plist("/U/app/com.y.plist", Twin::Normal),
+                LaunchDomain::System,
+            )
+            .expect("valid plist");
+        builder
+            .add_launch_job(
+                plist("/U/agents/com.x.plist", Twin::Normal),
+                LaunchDomain::Gui(501),
+            )
+            .expect("valid plist");
+        let plan = builder.build();
+
+        let user = plan.runnable_as(RunAs::User);
+        let sudo = plan.runnable_as(RunAs::Sudo);
+
+        let plists = |runnable: &Runnable| -> Vec<PathBuf> {
+            runnable.bootouts().map(|b| b.plist.clone()).collect()
+        };
+        let deleted = |runnable: &Runnable| -> Vec<PathBuf> {
+            runnable.deletes().iter().map(|d| d.path.clone()).collect()
+        };
+        assert_eq!(plists(&user), [PathBuf::from("/U/agents/com.x.plist")]);
+        assert_eq!(deleted(&user), [PathBuf::from("/U/agents/com.x.plist")]);
+        assert_eq!(plists(&sudo), [PathBuf::from("/U/app/com.y.plist")]);
+        assert_eq!(deleted(&sudo), Vec::<PathBuf>::new());
     }
 
     #[test]
@@ -604,21 +648,21 @@ mod tests {
     // tools
 
     #[test]
-    fn tools_with_the_same_trimmed_cmd_dedupe_into_one_entry() {
+    fn tools_with_the_same_argv_dedupe_into_one_entry() {
         let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let prune = argv("docker system prune --force");
+        let prune_all = argv("docker system prune --all --force");
+        let cleanup = argv("brew cleanup");
         let adds = [
             (
                 "rosie/docker",
                 ToolCmds::Twins {
-                    cmd: "docker system prune --force",
-                    cmd_aggressive: "docker system prune --all --force",
+                    cmd: &prune,
+                    cmd_aggressive: &prune_all,
                 },
             ),
-            (
-                "user/docker",
-                ToolCmds::Normal("  docker system prune --force\n"),
-            ),
-            ("rosie/brew", ToolCmds::Normal("brew cleanup")),
+            ("user/docker", ToolCmds::Normal(&prune)),
+            ("rosie/brew", ToolCmds::Normal(&cleanup)),
         ];
         for (rule, cmds) in adds {
             builder.add_tool(rule, cmds).expect("valid command");
@@ -652,12 +696,12 @@ mod tests {
     fn with_aggressive_cmd_aggressive_replaces_cmd() {
         let mut builder = PlanBuilder::new(AggressiveItems::Ticked);
         let twins = ToolCmds::Twins {
-            cmd: "docker system prune --force",
-            cmd_aggressive: "docker system prune --all --force",
+            cmd: &argv("docker system prune --force"),
+            cmd_aggressive: &argv("docker system prune --all --force"),
         };
         builder.add_tool("rosie/docker", twins).expect("valid");
         builder
-            .add_tool("rosie/brew", ToolCmds::Normal("brew cleanup"))
+            .add_tool("rosie/brew", ToolCmds::Normal(&argv("brew cleanup")))
             .expect("valid");
 
         let plan = builder.build();
@@ -677,41 +721,5 @@ mod tests {
                 ),
             ]
         );
-    }
-
-    #[test]
-    fn refuses_an_empty_tool_command() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
-
-        let refused = builder.add_tool("rosie/blank", ToolCmds::Normal("   "));
-
-        assert!(
-            matches!(refused, Err(Error::EmptyCommand { ref rule }) if rule == "rosie/blank"),
-            "{refused:?}"
-        );
-    }
-
-    #[test]
-    fn refuses_a_tool_command_with_quotes_or_backslashes_naming_the_rule() {
-        let quoted = [
-            r#"find /tmp -name "a b" -delete"#,
-            "find /tmp -name 'a b' -delete",
-            r"find /tmp -name a\ b -delete",
-        ];
-
-        for cmd in quoted {
-            let mut builder = PlanBuilder::new(AggressiveItems::Ticked);
-            let twins = ToolCmds::Twins {
-                cmd,
-                cmd_aggressive: "tool clean --all",
-            };
-
-            let refused = builder.add_tool("user/find", twins);
-
-            assert!(
-                matches!(refused, Err(Error::QuotedCommand { ref rule, .. }) if rule == "user/find"),
-                "{cmd}: {refused:?}"
-            );
-        }
     }
 }

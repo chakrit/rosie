@@ -20,7 +20,6 @@ paths_aggressive = ["~/.yarn/berry/cache"]
 [rules.pnpm-store]
 strategy = "tool"
 cmd = "pnpm store prune"
-cmd_aggressive = "pnpm store prune"
 
 [rules.bun-cache]
 strategy = "path"

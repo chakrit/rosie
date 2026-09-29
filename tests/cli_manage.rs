@@ -4,8 +4,8 @@ mod cli_fixture;
 mod pack_fixture;
 mod tarball;
 
-use cli_fixture::{CONFIG_FILE, CWD, HOME, PACK, Sandbox, Script};
-use pack_fixture::{Canned, url_of};
+use cli_fixture::{CONFIG_FILE, CWD, HOME, NODE_RULE, PACK, Sandbox, Script};
+use pack_fixture::{Canned, ROSIE_SET_ASIDE, url_of};
 use rosie::cli::ExitStatus;
 use rosie::fs::Argv;
 use tarball::Tarball;
@@ -63,6 +63,27 @@ fn rules_remove_without_a_pack_offers_the_pulled_packs() {
     ran.assert_status(ExitStatus::Success);
     assert_eq!(ran.asked, ["Choose a pack: rosie (chakrit/rosie)"]);
     assert!(!sandbox.exists(PACK));
+}
+
+/// A pull that failed mid-swap can leave the only pack at its set-aside copy, not at
+/// its normal name; the bare picker settles it first, the same as the named form.
+#[test]
+fn rules_remove_without_a_pack_settles_a_set_aside_pack_first() {
+    let sandbox = Sandbox::bare();
+    sandbox.write_config(&format!("roots = [\"{HOME}\"]\n"));
+    sandbox
+        .fake
+        .add_file(format!("{ROSIE_SET_ASIDE}/node.toml"), NODE_RULE);
+    sandbox
+        .fake
+        .add_file(format!("{ROSIE_SET_ASIDE}/.pulled"), "1800000000");
+
+    let ran = sandbox.run_with(Script::terminal().pick(0), &["rules", "remove"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(ran.asked, ["Choose a pack: rosie (chakrit/rosie)"]);
+    assert!(!sandbox.exists(PACK));
+    assert!(!sandbox.exists(ROSIE_SET_ASIDE));
 }
 
 #[test]

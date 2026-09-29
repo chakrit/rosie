@@ -3,7 +3,11 @@
 //! `docs/decisions/2026-09-29-elevation-without-ffi.md`).
 //!
 //! Shared by the scanner, app mode, and the runner: all of them refuse items a process
-//! executes from, and the elevated entry walks the parent chain to find `sudo`.
+//! executes from, and the elevated entry walks the parent chain to find `sudo`. A scanned
+//! plan's path entry is built only from an [`IdlePath`], which only
+//! [`ProcessTable::admit`] issues, so no scan mode can plan an item without passing it
+//! through the table. A plan read from a file carries no such proof; the runner checks
+//! its deletes against the table before running them.
 //!
 //! [`run_tool`] and [`run_tool_text`] are the one way rosie reads a read-only system
 //! tool's output, here and in app mode (`plutil`, `pkgutil`).
@@ -56,7 +60,7 @@ impl Process {
 }
 
 /// Every process running when the table was read.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessTable {
     processes: Vec<Process>,
 }
@@ -78,7 +82,7 @@ impl ProcessTable {
     /// Parses `ps` output: three numbers, then the command, which is the rest of the
     /// line and may hold spaces. The command keeps its exact bytes, so a path that is
     /// not UTF-8 still matches the item it runs from.
-    pub fn parse(text: &[u8]) -> Result<Self, Error> {
+    pub(crate) fn parse(text: &[u8]) -> Result<Self, Error> {
         let processes = text
             .split(|&byte| byte == b'\n')
             .filter(|line| !line.trim_ascii().is_empty())
@@ -92,11 +96,29 @@ impl ProcessTable {
         Ok(ProcessTable { processes })
     }
 
+    /// A table with no process, which admits every path: only tests build one, so every
+    /// production table comes from `ps`.
+    #[cfg(test)]
+    pub(crate) fn empty() -> Self {
+        ProcessTable {
+            processes: Vec::new(),
+        }
+    }
+
     /// A process whose executable is `path` or lies inside it.
     pub fn executing_from(&self, path: &Path) -> Option<&Process> {
         self.processes
             .iter()
             .find(|process| process.executes_from(path))
+    }
+
+    /// Admits `path` as an item a plan may hold when no process executes from it, or
+    /// names the process that does.
+    pub fn admit(&self, path: PathBuf) -> Admission<'_> {
+        match self.executing_from(&path) {
+            Some(process) => Admission::Running { path, process },
+            None => Admission::Idle(IdlePath(path)),
+        }
     }
 
     /// The parent of `pid`, its parent, and so on up the chain, nearest first. A chain
@@ -115,6 +137,27 @@ impl ProcessTable {
             current = Some(parent.ppid);
         }
         chain
+    }
+}
+
+/// Whether a path may become a plan item (`docs/spec/safety.md#running-processes`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Admission<'t> {
+    Idle(IdlePath),
+    Running { path: PathBuf, process: &'t Process },
+}
+
+/// A path no process executed from when the process table was read.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct IdlePath(PathBuf);
+
+impl IdlePath {
+    pub fn as_path(&self) -> &Path {
+        &self.0
+    }
+
+    pub fn into_path(self) -> PathBuf {
+        self.0
     }
 }
 

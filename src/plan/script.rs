@@ -112,8 +112,7 @@ impl Line {
 /// `( exec -- <quoted words> ) </dev/null`.
 ///
 /// As arguments to `exec`, the words are never read as a builtin, a function, a reserved
-/// word, a job, or an assignment, so the program is always the one `PATH` finds. The
-/// subshell keeps `exec` from replacing the script.
+/// word, a job, or an assignment. The subshell keeps `exec` from replacing the script.
 fn command_line(argv: &Argv) -> String {
     let words = std::iter::once(argv.program())
         .chain(argv.args().iter().map(|arg| arg.as_os_str()))
@@ -123,8 +122,8 @@ fn command_line(argv: &Argv) -> String {
     format!("( exec -- {words} ) </dev/null")
 }
 
-/// `-x` keeps `rm` inside the file system the path is on, as rosie's own walk does: a
-/// volume mounted inside a matched folder is left alone.
+/// `-x` keeps `rm` inside the file system the path is on, so a volume mounted inside a
+/// matched folder is left alone.
 fn delete_argv(path: &Path) -> Argv {
     Argv::new("rm").arg("-rfx").arg("--").arg(path)
 }
@@ -135,7 +134,6 @@ fn rules_text(rules: &[String]) -> String {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
     use std::process::Command;
     use std::sync::{Arc, Mutex, Weak};
 
@@ -151,7 +149,7 @@ mod tests {
 
     fn found(path: &str, reach: Reach, twin: Twin) -> PathMatch {
         PathMatch {
-            path: PathBuf::from(path),
+            path: crate::plan::idle(path),
             kind: ItemKind::Folder,
             size: Size::bytes(2_000_000),
             run_as: RunAs::User,
@@ -184,13 +182,13 @@ mod tests {
         builder
             .add_tool(
                 "rosie/docker",
-                ToolCmds::Normal("docker system prune --force"),
+                ToolCmds::Normal(&crate::plan::argv("docker system prune --force")),
             )
             .expect("valid");
         builder
             .add_tool(
                 "rosie/tool",
-                ToolCmds::Aggressive("tool clean --dir=/tmp/x$y"),
+                ToolCmds::Aggressive(&crate::plan::argv("tool clean --dir=/tmp/x$y")),
             )
             .expect("valid");
         builder

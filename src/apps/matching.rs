@@ -1,7 +1,7 @@
 //! Which leftover names belong to an app (`docs/spec/app.md`). Pure: names in, answers
-//! out. Matches that claim a leftover are case-exact; only the orphan scan's check that
-//! an installed app accounts for a leftover folds case, which can only keep a leftover
-//! out of the plan.
+//! out. Matches that claim a leftover are case-exact; only the orphan scan's exclusions
+//! fold case (an installed app accounting for a leftover, and the `com.apple` domain),
+//! and each can only keep a leftover out of the plan.
 
 use super::bundle::{BundleId, BundleName, is_id_part};
 use super::locations::Holds;

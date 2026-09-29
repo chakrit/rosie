@@ -1,5 +1,8 @@
 //! Loading the rule layers (`docs/spec/rules.md#layers-and-overrides`): pulled packs,
 //! then the user's rules, which may replace a pack's rule by its qualified name.
+//!
+//! Which packs are installed is not read here: the pack store lists them, and every
+//! other reader of the packs folder takes the same list.
 
 use std::collections::BTreeMap;
 use std::io::ErrorKind;
@@ -11,40 +14,50 @@ use super::name::{Name, NameError, RuleId};
 use super::pack::load_pack;
 use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
-use crate::fs::{self, Backend, Bounds, FileKind, Gate};
+use crate::fs::{self, Backend, FileKind, Gate};
 
-/// Where the rule layers live, below rosie's own folders.
-#[derive(Debug, Clone)]
-pub struct RuleDirs {
-    /// `<data>/packs`, holding `<owner>/<repo>/*.toml`.
-    pub packs: PathBuf,
-    /// `<config>/rules`, holding `*.toml`.
-    pub user: PathBuf,
+/// A pulled pack's name and the folder holding its `*.toml` rule files.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PackFolder {
+    pub name: Name,
+    pub folder: PathBuf,
 }
 
-impl RuleDirs {
-    pub fn new(bounds: &Bounds) -> RuleDirs {
-        RuleDirs {
-            packs: bounds.data_dir.join("packs"),
-            user: bounds.config_dir.join("rules"),
+/// The rule layers to load: the pulled packs, then the user's rules folder.
+#[derive(Debug, Clone)]
+pub struct RuleLayers {
+    packs: Vec<PackFolder>,
+    /// `<config>/rules`, holding `*.toml`.
+    user: PathBuf,
+}
+
+impl RuleLayers {
+    /// `packs` are the installed packs as the pack store lists them; `config_dir` is
+    /// rosie's config folder, which holds the user's `rules` folder.
+    pub fn new(packs: Vec<PackFolder>, config_dir: &Path) -> RuleLayers {
+        RuleLayers {
+            packs,
+            user: config_dir.join("rules"),
         }
     }
 }
 
-pub(super) fn load<B: Backend>(gate: &Gate<B>, dirs: &RuleDirs) -> Result<Vec<Rule>, Error> {
+pub(super) fn load<B: Backend>(gate: &Gate<B>, layers: &RuleLayers) -> Result<Vec<Rule>, Error> {
+    refuse_duplicate_packs(layers)?;
+
     let mut loaded: BTreeMap<RuleId, Rule> = BTreeMap::new();
-    for (pack, folder) in pack_folders(gate, dirs)? {
-        let files = read_rule_files(gate, &folder)?;
+    for pack in &layers.packs {
+        let files = read_rule_files(gate, &pack.folder)?;
         let labeled = files
             .iter()
             .map(|(file, bytes)| (file.as_path(), bytes.as_slice()));
-        let rules = load_pack(&pack, labeled)?;
+        let rules = load_pack(&pack.name, labeled)?;
         loaded.extend(rules.into_iter().map(|rule| (rule.id.clone(), rule)));
     }
 
     let lua = new_parser_state()?;
     let mut user_layer = UserLayer::new();
-    for (file, bytes) in read_rule_files(gate, &dirs.user)? {
+    for (file, bytes) in read_rule_files(gate, &layers.user)? {
         for parsed in parse_file(&bytes, &file, &lua)? {
             apply_user_rule(&mut loaded, &mut user_layer, parsed, &file)?;
         }
@@ -55,56 +68,25 @@ pub(super) fn load<B: Backend>(gate: &Gate<B>, dirs: &RuleDirs) -> Result<Vec<Ru
 
 // packs
 
-/// Each pulled pack's name and folder, from `<packs>/<owner>/<repo>`, in name order.
-fn pack_folders<B: Backend>(
-    gate: &Gate<B>,
-    dirs: &RuleDirs,
-) -> Result<Vec<(Name, PathBuf)>, Error> {
-    let mut packs: BTreeMap<Name, PathBuf> = BTreeMap::new();
-
-    for owner in subfolders(gate, &dirs.packs)? {
-        for repo in subfolders(gate, &owner)? {
-            if is_copy_beside_pack(&repo) {
-                continue;
-            }
-            let name = repo_name(&repo)?;
-            let first = match name.is_user_pack() {
-                true => Some(dirs.user.clone()),
-                false => packs.get(&name).cloned(),
-            };
-            if let Some(first) = first {
-                return Err(Error::DuplicatePack {
-                    pack: name.to_string(),
-                    first,
-                    second: repo,
-                });
-            }
-            packs.insert(name, repo);
+/// Two pulled packs with one name, or one named `user`, would give their rules the same
+/// `pack/rule` identities.
+fn refuse_duplicate_packs(layers: &RuleLayers) -> Result<(), Error> {
+    let mut seen: BTreeMap<&Name, &Path> = BTreeMap::new();
+    for pack in &layers.packs {
+        let first = match pack.name.is_user_pack() {
+            true => Some(layers.user.as_path()),
+            false => seen.get(&pack.name).copied(),
+        };
+        if let Some(first) = first {
+            return Err(Error::DuplicatePack {
+                pack: pack.name.to_string(),
+                first: first.into(),
+                second: pack.folder.clone(),
+            });
         }
+        seen.insert(&pack.name, &pack.folder);
     }
-
-    Ok(packs.into_iter().collect())
-}
-
-/// Whether `repo` is a dot-prefixed staging or aside copy beside a pack (the copies
-/// documented on `Store` in `src/packs/store.rs`), rather than a pack folder: a valid
-/// pack name never starts with `.`, so those copies are never mistaken for one.
-fn is_copy_beside_pack(repo: &Path) -> bool {
-    repo.file_name()
-        .is_some_and(|name| name.to_string_lossy().starts_with('.'))
-}
-
-/// The repo folder's pack name.
-fn repo_name(repo: &Path) -> Result<Name, Error> {
-    let text = repo
-        .file_name()
-        .map(|name| name.to_string_lossy())
-        .unwrap_or_default();
-
-    Name::parse(&text).map_err(|source| Error::PackName {
-        folder: repo.into(),
-        source,
-    })
+    Ok(())
 }
 
 // user rules
@@ -182,27 +164,6 @@ fn read_rule_files<B: Backend>(
             Ok((file, bytes))
         })
         .collect()
-}
-
-/// The folders in `dir`, in name order; none when `dir` is missing. Plain files such as
-/// `.DS_Store` are passed over; a symlink or special file is refused.
-fn subfolders<B: Backend>(gate: &Gate<B>, dir: &Path) -> Result<Vec<PathBuf>, Error> {
-    let entries = entries(gate, dir)?;
-    let mut folders = Vec::new();
-    for (path, kind) in entries {
-        match kind {
-            FileKind::Dir => folders.push(path),
-            FileKind::File => {}
-            FileKind::Symlink | FileKind::Other => {
-                return Err(Error::WrongKind {
-                    path,
-                    found: kind.label(),
-                    expected: "folder",
-                });
-            }
-        }
-    }
-    Ok(folders)
 }
 
 /// The `*.toml` files in `dir`, in name order; none when `dir` is missing. Other entries

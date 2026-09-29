@@ -12,7 +12,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Backend, Bounds, Gate, Home};
-use rosie::packs::{Network, Source};
+use rosie::packs::{Installed, Network, Source};
 
 pub const HOME: &str = "/Users/me";
 pub const CONFIG: &str = "/Users/me/.config/rosie";
@@ -103,4 +103,45 @@ pub fn listing(fake: &FakeBackend, path: &str) -> Vec<OsString> {
     let mut names = fake.read_dir(Path::new(path)).expect("folder exists");
     names.sort();
     names
+}
+
+/// The packs the fake holds and their pull times, read straight from the fake so that
+/// looking never settles a copy beside a pack: every entry `<owner>/<repo>` under the
+/// packs folder whose names do not start with `.`.
+pub fn installed(fake: &FakeBackend) -> Vec<Installed> {
+    sources(fake)
+        .into_iter()
+        .map(|source| {
+            let pulled = contents(fake, format!("{DATA}/packs/{source}/.pulled"));
+            let seconds = pulled.trim().parse().expect("pull time in seconds");
+            Installed {
+                source,
+                pulled_at: at(seconds),
+            }
+        })
+        .collect()
+}
+
+/// The sources of the packs the fake holds, ordered; see [`installed`].
+pub fn sources(fake: &FakeBackend) -> Vec<Source> {
+    let packs = format!("{DATA}/packs");
+    if !fake.exists(&packs) {
+        return Vec::new();
+    }
+
+    let mut sources: Vec<Source> = visible(listing(fake, &packs))
+        .flat_map(|owner| {
+            let repos = listing(fake, &format!("{packs}/{owner}"));
+            visible(repos).map(move |repo| source(&format!("{owner}/{repo}")))
+        })
+        .collect();
+    sources.sort();
+    sources
+}
+
+fn visible(names: Vec<OsString>) -> impl Iterator<Item = String> {
+    names
+        .into_iter()
+        .map(|name| name.into_string().expect("UTF-8 name"))
+        .filter(|name| !name.starts_with('.'))
 }

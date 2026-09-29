@@ -4,11 +4,11 @@
 //!
 //! It acts only when all four gates pass:
 //!
-//! 1. it runs as root, by `id -u`;
-//! 2. an ancestor process is `sudo`, by the `ps` parent chain;
-//! 3. stdin is a pipe;
-//! 4. stdin starts with a header of this format version whose nonce matches the
-//!    argument.
+//! 1. stdin is a pipe;
+//! 2. stdin starts with a header of this format version whose nonce matches the
+//!    argument;
+//! 3. it runs as root, by `id -u`;
+//! 4. an ancestor process is `sudo`, by the `ps` parent chain.
 //!
 //! It then loads the invoking user's config and roots from the header's home, never
 //! `$HOME`, and runs the piped items through the same gate and runner as any run.
@@ -112,8 +112,8 @@ pub fn run_elevated<B, R, W>(
 ) -> Result<RunStats, Error>
 where
     B: Backend + Sync,
-    R: Reporter + Send,
-    W: Write + Send,
+    R: Reporter,
+    W: Write,
 {
     let (header, body) = admit(backend, &invocation)?;
     let plan = Plan::parse(body)?;
@@ -210,7 +210,7 @@ fn is_root_sudo(process: &Process) -> bool {
 
 /// A gate acting for the user whose home this is, bounded by the roots in their
 /// config. The user is the owner of the home folder. The child deletes through it only
-/// with `Gate::delete_as_root`, which changes no permissions.
+/// what `Gate::admit_delete_as_root` admits, which changes no permissions.
 fn user_gate<'b, B: Backend>(backend: &'b B, home: &Home) -> Result<Gate<&'b B>, Error> {
     let bootstrap = Gate::new(backend, home.bounds(Vec::new(), ROOT_UID))?;
     let user_uid = bootstrap.lstat(home)?.uid;

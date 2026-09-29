@@ -77,11 +77,11 @@ fn a_symlinked_info_plist_is_refused_by_app_and_orphan_scans() {
 
 // fixed folders: a symlink anywhere in their path fails the scan
 
-fn is_symlink_refusal(result: &Result<Scanned, Error>) -> bool {
+fn is_symlink_refusal(result: &Result<Scan, Error>) -> bool {
     matches!(result, Err(Error::Fs(fs::Error::Symlink { .. })))
 }
 
-fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scanned, Error> {
+fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
         &gate(fake, &ALL_ROOTS),
         Path::new(app),
@@ -91,7 +91,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scanned, Error> {
     )
 }
 
-fn orphan_scan(fake: &FakeBackend) -> Result<Scanned, Error> {
+fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {
     scan_orphans(
         &gate(fake, &ALL_ROOTS),
         &home(),

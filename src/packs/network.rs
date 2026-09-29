@@ -33,9 +33,9 @@ impl Https {
     /// is well under a megabyte; a stalled server must not hang rosie.
     pub const TIMEOUT: Duration = Duration::from_secs(30);
 
-    /// The most gzipped bytes a download may carry. rosie's own repository archive is
-    /// under 100 KiB; [`Archive::UNPACKED_LIMIT`](super::Archive::UNPACKED_LIMIT) bounds
-    /// what they unpack to.
+    /// The most gzipped bytes a download may carry;
+    /// [`Archive::UNPACKED_LIMIT`](super::Archive::UNPACKED_LIMIT) bounds what they
+    /// unpack to.
     pub const DOWNLOAD_LIMIT: u64 = 8 * 1024 * 1024;
 
     pub fn new() -> Self {

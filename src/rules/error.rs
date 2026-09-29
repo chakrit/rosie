@@ -28,13 +28,6 @@ pub enum Error {
         problem: Problem,
     },
 
-    #[error("{folder}: the pack name is invalid: {source}", folder = folder.display())]
-    PackName {
-        folder: PathBuf,
-        #[source]
-        source: NameError,
-    },
-
     #[error(
         "the pack `{pack}` is installed twice, at {first} and {second}",
         first = first.display(),

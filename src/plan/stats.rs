@@ -117,7 +117,9 @@ impl fmt::Display for PlanStats {
 
 // run
 
-/// How one executed item ended.
+/// How one item of a run ended. A skipped item never ran. A command that is done ran;
+/// one that failed ran and failed, or could not be started. A failed delete may also be
+/// one the gate refused before it began.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Done,
@@ -138,6 +140,13 @@ pub enum SkipReason {
     /// root, so the elevated child left it for the user to delete by hand (see
     /// [`crate::fs::Error::NotRootControlled`]).
     UnsafeToElevate,
+    /// The running-process table could not be read, so a process executing from the
+    /// item, or from the delete a bootout belongs to, could not be ruled out. Unlike
+    /// the other skips, it fails the run.
+    ProcessCheckFailed,
+    /// The gate refused the delete, which fails, so its bootouts never ran and are
+    /// skipped.
+    DeleteRefused,
 }
 
 impl SkipReason {
@@ -147,39 +156,161 @@ impl SkipReason {
             SkipReason::RunningProcess => "running process",
             SkipReason::SudoRefused => "sudo refused",
             SkipReason::UnsafeToElevate => "unsafe to elevate",
+            SkipReason::ProcessCheckFailed => "process check failed",
+            SkipReason::DeleteRefused => "delete refused",
         }
     }
 }
 
-/// Why the walk did not enter a folder (`docs/spec/safety.md#walk-skips`).
+/// Why the walk did not enter a folder (`docs/spec/safety.md#walk-skips`). A closed
+/// skip is one its `[walk]` settings would open, and it carries every setting that
+/// takes; a sealed one stays closed whatever the settings.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum WalkSkip {
-    Bundle,
-    Mount,
-    Placeholder,
+    /// An entry left closed until every setting in `Needs` is on: a folder no rule was
+    /// seen to match, since opening it could reveal targets inside, or a fixed path or
+    /// leftover location that lies inside a mount the walk may not enter.
+    Closed(Needs),
+    /// A mount root that is never entered and never a target, whatever the settings:
+    /// one a rule matches, since the gate never deletes a mount point, or one inside an
+    /// item being sized, since sizing never leaves the item's volume.
+    SealedMount,
+    /// A placeholder that is never opened and never a target, whatever the settings:
+    /// one a rule matches, since a match is final, or one inside an item being sized.
+    SealedPlaceholder,
     /// `EPERM` or another denial.
     Denied,
 }
 
 impl WalkSkip {
     /// Why the path was skipped, briefly, as the line naming it shows it
-    /// (`docs/spec/plan.md`).
-    pub fn reason(self) -> &'static str {
+    /// (`docs/spec/plan.md`): each closure of a closed skip, outermost first.
+    pub fn reason(self) -> String {
         match self {
-            WalkSkip::Bundle => "bundle",
-            WalkSkip::Mount => "another volume",
-            WalkSkip::Placeholder => "cloud placeholder, not downloaded",
-            WalkSkip::Denied => "permission denied",
+            WalkSkip::Closed(needs) => {
+                let reasons: Vec<&str> = needs.settings().map(WalkSetting::reason).collect();
+                reasons.join("; ")
+            }
+            WalkSkip::SealedMount => "mount point, never entered or a target".to_owned(),
+            WalkSkip::SealedPlaceholder => "cloud placeholder, never opened or a target".to_owned(),
+            WalkSkip::Denied => "permission denied".to_owned(),
         }
     }
 
+    /// The count this skip adds to: a closed skip counts under its outermost closure.
+    fn bucket(self) -> Bucket {
+        match self {
+            WalkSkip::Closed(needs) => match needs.outermost() {
+                WalkSetting::Placeholders => Bucket::Placeholders,
+                WalkSetting::Mounts => Bucket::Mounts,
+                WalkSetting::Bundles => Bucket::Bundles,
+            },
+            WalkSkip::SealedMount => Bucket::Mounts,
+            WalkSkip::SealedPlaceholder => Bucket::Placeholders,
+            WalkSkip::Denied => Bucket::Denied,
+        }
+    }
+}
+
+/// A `[walk]` setting that opens a kind of closed folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalkSetting {
+    /// `enter_placeholders`: a dataless cloud placeholder.
+    Placeholders,
+    /// `enter_mounts`: a mount root on another volume.
+    Mounts,
+    /// `enter_bundles`: a bundle folder.
+    Bundles,
+}
+
+impl WalkSetting {
+    fn reason(self) -> &'static str {
+        match self {
+            WalkSetting::Placeholders => "cloud placeholder, not downloaded",
+            WalkSetting::Mounts => "another volume",
+            WalkSetting::Bundles => "bundle",
+        }
+    }
+}
+
+/// The `[walk]` settings a closed folder needs, all together, before the walk enters
+/// it. Never empty: it starts from one setting and only grows.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Needs {
+    placeholders: bool,
+    mounts: bool,
+    bundles: bool,
+}
+
+impl Needs {
+    pub const PLACEHOLDERS: Needs = Needs::of(WalkSetting::Placeholders);
+    pub const MOUNTS: Needs = Needs::of(WalkSetting::Mounts);
+    pub const BUNDLES: Needs = Needs::of(WalkSetting::Bundles);
+
+    pub const fn of(setting: WalkSetting) -> Needs {
+        Needs {
+            placeholders: matches!(setting, WalkSetting::Placeholders),
+            mounts: matches!(setting, WalkSetting::Mounts),
+            bundles: matches!(setting, WalkSetting::Bundles),
+        }
+    }
+
+    /// These settings, and `more` when there is one.
+    pub fn and(self, more: Option<WalkSetting>) -> Needs {
+        let more = more.map_or(self, Needs::of);
+        Needs {
+            placeholders: self.placeholders || more.placeholders,
+            mounts: self.mounts || more.mounts,
+            bundles: self.bundles || more.bundles,
+        }
+    }
+
+    pub fn contains(self, setting: WalkSetting) -> bool {
+        match setting {
+            WalkSetting::Placeholders => self.placeholders,
+            WalkSetting::Mounts => self.mounts,
+            WalkSetting::Bundles => self.bundles,
+        }
+    }
+
+    /// The settings, outermost first: placeholders, then mounts, then bundles.
+    pub fn settings(self) -> impl Iterator<Item = WalkSetting> {
+        [
+            WalkSetting::Placeholders,
+            WalkSetting::Mounts,
+            WalkSetting::Bundles,
+        ]
+        .into_iter()
+        .filter(move |setting| self.contains(*setting))
+    }
+
+    /// The first of [`Needs::settings`]; there is always one.
+    pub fn outermost(self) -> WalkSetting {
+        match (self.placeholders, self.mounts) {
+            (true, _) => WalkSetting::Placeholders,
+            (false, true) => WalkSetting::Mounts,
+            (false, false) => WalkSetting::Bundles,
+        }
+    }
+}
+
+/// One count of [`WalkSkips`].
+#[derive(Debug, Clone, Copy)]
+enum Bucket {
+    Bundles,
+    Mounts,
+    Placeholders,
+    Denied,
+}
+
+impl Bucket {
     /// `3 bundles`, `1 mount`, `2 denied`.
     fn counted(self, count: usize) -> String {
         let (one, many) = match self {
-            WalkSkip::Bundle => ("bundle", "bundles"),
-            WalkSkip::Mount => ("mount", "mounts"),
-            WalkSkip::Placeholder => ("placeholder", "placeholders"),
-            WalkSkip::Denied => ("denied", "denied"),
+            Bucket::Bundles => ("bundle", "bundles"),
+            Bucket::Mounts => ("mount", "mounts"),
+            Bucket::Placeholders => ("placeholder", "placeholders"),
+            Bucket::Denied => ("denied", "denied"),
         };
         match count {
             1 => format!("{count} {one}"),
@@ -199,11 +330,11 @@ pub struct WalkSkips {
 
 impl WalkSkips {
     pub fn record(&mut self, skip: WalkSkip) {
-        let count = match skip {
-            WalkSkip::Bundle => &mut self.bundles,
-            WalkSkip::Mount => &mut self.mounts,
-            WalkSkip::Placeholder => &mut self.placeholders,
-            WalkSkip::Denied => &mut self.denied,
+        let count = match skip.bucket() {
+            Bucket::Bundles => &mut self.bundles,
+            Bucket::Mounts => &mut self.mounts,
+            Bucket::Placeholders => &mut self.placeholders,
+            Bucket::Denied => &mut self.denied,
         };
         *count += 1;
     }
@@ -212,12 +343,12 @@ impl WalkSkips {
         self.bundles + self.mounts + self.placeholders + self.denied
     }
 
-    fn counts(&self) -> [(WalkSkip, usize); 4] {
+    fn counts(&self) -> [(Bucket, usize); 4] {
         [
-            (WalkSkip::Bundle, self.bundles),
-            (WalkSkip::Mount, self.mounts),
-            (WalkSkip::Placeholder, self.placeholders),
-            (WalkSkip::Denied, self.denied),
+            (Bucket::Bundles, self.bundles),
+            (Bucket::Mounts, self.mounts),
+            (Bucket::Placeholders, self.placeholders),
+            (Bucket::Denied, self.denied),
         ]
     }
 }
@@ -243,7 +374,7 @@ impl fmt::Display for WalkSkips {
             .counts()
             .into_iter()
             .filter(|(_, count)| *count > 0)
-            .map(|(skip, count)| skip.counted(count))
+            .map(|(bucket, count)| bucket.counted(count))
             .collect();
         write!(f, "walk skipped {}", parts.join(", "))
     }
@@ -257,6 +388,8 @@ pub struct RunStats {
     pub running_process: Tally,
     pub sudo_refused: Tally,
     pub unsafe_to_elevate: Tally,
+    pub process_check_failed: Tally,
+    pub delete_refused: Tally,
     pub failed: Tally,
     pub walk_skips: WalkSkips,
 }
@@ -269,6 +402,8 @@ impl RunStats {
             Outcome::Skipped(SkipReason::RunningProcess) => &mut self.running_process,
             Outcome::Skipped(SkipReason::SudoRefused) => &mut self.sudo_refused,
             Outcome::Skipped(SkipReason::UnsafeToElevate) => &mut self.unsafe_to_elevate,
+            Outcome::Skipped(SkipReason::ProcessCheckFailed) => &mut self.process_check_failed,
+            Outcome::Skipped(SkipReason::DeleteRefused) => &mut self.delete_refused,
             Outcome::Failed => &mut self.failed,
         };
         tally.add(size);
@@ -279,9 +414,10 @@ impl RunStats {
         self.done.size
     }
 
-    /// Whether any item failed; rosie then exits non-zero (`docs/spec/cli.md#exit-status`).
+    /// Whether any item failed, or could not be checked for running processes; rosie
+    /// then exits non-zero (`docs/spec/cli.md#exit-status`).
     pub fn any_failed(&self) -> bool {
-        !self.failed.is_empty()
+        !self.failed.is_empty() || !self.process_check_failed.is_empty()
     }
 
     /// Every skipped item, whatever the reason.
@@ -290,14 +426,18 @@ impl RunStats {
             .plus(self.running_process)
             .plus(self.sudo_refused)
             .plus(self.unsafe_to_elevate)
+            .plus(self.process_check_failed)
+            .plus(self.delete_refused)
     }
 
-    fn skip_reasons(&self) -> [(SkipReason, Tally); 4] {
+    fn skip_reasons(&self) -> [(SkipReason, Tally); 6] {
         [
             (SkipReason::Stale, self.stale),
             (SkipReason::RunningProcess, self.running_process),
             (SkipReason::SudoRefused, self.sudo_refused),
             (SkipReason::UnsafeToElevate, self.unsafe_to_elevate),
+            (SkipReason::ProcessCheckFailed, self.process_check_failed),
+            (SkipReason::DeleteRefused, self.delete_refused),
         ]
     }
 }
@@ -328,8 +468,6 @@ impl fmt::Display for RunStats {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
     use super::*;
     use crate::plan::{
         AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
@@ -338,7 +476,7 @@ mod tests {
 
     fn found(path: &str, bytes: u64, reach: Reach, twin: Twin) -> PathMatch {
         PathMatch {
-            path: PathBuf::from(path),
+            path: crate::plan::idle(path),
             kind: ItemKind::Folder,
             size: Size::bytes(bytes),
             run_as: RunAs::User,
@@ -369,8 +507,8 @@ mod tests {
             builder.add_path(found).expect("valid match");
         }
         let docker = ToolCmds::Twins {
-            cmd: "docker system prune --force",
-            cmd_aggressive: "docker system prune --all --force",
+            cmd: &crate::plan::argv("docker system prune --force"),
+            cmd_aggressive: &crate::plan::argv("docker system prune --all --force"),
         };
         builder
             .add_tool("rosie/docker", docker)
@@ -446,10 +584,10 @@ mod tests {
     fn walk_skips_count_per_reason() {
         let mut skips = WalkSkips::default();
         let seen = [
-            WalkSkip::Bundle,
+            WalkSkip::Closed(Needs::BUNDLES),
             WalkSkip::Denied,
-            WalkSkip::Bundle,
-            WalkSkip::Placeholder,
+            WalkSkip::Closed(Needs::BUNDLES),
+            WalkSkip::Closed(Needs::PLACEHOLDERS),
         ];
         for skip in seen {
             skips.record(skip);
@@ -480,7 +618,7 @@ mod tests {
             Outcome::Skipped(SkipReason::Stale),
         );
         stats.record(ItemSize::Known(Size::bytes(20_000)), Outcome::Failed);
-        stats.walk_skips.record(WalkSkip::Mount);
+        stats.walk_skips.record(WalkSkip::Closed(Needs::MOUNTS));
 
         assert_eq!(
             stats.to_string(),

@@ -27,6 +27,9 @@ pub use keys::{Key, WalkFlag};
 
 const FILE_NAME: &str = "config.toml";
 
+/// What an error in the default text that seeds `config.toml` names as its file.
+const DEFAULT_LABEL: &str = "<default config.toml>";
+
 /// The user's config, typed. Fields default when the key is absent, so an empty or
 /// partial file is valid. A key rosie does not know is a load error.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
@@ -138,8 +141,8 @@ pub enum Error {
 // loading and seeding
 
 /// Loads the user's config, seeding it from `default_text` first when none exists yet
-/// (`docs/spec/rules.md#packs`: the default config text is downloaded by slice 08 and
-/// passed in here).
+/// (`docs/spec/safety.md#roots`: a fresh `config.toml` is seeded with ordinary,
+/// editable `roots` entries). The caller supplies the seed text.
 pub fn load_or_seed<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
@@ -169,10 +172,11 @@ pub fn load<B: Backend>(
 }
 
 /// Writes `default_text` as the user's config file, first validating it the same way a
-/// loaded file is validated, then returns it loaded. Any failure of that validation is
-/// reported as [`Error::InvalidDefault`], naming the default text rather than the
-/// user's (not yet written) config path. Private: `load_or_seed` is the only public
-/// seeding path, so a caller can never overwrite an existing user config.
+/// loaded file is validated, then returns it loaded. A validation failure is
+/// [`Error::InvalidDefault`]; where it names the config file, it names
+/// [`DEFAULT_LABEL`], never the user's config path, which is not written yet.
+/// Private: `load_or_seed` is the only public seeding path, so a caller can never
+/// overwrite an existing user config.
 fn seed<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
@@ -180,15 +184,15 @@ fn seed<B: Backend>(
     default_text: &str,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
-    let file = parse(default_text, &path, gate, home)
+    let file = parse(default_text, Path::new(DEFAULT_LABEL), gate, home)
         .map_err(|source| Error::InvalidDefault(Box::new(source)))?;
     write_validated(gate, config_dir, &path, default_text, file)
 }
 
 // writing
 
-/// The one writer of `config.toml`: validates `text` as a config, then writes it and
-/// returns its loaded form. Nothing is written when `text` does not load.
+/// Validates `text` as a config, then writes it and returns its loaded form. Nothing is
+/// written when `text` does not load.
 fn store<B: Backend>(
     gate: &Gate<B>,
     config_dir: &Path,
@@ -287,9 +291,9 @@ fn validate_shape(document: &DocumentMut, path: &Path) -> Result<(), Error> {
     Ok(())
 }
 
-/// Refuses two `roots` entries that read as the same path once `~` is expanded,
-/// naming both as the user spelled them. A symlinked entry never reaches this check:
-/// `check_root_entry` already refuses it.
+/// Refuses two `roots` entries that read as the same path once `~` is expanded and dots
+/// are resolved, naming both as the user spelled them. A symlinked entry never reaches
+/// this check: `check_root_entry` already refuses it.
 fn refuse_duplicate_roots(
     written: &[PathBuf],
     checked: &[PathBuf],
@@ -484,7 +488,12 @@ mod tests {
 
         let result = seed(&gate, config_dir(), &home(), "not valid toml [[[");
 
-        assert!(matches!(result, Err(Error::InvalidDefault(_))));
+        let Err(error @ Error::InvalidDefault(_)) = result else {
+            panic!("expected an invalid default, got {result:?}");
+        };
+        let message = error.to_string();
+        assert!(message.contains(DEFAULT_LABEL), "{message}");
+        assert!(!message.contains("/Users/me/.config"), "{message}");
         assert!(!fake.exists("/Users/me/.config/rosie/config.toml"));
     }
 

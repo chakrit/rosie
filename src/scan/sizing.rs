@@ -4,8 +4,10 @@
 //! sizer, by dev and inode, so a file hardlinked into two targets, or twice into one,
 //! weighs once in the plan (`docs/spec/plan.md#stats`); only such files enter the
 //! shared set of counted entries. Sizing descends into bundles, since deleting a target
-//! removes them too, but never into another volume or a dataless placeholder, which
-//! are neither counted nor opened; a denied folder is a walk skip.
+//! removes them too, but never into a mount root or a dataless placeholder it meets
+//! inside a target, told by `Sealed::of`; those are neither counted nor opened. A
+//! denied folder is a walk skip when the target was claimed, and is dropped for a
+//! refused one.
 //!
 //! Each folder's entries are summed on the worker listing it, and the sum is added to
 //! the target's total and reported as progress once per folder, so workers share no
@@ -18,11 +20,11 @@ use std::sync::{Arc, Mutex};
 
 use rayon::Scope;
 
-use super::entry::Entry;
+use super::entry::{Entry, Sealed};
 use super::log::{Log, SizingLog};
 use super::progress::Progress;
 use crate::fs::{Backend, FileKind, Gate, Metadata};
-use crate::plan::{Size, WalkSkip};
+use crate::plan::Size;
 
 /// Sizes targets against one shared set of counted entries.
 pub struct Sizer<'a, B: Backend, P: Progress> {
@@ -54,9 +56,8 @@ impl Measure {
 
 impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
     /// Builds a sizer for a target the caller has entered and claimed: what it meets
-    /// while sizing counts as part of that scan's walk (`docs/spec/safety.md#walk-skips`).
-    /// This is the only way to build a [`Sizer`] from outside `scan`; the refused-target
-    /// sink stays internal to the scan.
+    /// while sizing counts as part of that scan's walk. This is the only way to build a
+    /// [`Sizer`] from outside `scan`; the refused-target sink stays internal to the scan.
     pub fn walking(gate: &'a Gate<B>, progress: &'a P, log: &'a Log) -> Self {
         Self::new(gate, progress, SizingLog::walked(log))
     }
@@ -78,14 +79,22 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
 
         if meta.kind == FileKind::Dir {
             let (folder, folder_total) = (entry.into_path(), total.clone());
-            scope.spawn(move |scope| self.size_folder(scope, folder, meta.dev, folder_total));
+            scope.spawn(move |scope| self.size_folder(scope, folder, meta, folder_total));
         }
         total
     }
 
     /// Adds the weights of the folder's entries to `total` in one step, and starts
-    /// sizing each subfolder on its own task.
-    fn size_folder<'s>(&'s self, scope: &Scope<'s>, folder: PathBuf, dev: u64, total: Measure) {
+    /// sizing each subfolder on its own task. A sealed entry, told by [`Sealed::of`]
+    /// against the folder's own `lstat`, is skipped. A symlink is weighed as a link,
+    /// since a delete removes it as one.
+    fn size_folder<'s>(
+        &'s self,
+        scope: &Scope<'s>,
+        folder: PathBuf,
+        folder_meta: Metadata,
+        total: Measure,
+    ) {
         let names = match self.gate.read_dir(&folder) {
             Ok(names) => names,
             Err(error) => return self.log.entry_failed(folder, error),
@@ -102,26 +111,22 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
                 }
             };
 
-            if meta.dev != dev {
-                self.log.skip(path, WalkSkip::Mount);
-                continue;
-            }
-            if meta.is_dataless() {
-                self.log.skip(path, WalkSkip::Placeholder);
+            if let Some(sealed) = Sealed::of(meta, folder_meta) {
+                self.log.skip(path, sealed.skip());
                 continue;
             }
 
             sum = sum.saturating_add(self.weight(meta));
             if meta.kind == FileKind::Dir {
                 let total = total.clone();
-                scope.spawn(move |scope| self.size_folder(scope, path, dev, total));
+                scope.spawn(move |scope| self.size_folder(scope, path, meta, total));
             }
         }
         self.publish(&total, sum);
     }
 
     /// The entry's allocated bytes, or nothing when another of its names was counted
-    /// already. APFS gives folders no second name, so only files are looked up.
+    /// already. APFS gives folders no second name, so folders are never looked up.
     fn weight(&self, meta: Metadata) -> u64 {
         let named_once = meta.kind == FileKind::Dir || meta.nlink <= 1;
         let first_sight = named_once || self.counted.claim(meta.dev, meta.inode);

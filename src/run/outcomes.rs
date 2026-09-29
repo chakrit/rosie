@@ -12,9 +12,9 @@
 //! ```
 //!
 //! or, for a command, `command = ["/usr/sbin/pkgutil", "--forget", "com.x"]` in place
-//! of `path`. Each record is written whole and flushed before the next item, so a child
-//! that crashes mid-run leaves the records of the items it finished. A last record
-//! without its NUL was cut short and is ignored.
+//! of `path`. Each record is written whole and flushed as soon as its item finishes,
+//! so a child that crashes mid-run leaves the records of the items it finished. A last
+//! record without its NUL was cut short and is ignored.
 
 use std::io::Write;
 use std::path::PathBuf;
@@ -46,8 +46,8 @@ pub enum Error {
         source: toml::de::Error,
     },
 
-    #[error("the elevated child's report has an unknown outcome {0:?}")]
-    UnknownOutcome(String),
+    #[error("the elevated child's report record {0:?} names no outcome")]
+    NoOutcome(String),
 
     #[error("the elevated child's report record names both a path and a command, or neither")]
     Subject,
@@ -90,7 +90,7 @@ pub struct Record {
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 struct Entry {
-    outcome: String,
+    outcome: Option<Label>,
     #[serde(skip_serializing_if = "Option::is_none")]
     path: Option<PathBuf>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -116,7 +116,7 @@ impl<W: Write> Writer<W> {
             Key::Command(words) => (None, Some(words)),
         };
         let entry = Entry {
-            outcome: outcome_label(result.outcome).to_owned(),
+            outcome: Some(result.outcome.into()),
             path,
             command,
         };
@@ -125,6 +125,11 @@ impl<W: Write> Writer<W> {
         self.out.write_all(record.as_bytes())?;
         self.out.flush()?;
         Ok(())
+    }
+
+    #[cfg(test)]
+    pub fn into_inner(self) -> W {
+        self.out
     }
 }
 
@@ -157,32 +162,56 @@ fn decode_record(record: &str) -> Result<Record, Error> {
         (None, Some(words)) => Key::Command(words),
         _ => return Err(Error::Subject),
     };
-    let outcome = parse_outcome(&entry.outcome)?;
+    let outcome = entry
+        .outcome
+        .ok_or_else(|| Error::NoOutcome(record.to_owned()))?
+        .into();
     Ok(Record { key, outcome })
 }
 
-const OUTCOMES: [Outcome; 6] = [
-    Outcome::Done,
-    Outcome::Skipped(SkipReason::Stale),
-    Outcome::Skipped(SkipReason::RunningProcess),
-    Outcome::Skipped(SkipReason::SudoRefused),
-    Outcome::Skipped(SkipReason::UnsafeToElevate),
-    Outcome::Failed,
-];
+/// An outcome as a record spells it. Both conversions are exhaustive matches, so an
+/// outcome with no label, or a label with no outcome, does not compile.
+#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+enum Label {
+    Done,
+    Stale,
+    RunningProcess,
+    SudoRefused,
+    UnsafeToElevate,
+    ProcessCheckFailed,
+    DeleteRefused,
+    Failed,
+}
 
-fn outcome_label(outcome: Outcome) -> &'static str {
-    match outcome {
-        Outcome::Done => "done",
-        Outcome::Skipped(reason) => reason.label(),
-        Outcome::Failed => "failed",
+impl From<Outcome> for Label {
+    fn from(outcome: Outcome) -> Label {
+        match outcome {
+            Outcome::Done => Label::Done,
+            Outcome::Skipped(SkipReason::Stale) => Label::Stale,
+            Outcome::Skipped(SkipReason::RunningProcess) => Label::RunningProcess,
+            Outcome::Skipped(SkipReason::SudoRefused) => Label::SudoRefused,
+            Outcome::Skipped(SkipReason::UnsafeToElevate) => Label::UnsafeToElevate,
+            Outcome::Skipped(SkipReason::ProcessCheckFailed) => Label::ProcessCheckFailed,
+            Outcome::Skipped(SkipReason::DeleteRefused) => Label::DeleteRefused,
+            Outcome::Failed => Label::Failed,
+        }
     }
 }
 
-fn parse_outcome(label: &str) -> Result<Outcome, Error> {
-    OUTCOMES
-        .into_iter()
-        .find(|outcome| outcome_label(*outcome) == label)
-        .ok_or_else(|| Error::UnknownOutcome(label.to_owned()))
+impl From<Label> for Outcome {
+    fn from(label: Label) -> Outcome {
+        match label {
+            Label::Done => Outcome::Done,
+            Label::Stale => Outcome::Skipped(SkipReason::Stale),
+            Label::RunningProcess => Outcome::Skipped(SkipReason::RunningProcess),
+            Label::SudoRefused => Outcome::Skipped(SkipReason::SudoRefused),
+            Label::UnsafeToElevate => Outcome::Skipped(SkipReason::UnsafeToElevate),
+            Label::ProcessCheckFailed => Outcome::Skipped(SkipReason::ProcessCheckFailed),
+            Label::DeleteRefused => Outcome::Skipped(SkipReason::DeleteRefused),
+            Label::Failed => Outcome::Failed,
+        }
+    }
 }
 
 #[cfg(test)]
@@ -202,7 +231,17 @@ mod tests {
 
     #[test]
     fn reads_back_every_outcome_for_paths_and_commands() {
-        let mut results: Vec<ItemResult> = OUTCOMES
+        let outcomes = [
+            Outcome::Done,
+            Outcome::Skipped(SkipReason::Stale),
+            Outcome::Skipped(SkipReason::RunningProcess),
+            Outcome::Skipped(SkipReason::SudoRefused),
+            Outcome::Skipped(SkipReason::UnsafeToElevate),
+            Outcome::Skipped(SkipReason::ProcessCheckFailed),
+            Outcome::Skipped(SkipReason::DeleteRefused),
+            Outcome::Failed,
+        ];
+        let mut results: Vec<ItemResult> = outcomes
             .into_iter()
             .map(|outcome| path_result("/Library/Caches/a \"b\"\nc", outcome))
             .collect();

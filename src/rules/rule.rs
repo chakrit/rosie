@@ -1,5 +1,5 @@
-//! The loaded rule model (`docs/spec/rules.md#rule-tables`). Every value here is valid
-//! by construction; the TOML is checked once, in `parse`.
+//! The loaded rule model (`docs/spec/rules.md#rule-tables`). The TOML is checked once,
+//! in `parse`.
 
 use std::borrow::Cow;
 use std::ffi::OsStr;
@@ -39,7 +39,8 @@ pub enum Source {
     UserOverride,
 }
 
-/// What a rule cleans and how it finds it. The strategy follows from the shape.
+/// What a rule cleans and how it finds it. The strategy follows from the shape, and so
+/// do the modes that use it (`docs/spec/rules.md#modes`): the scanner dispatches on it.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Shape {
     /// Folders found by the walk: the `name`, `marker`, and `lua` strategies.
@@ -48,25 +49,6 @@ pub enum Shape {
     Paths(Twin<FixedPaths>),
     /// The `tool` strategy.
     Tool(Twin<Argv>),
-}
-
-impl Shape {
-    /// The modes that use a rule of this shape (`docs/spec/rules.md#modes`). `tree`
-    /// takes only the fixed paths that lie under its folder.
-    pub fn modes(&self) -> &'static [Mode] {
-        match self {
-            Shape::Folder(_) => &[Mode::Tree],
-            Shape::Paths(_) => &[Mode::Caches, Mode::Tree],
-            Shape::Tool(_) => &[Mode::Caches],
-        }
-    }
-}
-
-/// A scan mode that rules feed. `app` and `orphans` are scanning logic, not rules.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Mode {
-    Tree,
-    Caches,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -233,7 +215,7 @@ pub(super) enum PathProblem {
     /// An empty, `.`, or `..` component (including a trailing slash, which leaves a
     /// trailing empty component).
     BadComponent,
-    /// Exactly `/` or `~`: the root or home folder itself.
+    /// Exactly `/`, `~`, or `~/`: the root or home folder itself.
     RootOrHome,
 }
 
@@ -280,18 +262,6 @@ impl<T> Twin<T> {
         match self {
             Twin::Aggressive(aggressive) | Twin::Both { aggressive, .. } => Some(aggressive),
             Twin::Normal(_) => None,
-        }
-    }
-
-    /// The same twin with `convert` applied to each value set.
-    pub fn map<U>(&self, convert: impl Fn(&T) -> U) -> Twin<U> {
-        match self {
-            Twin::Normal(normal) => Twin::Normal(convert(normal)),
-            Twin::Aggressive(aggressive) => Twin::Aggressive(convert(aggressive)),
-            Twin::Both { normal, aggressive } => Twin::Both {
-                normal: convert(normal),
-                aggressive: convert(aggressive),
-            },
         }
     }
 

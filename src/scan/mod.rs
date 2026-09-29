@@ -14,6 +14,7 @@ mod entry;
 mod fixed;
 mod log;
 mod progress;
+mod refusal;
 mod sizing;
 mod targets;
 mod walk;
@@ -24,13 +25,15 @@ use thiserror::Error;
 
 use crate::config::Walk;
 use crate::fs::{self, Backend, FileKind, Gate, Home};
-use crate::plan::{self, AggressiveItems, Plan, PlanBuilder, Size, ToolCmds, WalkSkip, WalkSkips};
-use crate::process::{self, Process, ProcessTable};
+use crate::plan::{self, AggressiveItems, Needs, Plan, PlanBuilder, ToolCmds, WalkSkip, WalkSkips};
+use crate::process::{self, ProcessTable};
 use crate::rules::{RuleId, RuleSet, Shape, Tier, Twin};
 
-pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry};
+pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry, Sealed};
 pub use log::{Log, Problem, Skipped};
 pub use progress::{NoProgress, Progress, StderrProgress};
+pub(crate) use refusal::Refusals;
+pub use refusal::Refused;
 pub use sizing::{Measure, Sizer};
 
 use fixed::{FixedClaim, FixedTargets};
@@ -58,11 +61,12 @@ pub struct Settings {
     pub aggressive: AggressiveItems,
 }
 
-/// What one scan found.
+/// What one scan found, in any mode: tree and caches here, app and orphans in
+/// [`crate::apps`].
 #[derive(Debug)]
 pub struct Scan {
     pub plan: Plan,
-    /// Targets a running process executes from, kept out of the plan.
+    /// Items a running process executes from, kept out of the plan, sorted by path.
     pub refused: Vec<Refused>,
     /// Paths the walk or the sizing did not enter, sorted by path.
     pub skipped: Vec<Skipped>,
@@ -76,19 +80,6 @@ impl Scan {
     pub fn skip_counts(&self) -> WalkSkips {
         self.skipped.iter().map(|skipped| skipped.reason).collect()
     }
-}
-
-/// A target left out of the plan because a process executes from it
-/// (`docs/spec/safety.md#running-processes`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Refused {
-    pub path: PathBuf,
-    /// Every rule that matched the path, sorted.
-    pub rules: Vec<String>,
-    pub process: Process,
-    /// Sized apart from the plan, for the stats; its hardlinks are counted once among
-    /// the refused targets and do not take bytes from a planned one.
-    pub size: Size,
 }
 
 /// One rule accepting a target, under the tier its field came from.
@@ -139,7 +130,7 @@ impl<B: Backend + Sync> Scanner<B> {
             log: &log,
         };
         match root_meta.is_dataless() && !self.settings.walk.enter_placeholders {
-            true => log.skip(root, WalkSkip::Placeholder),
+            true => log.skip(root, WalkSkip::Closed(Needs::PLACEHOLDERS)),
             false => rayon::scope(|scope| walk.visit(scope, root, root_meta)),
         }
 
@@ -178,15 +169,12 @@ impl<B: Backend + Sync> Scanner<B> {
 
     // plan
 
-    /// The plan dedupes tools on their `cmd` text; a rule's argv is written back as its
-    /// words joined by single spaces, which the plan splits into the same argv.
     fn add_tools(&self, builder: &mut PlanBuilder, log: &Log) {
         for rule in self.rules.iter() {
             let Shape::Tool(argvs) = rule.shape() else {
                 continue;
             };
-            let texts = argvs.map(ToString::to_string);
-            let cmds = match &texts {
+            let cmds = match argvs {
                 Twin::Normal(cmd) => ToolCmds::Normal(cmd),
                 Twin::Aggressive(cmd) => ToolCmds::Aggressive(cmd),
                 Twin::Both { normal, aggressive } => ToolCmds::Twins {

@@ -15,7 +15,7 @@ fn bar_app_answering(fake: &FakeBackend, id: CommandOutput, name: CommandOutput)
     quiet(fake);
 }
 
-fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scanned, Error> {
+fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
         &gate(fake, &ALL_ROOTS),
         Path::new(app),
@@ -108,8 +108,8 @@ fn refuses_a_file_named_like_an_app() {
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
 }
 
-/// App mode never crosses volumes (`docs/spec/safety.md#walk-skips`), and a bundle
-/// that is a volume root would plan that whole volume.
+/// A mount point is never planned, and a bundle that is a volume root would plan that
+/// whole volume.
 #[test]
 fn refuses_a_bundle_that_is_a_mounted_volume_before_reading_or_sizing_it() {
     let fake = FakeBackend::new();

@@ -14,7 +14,7 @@ use std::path::Path;
 
 use pack_fixture::{
     Canned, DATA, OWNER, ROSIE_PACK, ROSIE_REMOVED, ROSIE_SET_ASIDE, ROSIE_STAGING, ROSIE_URL, at,
-    contents, fake_home, gate, home, listing,
+    contents, fake_home, gate, home, installed, listing,
 };
 use rosie::fs::Op;
 use rosie::fs::fake::FakeBackend;
@@ -56,14 +56,14 @@ fn assert_no_copies_beside_the_pack(fake: &FakeBackend) {
     }
 }
 
-fn assert_offline_first_run_pulls<B: rosie::fs::Backend>(store: &Store<B>) {
+fn assert_offline_first_run_pulls<B: rosie::fs::Backend>(fake: &FakeBackend, store: &Store<B>) {
     let result = packs::first_run(store, &Canned::offline(), at(9));
 
     assert!(
         matches!(&result, Err(Error::Download { url, .. }) if url == ROSIE_URL),
         "the next run must pull, not bring a pack back: {result:?}"
     );
-    assert_eq!(store.installed().expect("list packs"), vec![]);
+    assert_eq!(installed(fake), vec![]);
 }
 
 // pull: crash while staging
@@ -90,7 +90,7 @@ fn a_staging_copy_an_interrupted_first_pull_left_is_never_installed() {
     let gate = gate(&fake);
     let store = Store::new(&gate, &home(), Path::new(DATA));
 
-    assert_offline_first_run_pulls(&store);
+    assert_offline_first_run_pulls(&fake, &store);
     assert_no_copies_beside_the_pack(&fake);
 }
 
@@ -110,7 +110,7 @@ fn first_run_puts_back_a_pack_an_interrupted_swap_set_aside() {
     assert!(matches!(outcome, FirstRun::Ready), "got {outcome:?}");
     assert_eq!(network.requested(), Vec::<String>::new());
     assert_eq!(contents(&fake, format!("{ROSIE_PACK}/node.toml")), V1);
-    assert_eq!(store.installed().expect("list packs"), rosie_pulled_at(1));
+    assert_eq!(installed(&fake), rosie_pulled_at(1));
     assert_no_copies_beside_the_pack(&fake);
 }
 
@@ -142,10 +142,10 @@ fn removing_a_pack_an_interrupted_swap_set_aside_removes_it() {
 
     assert_eq!(removed, Source::default());
     assert_no_copies_beside_the_pack(&fake);
-    assert_offline_first_run_pulls(&store);
+    assert_offline_first_run_pulls(&fake, &store);
 }
 
-// pull: the new pack moves in but the old one cannot be put back
+// pull: the new pack cannot move in, and the old one cannot be put back
 
 #[test]
 fn a_failed_swap_whose_restore_also_fails_names_the_set_aside_copy() {
@@ -171,6 +171,40 @@ fn a_failed_swap_whose_restore_also_fails_names_the_set_aside_copy() {
     assert_eq!(contents(&fake, format!("{ROSIE_SET_ASIDE}/node.toml")), V1);
 }
 
+// pull: the new pack cannot move in, and its staging copy cannot be cleared
+
+#[test]
+fn a_failed_swap_puts_the_old_pack_back_even_when_staging_cannot_be_cleared() {
+    let fake = fake_home();
+    add_copy(&fake, ROSIE_PACK, V1, 1);
+    fake.fail_on(ROSIE_STAGING, Op::Rename, ErrorKind::PermissionDenied);
+    fake.fail_on(
+        format!("{ROSIE_STAGING}/node.toml"),
+        Op::RemoveFile,
+        ErrorKind::PermissionDenied,
+    );
+    let gate = gate(&fake);
+    let store = Store::new(&gate, &home(), Path::new(DATA));
+    let tarball = Tarball::pack(&[("node.toml", V2)]).gzip();
+
+    let result = packs::pull(
+        &store,
+        &Canned::serving(ROSIE_URL, tarball),
+        &Source::default(),
+        at(2),
+    );
+
+    assert!(
+        matches!(&result, Err(Error::Leftover { .. })),
+        "got {result:?}"
+    );
+    assert_eq!(contents(&fake, format!("{ROSIE_PACK}/node.toml")), V1);
+    assert!(
+        !fake.exists(ROSIE_SET_ASIDE),
+        "the old pack is still set aside"
+    );
+}
+
 // pull: crash after a good swap, before the old pack is discarded
 
 #[test]
@@ -184,7 +218,7 @@ fn a_stale_copy_beside_a_newer_pack_is_discarded_not_restored() {
     let outcome = packs::first_run(&store, &Canned::offline(), at(9)).expect("ready");
 
     assert!(matches!(outcome, FirstRun::Ready), "got {outcome:?}");
-    assert_eq!(store.installed().expect("list packs"), rosie_pulled_at(2));
+    assert_eq!(installed(&fake), rosie_pulled_at(2));
     assert_eq!(contents(&fake, format!("{ROSIE_PACK}/node.toml")), V2);
     assert_no_copies_beside_the_pack(&fake);
 }
@@ -200,7 +234,7 @@ fn removing_a_pack_with_a_stale_copy_beside_it_does_not_resurrect_the_copy() {
     remove_rosie(&store).expect("remove rosie");
 
     assert_no_copies_beside_the_pack(&fake);
-    assert_offline_first_run_pulls(&store);
+    assert_offline_first_run_pulls(&fake, &store);
 }
 
 // pull: discarding the old pack after a good swap fails partway
@@ -236,7 +270,7 @@ fn a_failed_discard_after_a_good_swap_leaves_nothing_restorable() {
     );
 
     assert!(result.is_err(), "the failed delete is reported: {result:?}");
-    assert_eq!(store.installed().expect("list packs"), rosie_pulled_at(2));
+    assert_eq!(installed(&fake), rosie_pulled_at(2));
     assert!(
         !fake.exists(ROSIE_SET_ASIDE),
         "the old copy must not wait under the restorable name"
@@ -254,7 +288,7 @@ fn a_partly_discarded_copy_beside_a_newer_pack_is_cleared() {
     let outcome = packs::first_run(&store, &Canned::offline(), at(9)).expect("ready");
 
     assert!(matches!(outcome, FirstRun::Ready), "got {outcome:?}");
-    assert_eq!(store.installed().expect("list packs"), rosie_pulled_at(2));
+    assert_eq!(installed(&fake), rosie_pulled_at(2));
     assert_no_copies_beside_the_pack(&fake);
 }
 
@@ -269,7 +303,7 @@ fn removing_a_pack_with_a_partly_discarded_copy_beside_it_removes_both() {
     remove_rosie(&store).expect("remove rosie");
 
     assert_no_copies_beside_the_pack(&fake);
-    assert_offline_first_run_pulls(&store);
+    assert_offline_first_run_pulls(&fake, &store);
 }
 
 // remove: crash after the pack is renamed aside, before or during its delete
@@ -281,7 +315,7 @@ fn a_removed_copy_an_interrupted_remove_left_is_never_installed() {
     let gate = gate(&fake);
     let store = Store::new(&gate, &home(), Path::new(DATA));
 
-    assert_offline_first_run_pulls(&store);
+    assert_offline_first_run_pulls(&fake, &store);
     assert_no_copies_beside_the_pack(&fake);
 }
 
@@ -309,7 +343,7 @@ fn an_interrupted_remove_does_not_resurrect_the_pack() {
     assert!(result.is_err(), "the failed delete is reported: {result:?}");
     assert!(!fake.exists(ROSIE_PACK), "the pack folder stays gone");
     assert!(!fake.exists(ROSIE_SET_ASIDE));
-    assert_eq!(store.installed().expect("list packs"), vec![]);
+    assert_eq!(installed(&fake), vec![]);
 }
 
 // remove: crash after the delete, before the empty owner folder goes
@@ -326,5 +360,5 @@ fn an_empty_owner_folder_an_interrupted_remove_left_is_not_a_pack() {
         .expect("first run pulls");
 
     assert!(matches!(outcome, FirstRun::Pulled(_)), "got {outcome:?}");
-    assert_eq!(store.installed().expect("list packs"), rosie_pulled_at(9));
+    assert_eq!(installed(&fake), rosie_pulled_at(9));
 }

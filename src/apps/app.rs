@@ -4,6 +4,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 
+use super::Error;
 use super::bundle::{
     Bundle, BundleId, Unidentified, Unlistable, installed_apps, is_app_path, read_bundle,
 };
@@ -11,18 +12,19 @@ use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
 use super::matching::{claimed_by_other, claims_by_id, claims_by_name};
 use super::search::{Candidate, Search};
-use super::{Error, Scanned};
 use crate::fs::{Backend, FileKind, Gate, Home, SystemArgv, SystemTool};
 use crate::plan::{AggressiveItems, Report, Twin};
 use crate::process::{self, ProcessTable};
-use crate::scan::{Entry, Mounts};
+use crate::scan::{Entry, Mounts, Scan};
 
 /// Scans for `app` and its leftovers in the user's `home` and the system folders.
 ///
 /// The app argument is a user-typed path: a symlink or misspelling in it is refused, and
-/// so is a bundle that is the root of a mounted volume, since app mode never crosses
-/// volumes. The plan is refused while any process executes from the bundle. An installed app rosie
-/// cannot identify is reported, since leftovers the two apps share may be ticked.
+/// so is a bundle that is a dataless placeholder, which rosie does not open, or the root
+/// of a mounted volume, since rosie never plans a mount point, which would plan the
+/// whole volume. The plan is refused while any process executes from the bundle, and a
+/// leftover a process executes from is refused. An installed app rosie cannot identify
+/// is reported, since leftovers the two apps share may be ticked.
 ///
 /// The app itself may have no bundle-ID key: it is the app the user asked to remove, not
 /// one rosie must first identify among others, so this is not refused. Its own bundle is
@@ -34,15 +36,12 @@ pub fn scan_app<B>(
     home: &Home,
     aggressive: AggressiveItems,
     mounts: Mounts,
-) -> Result<Scanned, Error>
+) -> Result<Scan, Error>
 where
     B: Backend + Sync,
 {
     let path = gate.check_typed_path(app)?;
     let entry = Entry::lstat(gate, &path)?;
-    if entry.is_mount(gate)? {
-        return Err(Error::Mount { path });
-    }
     let name = path
         .file_name()
         .unwrap_or_default()
@@ -56,7 +55,8 @@ where
         return Err(Error::NotAnApp { path });
     };
     let bundle = read_bundle(gate, &path)?;
-    refuse_running(gate, &bundle)?;
+    let processes = ProcessTable::query(gate)?;
+    refuse_running(&processes, &bundle)?;
     let installed = installed_apps(gate, home)?;
     let others: Vec<BundleId> = installed
         .apps
@@ -69,7 +69,7 @@ where
         None => "app".to_owned(),
     };
 
-    let mut search = Search::new(gate, home, mounts, aggressive);
+    let mut search = Search::new(gate, home, mounts, &processes, aggressive);
     search.add(itself, Holds::Plain, &rule, Twin::Normal)?;
 
     for location in leftover_locations(home) {
@@ -117,8 +117,9 @@ fn id_match_twin(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -
     }
 }
 
-fn refuse_running<B: Backend>(gate: &Gate<B>, bundle: &Bundle) -> Result<(), Error> {
-    let processes = ProcessTable::query(gate)?;
+/// The whole plan is refused while the app itself runs (`docs/spec/app.md`); a leftover
+/// a process runs from is refused alone, as in every mode.
+fn refuse_running(processes: &ProcessTable, bundle: &Bundle) -> Result<(), Error> {
     match processes.executing_from(&bundle.path) {
         Some(process) => Err(Error::Running {
             app: bundle.path.clone(),

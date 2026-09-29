@@ -6,10 +6,11 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, Gate, Op};
+use rosie::fs::{Bounds, Gate, Home, Op};
+use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
-    Candidate, Error, LuaSandbox, Mode, Name, Problem, RuleDirs, RuleId, RuleSet, Shape, Source,
-    Tier, Twin,
+    Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source, Tier,
+    Twin,
 };
 
 const HOME: &str = "/Users/me";
@@ -30,8 +31,17 @@ fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
     Gate::new(fake, bounds()).expect("absolute bounds")
 }
 
+/// Loads the rules of the packs the pack store lists, then the user's rules. What the
+/// store refuses in the packs folder is tested with the store.
 fn load(fake: &FakeBackend) -> Result<RuleSet, Error> {
-    RuleSet::load(&gate(fake), &RuleDirs::new(&bounds()))
+    let gate = gate(fake);
+    let bounds = bounds();
+    let home = Home::new(Path::new(HOME)).expect("absolute home");
+    let packs = SettlePacks
+        .run(&Store::new(&gate, &home, &bounds.data_dir))
+        .and_then(|settled| settled.pack_folders())
+        .expect("installed packs list");
+    RuleSet::load(&gate, &RuleLayers::new(packs, &bounds.config_dir))
 }
 
 fn loaded(fake: &FakeBackend) -> RuleSet {
@@ -44,12 +54,6 @@ fn id(text: &str) -> RuleId {
 
 fn ids(rules: &RuleSet) -> Vec<String> {
     rules.iter().map(|rule| rule.id().to_string()).collect()
-}
-
-fn shape<'a>(rules: &'a RuleSet, text: &str) -> &'a Shape {
-    let wanted = id(text);
-    let rule = rules.iter().find(|rule| *rule.id() == wanted);
-    rule.expect("rule loaded").shape()
 }
 
 /// The rules that accept `path`, with their tier, given the names in its parent.
@@ -236,8 +240,6 @@ fn refuses_rules_and_packs_defined_twice() {
     let same_pack_name = FakeBackend::new();
     same_pack_name.add_dir(ROSIE_PACK);
     same_pack_name.add_dir(format!("{PACKS}/fork/rosie"));
-    let user_pack = FakeBackend::new();
-    user_pack.add_dir(format!("{PACKS}/someone/user"));
     let overridden_twice = FakeBackend::new();
     overridden_twice.add_file(
         format!("{ROSIE_PACK}/a.toml"),
@@ -259,29 +261,19 @@ fn refuses_rules_and_packs_defined_twice() {
         Err(Error::DuplicatePack { pack, .. }) if pack == "rosie"
     ));
     assert!(matches!(
-        load(&user_pack),
-        Err(Error::DuplicatePack { pack, .. }) if pack == "user"
-    ));
-    assert!(matches!(
         load(&overridden_twice),
         Err(Error::DuplicateRule { rule, .. }) if rule == id("rosie/x")
     ));
 }
 
 #[test]
-fn refuses_invalid_pack_and_rule_names() {
-    let bad_pack = FakeBackend::new();
-    bad_pack.add_file(
-        format!("{PACKS}/someone/my.rules/x.toml"),
-        "[rules.x]\nstrategy = \"name\"\ntarget = \"x\"",
-    );
+fn refuses_invalid_rule_names() {
     let bad_rule = FakeBackend::new();
     bad_rule.add_file(
         format!("{USER_RULES}/x.toml"),
         "[rules.\"my rule\"]\nstrategy = \"name\"\ntarget = \"x\"",
     );
 
-    assert!(matches!(load(&bad_pack), Err(Error::PackName { .. })));
     assert!(matches!(
         load(&bad_rule),
         Err(Error::Rule { rule, problem: Problem::Name(_), .. }) if rule == "my rule"
@@ -307,22 +299,18 @@ fn names_the_file_and_rule_of_an_invalid_rule() {
 }
 
 #[test]
-fn refuses_rule_files_and_packs_behind_symlinks() {
+fn refuses_rule_files_and_folders_behind_symlinks() {
     let linked_file = FakeBackend::new();
     linked_file.add_file("/Users/me/dotfiles/node.toml", "");
     linked_file.add_symlink(
         format!("{ROSIE_PACK}/node.toml"),
         "/Users/me/dotfiles/node.toml",
     );
-    let linked_pack = FakeBackend::new();
-    linked_pack.add_dir("/Users/me/dotfiles/pack");
-    linked_pack.add_symlink(format!("{PACKS}/me/pack"), "/Users/me/dotfiles/pack");
     let linked_user_dir = FakeBackend::new();
     linked_user_dir.add_file("/Users/me/dotfiles/rules/x.toml", "");
     linked_user_dir.add_symlink(USER_RULES, "/Users/me/dotfiles/rules");
 
     assert!(matches!(load(&linked_file), Err(Error::WrongKind { .. })));
-    assert!(matches!(load(&linked_pack), Err(Error::WrongKind { .. })));
     assert!(matches!(
         load(&linked_user_dir),
         Err(Error::Fs(rosie::fs::Error::Symlink { .. }))
@@ -330,40 +318,37 @@ fn refuses_rule_files_and_packs_behind_symlinks() {
 }
 
 #[test]
-fn refuses_a_packs_or_rules_path_that_is_not_a_folder() {
-    let packs_file = FakeBackend::new();
-    packs_file.add_file(PACKS, "");
-    let rules_file = FakeBackend::new();
-    rules_file.add_file(USER_RULES, "");
+fn refuses_a_rules_path_that_is_not_a_folder() {
+    let fake = FakeBackend::new();
+    fake.add_file(USER_RULES, "");
 
-    for fake in [packs_file, rules_file] {
-        let result = load(&fake);
-        assert!(
-            matches!(
-                &result,
-                Err(Error::WrongKind {
-                    found: "file",
-                    expected: "folder",
-                    ..
-                })
-            ),
-            "{:?}",
-            result.err()
-        );
-    }
+    let result = load(&fake);
+
+    assert!(
+        matches!(
+            &result,
+            Err(Error::WrongKind {
+                found: "file",
+                expected: "folder",
+                ..
+            })
+        ),
+        "{:?}",
+        result.err()
+    );
 }
 
 #[test]
 fn reports_a_failed_inspection_of_a_rules_folder() {
     let fake = FakeBackend::new();
-    fake.add_dir(PACKS);
-    fake.fail_on(PACKS, Op::Lstat, ErrorKind::PermissionDenied);
+    fake.add_dir(USER_RULES);
+    fake.fail_on(USER_RULES, Op::Lstat, ErrorKind::PermissionDenied);
 
     let result = load(&fake);
 
     assert!(
         matches!(&result, Err(Error::Fs(rosie::fs::Error::Io { op: Op::Lstat, path, .. }))
-            if path == Path::new(PACKS)),
+            if path == Path::new(USER_RULES)),
         "{:?}",
         result.err()
     );
@@ -386,28 +371,6 @@ fn reports_a_failed_read_naming_the_file() {
         Err(Error::Fs(rosie::fs::Error::Io { op: Op::ReadFile, path, .. }))
             if path == Path::new(ROSIE_PACK).join("node.toml")
     ));
-}
-
-// modes
-
-#[test]
-fn infers_modes_from_the_rule_shape() {
-    let fake = FakeBackend::new();
-    fake.add_file(
-        format!("{ROSIE_PACK}/all.toml"),
-        "[rules.folder]\nstrategy = \"marker\"\ntarget = \"target\"\nmarker = [\"Cargo.toml\"]\n\
-         [rules.cache]\nstrategy = \"path\"\npaths = [\"~/.npm\"]\n\
-         [rules.tool]\nstrategy = \"tool\"\ncmd = \"docker system prune\"",
-    );
-
-    let rules = loaded(&fake);
-
-    assert_eq!(shape(&rules, "rosie/folder").modes(), &[Mode::Tree]);
-    assert_eq!(
-        shape(&rules, "rosie/cache").modes(),
-        &[Mode::Caches, Mode::Tree]
-    );
-    assert_eq!(shape(&rules, "rosie/tool").modes(), &[Mode::Caches]);
 }
 
 // matching

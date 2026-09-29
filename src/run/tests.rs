@@ -155,6 +155,23 @@ fn skips_a_missing_entry_as_stale() {
 }
 
 #[test]
+fn skips_an_entry_below_a_folder_that_became_a_file_as_stale() {
+    let fake = FakeBackend::new();
+    fake.add_file("/w/a", "was a folder");
+    respond_ps(&fake, "");
+    let plan = plan(&folder("/w/a/target", 30, "ticked"));
+
+    let (stats, recorder) = run(&fake, &["/w"], &plan);
+
+    assert_eq!(stats.stale, tally(1, 30, 0));
+    assert!(!stats.any_failed());
+    assert_eq!(
+        result_for(&recorder, "/w/a/target").outcome,
+        Outcome::Skipped(SkipReason::Stale)
+    );
+}
+
+#[test]
 fn skips_an_entry_whose_type_changed_as_stale() {
     let fake = FakeBackend::new();
     fake.add_file("/w/target", "now a file");
@@ -180,16 +197,68 @@ fn refuses_an_item_a_process_executes_from() {
     assert!(fake.exists("/w/app/target/debug/server"));
 }
 
+/// A bootout can stop the very process that runs from the item, so a `ps` read after it
+/// would no longer see that process: the table is read before any bootout, and a
+/// refused delete keeps its job loaded.
 #[test]
-fn fails_every_delete_when_the_process_table_cannot_be_read() {
+fn refuses_a_delete_and_skips_its_bootout_when_a_process_runs_from_it() {
     let fake = FakeBackend::new();
-    fake.add_file("/w/app/target/x", "x");
-    let plan = plan(&folder("/w/app/target", 50, "ticked"));
+    let support = "/Users/me/Library/Application Support/X";
+    let plist = format!("{support}/com.x.agent.plist");
+    fake.add_file(&plist, "<plist/>");
+    fake.add_file(format!("{support}/agent"), "bin");
+    respond_ps(&fake, &format!("  77  1  501 {support}/agent\n"));
+    let bootout = Argv::new("/bin/launchctl")
+        .arg("bootout")
+        .arg("gui/501")
+        .arg(&plist);
+    fake.respond(bootout.clone(), output(0, "", ""));
+    let plan = plan(&format!(
+        "{}[[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"gui/501\"\n",
+        folder(support, 1, "ticked")
+    ));
 
-    let (stats, _) = run(&fake, &["/w"], &plan);
+    let (stats, recorder) = run(&fake, &["/Users/me/Library"], &plan);
 
-    assert_eq!(stats.failed, tally(1, 50, 0));
-    assert!(fake.exists("/w/app/target/x"));
+    assert!(
+        !fake.calls().contains(&Call::Run(bootout)),
+        "the job was booted out"
+    );
+    assert!(fake.exists(&plist));
+    assert_eq!(
+        result_for(&recorder, support).outcome,
+        Outcome::Skipped(SkipReason::RunningProcess)
+    );
+    assert_eq!(stats.running_process, tally(2, 1, 1));
+}
+
+/// Without a readable process table no delete can be checked, so each one is withheld
+/// together with its bootouts, and the run fails.
+#[test]
+fn withholds_every_delete_and_its_bootout_when_the_process_table_cannot_be_read() {
+    let fake = FakeBackend::new();
+    let support = "/Users/me/Library/Application Support/X";
+    let plist = format!("{support}/com.x.agent.plist");
+    fake.add_file(&plist, "<plist/>");
+    let bootout = Argv::new("/bin/launchctl")
+        .arg("bootout")
+        .arg("gui/501")
+        .arg(&plist);
+    fake.respond(bootout.clone(), output(0, "", ""));
+    let plan = plan(&format!(
+        "{}[[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"gui/501\"\n",
+        folder(support, 50, "ticked")
+    ));
+
+    let (stats, _) = run(&fake, &["/Users/me/Library"], &plan);
+
+    assert!(
+        !fake.calls().contains(&Call::Run(bootout)),
+        "the job was booted out"
+    );
+    assert!(fake.exists(&plist));
+    assert_eq!(stats.process_check_failed, tally(2, 50, 1));
+    assert!(stats.any_failed());
 }
 
 #[test]
@@ -628,6 +697,7 @@ fn keeps_a_user_folder_whose_system_bootout_never_ran() {
         Outcome::Skipped(SkipReason::SudoRefused)
     );
     assert_eq!(stats.sudo_refused, tally(2, 1, 1));
+    assert!(!stats.any_failed());
 }
 
 #[test]
@@ -667,4 +737,37 @@ fn keeps_a_user_folder_when_the_elevated_child_never_launches() {
         Outcome::Skipped(SkipReason::SudoRefused)
     );
     assert_eq!(stats.sudo_refused, tally(2, 1, 1));
+}
+
+/// A child that could not read its process table withholds the bootout, and says so:
+/// the user's folder keeps its plist while the job may still be loaded, and the run
+/// fails.
+#[test]
+fn keeps_a_user_folder_whose_bootout_the_child_withheld_for_an_unreadable_process_table() {
+    let (fake, plan) = user_folder_with_system_plist();
+    let withheld = ItemResult {
+        subject: Subject::Command {
+            argv: Argv::new("/bin/launchctl")
+                .arg("bootout")
+                .arg("system")
+                .arg(HELPER_PLIST),
+            output: Vec::new(),
+        },
+        size: ItemSize::Unknown,
+        outcome: Outcome::Skipped(SkipReason::ProcessCheckFailed),
+        reason: "cannot check for running processes".to_owned(),
+    };
+    let mut report = outcomes::Writer::begin(Vec::new()).expect("header");
+    report.record(&withheld).expect("recordable");
+    let report = String::from_utf8(report.into_inner()).expect("utf-8 report");
+    fake.respond_to_sudo(output(0, &report, ""));
+
+    let (stats, recorder) = run(&fake, &["/Users/me/Library"], &plan);
+
+    assert!(fake.exists(HELPER_PLIST));
+    assert_eq!(
+        result_for(&recorder, HELPER).outcome,
+        Outcome::Skipped(SkipReason::ProcessCheckFailed)
+    );
+    assert!(stats.any_failed());
 }

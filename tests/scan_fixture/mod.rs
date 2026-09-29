@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use rosie::config::Walk;
 use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, CommandOutput, Exit, Gate, Home};
+use rosie::packs::{SettlePacks, Store};
 use rosie::plan::{AggressiveItems, Status};
 use rosie::process::ProcessTable;
-use rosie::rules::{Name, RuleDirs, RuleSet};
+use rosie::rules::{Name, RuleLayers, RuleSet};
 use rosie::scan::{Progress, Scan, Scanner, Settings};
 
 pub const HOME: &str = "/Users/me";
@@ -105,7 +106,13 @@ pub fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
 pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     let bounds = bounds_with_roots(options.roots);
     let gate = Gate::new(fake, bounds.clone()).expect("absolute bounds");
-    let rules = RuleSet::load(&gate, &RuleDirs::new(&bounds)).expect("rules load");
+    let home = Home::new(Path::new(HOME)).expect("absolute home");
+    let packs = SettlePacks
+        .run(&Store::new(&gate, &home, Path::new(DATA)))
+        .and_then(|settled| settled.pack_folders())
+        .expect("installed packs list");
+    let rules =
+        RuleSet::load(&gate, &RuleLayers::new(packs, &bounds.config_dir)).expect("rules load");
     let rules = match options.only.is_empty() {
         true => rules,
         false => rules.only(&names(&options.only)).expect("known rule names"),
@@ -201,7 +208,7 @@ pub fn size_of(scan: &Scan, path: &str) -> u64 {
     delete.expect("path is planned").size.get()
 }
 
-/// The skipped paths as (path, reason label).
+/// The skipped paths as (path, reason).
 pub fn skipped(scan: &Scan) -> Vec<(&str, rosie::plan::WalkSkip)> {
     scan.skipped
         .iter()

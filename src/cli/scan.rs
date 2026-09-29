@@ -5,17 +5,28 @@ use std::path::{Path, PathBuf};
 
 use super::args::{CleanArgs, Mode, PlanSource, RuleFlags, ScanArgs, ScanFlags};
 use super::console::{Console, Finish, PromptError};
-use super::findings::{Findings, stats_lines};
+use super::findings::{findings_lines, stats_lines};
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps;
 use crate::config::{ConfigFile, Walk};
 use crate::fs::{Backend, Gate};
 use crate::packs::Network;
-use crate::plan::{AggressiveItems, Plan, WalkSkips};
+use crate::plan::{AggressiveItems, ItemSize, Outcome, Plan, SkipReason, WalkSkips};
 use crate::rules::RuleSet;
 use crate::run::{Elevation, Runner};
-use crate::scan::{Scanner, Settings};
+use crate::scan::{Refused, Scan, Scanner, Settings};
+
+/// What the scan behind a run skipped, which the end-of-run stats count beside the
+/// run's own items (`docs/spec/plan.md#stats`). A saved plan's run has none.
+#[derive(Debug, Clone, Copy, Default)]
+struct ScanSkips<'s> {
+    walk: WalkSkips,
+    /// Items left out of the plan because a process executes from them.
+    refused: &'s [Refused],
+}
+
+const RUNNING_PROCESS: Outcome = Outcome::Skipped(SkipReason::RunningProcess);
 
 /// How `scan` prints the plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -46,6 +57,16 @@ impl Answer {
 
 const PROMPT: &str = "Clean the ticked items? [y/N/e]";
 
+/// How the `clean` confirmation ended.
+enum Confirmation {
+    /// The user answered `y`: run this plan, trimmed by any `e` edits.
+    Run(Plan),
+    /// Nothing is ticked, so nothing was asked.
+    NothingTicked,
+    /// The user answered `N`, or cancelled the prompt.
+    Declined,
+}
+
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn scan(&mut self, args: ScanArgs) -> Result<ExitStatus, Error> {
         let format = match args.sh {
@@ -53,16 +74,16 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             false => Format::Toml,
         };
         let config = self.config()?;
-        let findings = self.find(&config, &args.mode, &args.flags, "rosie scan app <X.app>")?;
+        let scan = self.find(&config, &args.mode, &args.flags, "rosie scan app <X.app>")?;
 
         let text = match format {
-            Format::Toml => findings.plan.to_toml()?,
-            Format::Sh => findings.plan.to_sh(),
+            Format::Toml => scan.plan.to_toml()?,
+            Format::Sh => scan.plan.to_sh(),
         };
         self.say(text.trim_end())?;
-        self.show_findings(&findings, &args.mode)?;
-        self.show_stats(&findings.plan, findings.skip_counts())?;
-        Ok(ExitStatus::failed_if(findings.errored()))
+        self.show_findings(&scan, &args.mode)?;
+        self.show_stats(&scan.plan, scan.skip_counts())?;
+        Ok(ExitStatus::failed_if(!scan.problems.is_empty()))
     }
 
     /// Scans, shows the plan, and runs it once the user answers `y`; `e` trims it first.
@@ -75,13 +96,19 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             ));
         }
         let config = self.config()?;
-        let findings = self.find(&config, &args.mode, &args.flags, "rosie clean app <X.app>")?;
-        let skips = findings.skip_counts();
-        let errored = findings.errored();
-        self.show_findings(&findings, &args.mode)?;
+        let scan = self.find(&config, &args.mode, &args.flags, "rosie clean app <X.app>")?;
+        let skips = ScanSkips {
+            walk: scan.skip_counts(),
+            refused: &scan.refused,
+        };
+        let errored = !scan.problems.is_empty();
+        self.show_findings(&scan, &args.mode)?;
 
-        let Some(plan) = self.confirm(findings.plan, skips)? else {
-            return Ok(ExitStatus::failed_if(errored));
+        let plan = match self.confirm(scan.plan, skips.walk)? {
+            Confirmation::Run(plan) => plan,
+            Confirmation::NothingTicked | Confirmation::Declined => {
+                return Ok(ExitStatus::failed_if(errored));
+            }
         };
         let failed = self.execute(&config, &plan, skips)?;
         Ok(ExitStatus::failed_if(failed || errored))
@@ -97,7 +124,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let plan = Plan::parse(text)?;
 
         let config = self.config()?;
-        let failed = self.execute(&config, &plan, WalkSkips::default())?;
+        let failed = self.execute(&config, &plan, ScanSkips::default())?;
         Ok(ExitStatus::failed_if(failed))
     }
 
@@ -109,7 +136,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         mode: &Mode,
         flags: &ScanFlags,
         app_usage: &str,
-    ) -> Result<Findings, Error> {
+    ) -> Result<Scan, Error> {
         let walk = walk_with_mounts_flag(config.config().walk, flags);
         let aggressive = match flags.aggressive {
             true => AggressiveItems::Ticked,
@@ -127,7 +154,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 let progress = self.console.progress();
                 let scan = scanner.tree(&dir, &progress);
                 progress.finish()?;
-                Ok(scan?.into())
+                Ok(scan?)
             }
             Mode::Caches { rules } => {
                 let walk = walk_with_rule_flags(walk, rules);
@@ -136,7 +163,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 let progress = self.console.progress();
                 let scan = scanner.caches(&progress);
                 progress.finish()?;
-                Ok(scan?.into())
+                Ok(scan?)
             }
             Mode::App { app } => {
                 let app = match app {
@@ -144,9 +171,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     None => self.pick_app(&gate, app_usage)?,
                 };
                 let home = &self.env.home;
-                Ok(apps::scan_app(&gate, &app, home, aggressive, walk.into())?.into())
+                Ok(apps::scan_app(&gate, &app, home, aggressive, walk.into())?)
             }
-            Mode::Orphans => Ok(apps::scan_orphans(&gate, home, aggressive, walk.into())?.into()),
+            Mode::Orphans => Ok(apps::scan_orphans(&gate, home, aggressive, walk.into())?),
         }
     }
 
@@ -177,15 +204,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     // confirming and running
 
-    /// Shows the plan and asks until the user answers `y` or `N`. Returns the plan to
-    /// run, trimmed by any `e` edits, or `None` when nothing is to run.
-    fn confirm(&mut self, mut plan: Plan, skips: WalkSkips) -> Result<Option<Plan>, Error> {
+    /// Shows the plan and asks until the user answers `y` or `N`, or nothing is ticked.
+    fn confirm(&mut self, mut plan: Plan, skips: WalkSkips) -> Result<Confirmation, Error> {
         loop {
             self.say(plan.to_toml()?.trim_end())?;
             self.show_stats(&plan, skips)?;
             if plan.ticked().is_empty() {
                 self.note("nothing to clean")?;
-                return Ok(None);
+                return Ok(Confirmation::NothingTicked);
             }
 
             let answer = match self.console.ask(PROMPT) {
@@ -194,10 +220,10 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 Err(error) => return Err(error.into()),
             };
             match answer {
-                Answer::Yes => return Ok(Some(plan)),
+                Answer::Yes => return Ok(Confirmation::Run(plan)),
                 Answer::No => {
                     self.note("nothing cleaned")?;
-                    return Ok(None);
+                    return Ok(Confirmation::Declined);
                 }
                 Answer::Edit => plan = self.edit(plan)?,
             }
@@ -219,12 +245,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     /// Runs the plan's ticked entries through a gate bounded by the config's roots, and
-    /// shows the end-of-run stats. Returns whether any item failed.
+    /// shows the end-of-run stats, the scan's skips among them. Returns whether any
+    /// item failed.
     fn execute(
         &mut self,
         config: &ConfigFile,
         plan: &Plan,
-        skips: WalkSkips,
+        skips: ScanSkips<'_>,
     ) -> Result<bool, Error> {
         let gate = self.roots_gate(config.config())?;
         let elevation = Elevation {
@@ -236,15 +263,18 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let mut stats = Runner::new(gate).run(plan, &elevation, &mut reporter);
         reporter.finish()?;
 
-        stats.walk_skips = skips;
+        for refused in skips.refused {
+            stats.record(ItemSize::Known(refused.size), RUNNING_PROCESS);
+        }
+        stats.walk_skips = skips.walk;
         self.note(stats.to_string().trim_end())?;
         Ok(stats.any_failed())
     }
 
     // output
 
-    fn show_findings(&mut self, findings: &Findings, mode: &Mode) -> Result<(), Error> {
-        for line in findings.lines(mode) {
+    fn show_findings(&mut self, scan: &Scan, mode: &Mode) -> Result<(), Error> {
+        for line in findings_lines(scan, mode) {
             self.note(&line)?;
         }
         Ok(())

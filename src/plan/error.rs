@@ -6,20 +6,14 @@ use super::LaunchDomain;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("rule {rule}: cmd is empty")]
-    EmptyCommand { rule: String },
-
     #[error("cmd is empty")]
     EmptyArgv,
 
     #[error("{text:?} holds a NUL byte, which no path or argument can carry")]
     NulByte { text: String },
 
-    #[error(
-        "rule {rule}: cmd {cmd:?} holds a quote or a backslash; \
-         cmd is split on whitespace and never run through a shell"
-    )]
-    QuotedCommand { rule: String, cmd: String },
+    #[error("command word {word:?} is not valid UTF-8, so a plan file cannot hold it")]
+    NonUtf8Word { word: String },
 
     #[error("{plist} is booted out of both {first} and {second}", plist = plist.display())]
     ConflictingLaunchDomain {

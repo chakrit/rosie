@@ -11,8 +11,8 @@ use super::*;
 use crate::fs::ROOT_UID;
 use crate::fs::fake::{FakeBackend, USER_UID};
 use crate::fs::{self, Home, Op};
-use crate::plan::{AggressiveItems, Delete, LaunchDomain, RunAs, Size, Status, WalkSkip};
-use crate::scan::Mounts;
+use crate::plan::{AggressiveItems, Delete, LaunchDomain, Needs, RunAs, Size, Status, WalkSkip};
+use crate::scan::{Mounts, Scan};
 
 mod app_bundle;
 mod app_scan;
@@ -25,7 +25,7 @@ mod symlinks;
 const BAR: &str = "/Applications/Bar.app";
 const NPLAYER: &str = "/Applications/nPlayer.app";
 
-fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scanned {
+fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scan {
     scan_app(
         &gate(fake, roots),
         Path::new(BAR),
@@ -36,12 +36,12 @@ fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) 
     .expect("app scan")
 }
 
-fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scanned {
+fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {
     scan_orphans(&gate(fake, &ALL_ROOTS), &home(), aggressive, Mounts::Skip).expect("orphan scan")
 }
 
 /// `(path, status)` of every delete entry, in plan order.
-fn deletes(scanned: &Scanned) -> Vec<(String, Status)> {
+fn deletes(scanned: &Scan) -> Vec<(String, Status)> {
     scanned
         .plan
         .deletes()
@@ -50,7 +50,7 @@ fn deletes(scanned: &Scanned) -> Vec<(String, Status)> {
         .collect()
 }
 
-fn entry<'a>(scanned: &'a Scanned, path: &str) -> &'a Delete {
+fn entry<'a>(scanned: &'a Scan, path: &str) -> &'a Delete {
     scanned
         .plan
         .deletes()
@@ -69,8 +69,9 @@ fn bar_app(fake: &FakeBackend) {
 }
 
 /// Bar in `/Applications`, Baz in a suite folder, Qux in `~/Applications`, and Notes and Sys
-/// in `/System/Applications` are installed.
+/// in `/System/Applications` are installed; only `launchd` runs.
 fn installed_suite(fake: &FakeBackend) {
+    running(fake, "    1     0     0 /sbin/launchd\n");
     install_app(fake, BAR, "com.foo.Bar", Some("Bar"));
     install_app(
         fake,

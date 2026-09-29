@@ -318,3 +318,76 @@ fn elevated_boots_a_user_items_job_out_and_leaves_the_delete_to_the_user() {
     assert!(!mutated(&fake), "{:?}", fake.calls());
     assert_eq!(recorder.finished.len(), 1, "only the bootout is reported");
 }
+
+// the roots gate before any bootout
+
+/// A plan run after its folder left the roots: the delete is refused before anything
+/// runs, so its job stays loaded and its plist stays where it is.
+#[test]
+fn elevated_keeps_the_job_loaded_when_its_plist_is_outside_the_roots() {
+    let plist = "/Library/LaunchDaemons/com.x.helper.plist";
+    let fake = FakeBackend::running_as(ROOT_UID);
+    fake.add_file(plist, "<plist/>");
+    fake.chown_with_ancestors(plist, ROOT_UID);
+    respond_ps(&fake, "");
+    let bootout = Argv::new("/bin/launchctl")
+        .arg("bootout")
+        .arg("system")
+        .arg(plist);
+    fake.respond(bootout.clone(), output(0, "", ""));
+    let plan = plan(&format!(
+        "[[delete]]\npath = \"{plist}\"\ntype = \"file\"\nsize = 4096\nrules = [\"app/x\"]\n\
+         status = \"ticked\"\nsudo = true\n\
+         [[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"system\"\n"
+    ));
+
+    let recorder = run_as_root(&fake, &["/Library/Caches"], &plan);
+
+    assert!(
+        !fake.calls().contains(&Call::Run(bootout)),
+        "the job was booted out"
+    );
+    assert!(fake.exists(plist));
+    assert!(!mutated(&fake), "{:?}", fake.calls());
+    assert_eq!(result_for(&recorder, plist).outcome, Outcome::Failed);
+}
+
+/// A user's folder holding a `system` daemon's plist, which the child's roots no longer
+/// cover by the time it runs: the child refuses the folder, withholds the bootout and
+/// says so, and the user's part then keeps the folder and its plist, since the job may
+/// still be loaded. The gate refused the delete, so it fails, and so does the run.
+#[test]
+fn a_user_folder_the_child_refuses_keeps_its_plist_and_fails() {
+    let (fake, plan) = user_folder_with_system_plist();
+    let child = FakeBackend::running_as(ROOT_UID);
+    child.add_file(HELPER_PLIST, "<plist/>");
+    respond_ps(&child, "");
+    let bootout = Argv::new("/bin/launchctl")
+        .arg("bootout")
+        .arg("system")
+        .arg(HELPER_PLIST);
+
+    let reported = run_as_root(&child, &["/Library/Caches"], &plan);
+    let mut report = outcomes::Writer::begin(Vec::new()).expect("header");
+    for result in &reported.finished {
+        report.record(result).expect("recordable");
+    }
+    let report = String::from_utf8(report.into_inner()).expect("utf-8 report");
+    fake.respond_to_sudo(output(0, &report, ""));
+    let (stats, recorder) = run(&fake, &["/Users/me/Library"], &plan);
+
+    assert!(
+        !child.calls().contains(&Call::Run(bootout)),
+        "the child booted the job out"
+    );
+    assert!(matches!(
+        reported.finished[..],
+        [ItemResult {
+            outcome: Outcome::Skipped(SkipReason::DeleteRefused),
+            ..
+        }]
+    ));
+    assert!(fake.exists(HELPER_PLIST));
+    assert_eq!(result_for(&recorder, HELPER).outcome, Outcome::Failed);
+    assert!(stats.any_failed());
+}

@@ -8,7 +8,7 @@ use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::config::{ConfigFile, Key, WalkFlag, keys, roots};
 use crate::fs::Backend;
-use crate::packs::{self, Network, RemovePack, Source};
+use crate::packs::{self, Network, RemovePack, SettlePacks, Source};
 use crate::rules::{Rule, Source as RuleSource};
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
@@ -68,8 +68,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Some(pack) => pack,
             None => {
                 let picker = self.picker("rosie rules remove <pack>")?;
-                let packs = self
-                    .store()
+                let store = self.store();
+                let packs = SettlePacks
+                    .run(&store)?
                     .sources()?
                     .into_iter()
                     .map(|source| {

@@ -1,13 +1,14 @@
-//! The delete engines behind `Gate::delete`, `Gate::delete_as_root`, and
-//! `Gate::delete_own` (`docs/spec/safety.md#deletion`). Callers have already checked
-//! the top path for roots and symlinks; the engines refuse it when it is the root of a
-//! mounted volume. Every path below it comes from a listing and is `lstat`ed, never
-//! followed, and one on another volume is refused.
+//! The delete engines behind `Gate::delete` and `Gate::delete_own`
+//! (`docs/spec/safety.md#deletion`). Callers have already checked the folders above
+//! the item. Both engines start with one shared check of the item itself,
+//! [`Gate::admit_item`]: a symlink item or the root of a mounted volume is refused.
+//! Every path below it comes from a listing and is `lstat`ed, never followed, and one
+//! on another volume is refused.
 //!
-//! Both engines share one step, [`Gate::open_dir_for_removal`]; they differ only in
-//! whether a folder's entries are removed one after another or in parallel
-//! (`docs/spec/performance.md#run`). How a folder is entered depends on whom the
-//! delete acts as: see [`Entering`].
+//! Both engines share one step, [`Gate::open_dir_for_removal`]. `Gate::delete_own`'s
+//! engine removes a folder's entries one after another and always acts as the user;
+//! `Gate::delete`'s removes them in parallel (`docs/spec/performance.md#run`). How a
+//! folder is entered depends on whom the delete acts as: see [`Entering`].
 
 use std::path::{Path, PathBuf};
 
@@ -34,8 +35,18 @@ pub(super) enum Entering {
 impl<B: Backend> Gate<B> {
     /// Removes an item and everything below it, one entry at a time, as the user.
     pub(super) fn remove_item(&self, path: &Path, meta: Metadata) -> Result<(), Error> {
-        self.refuse_mount_point(path, meta)?;
+        self.admit_item(path, meta)?;
         self.remove_entry(path, meta)
+    }
+
+    /// The check every delete makes of its item before touching anything. Entries
+    /// inside a folder are removed as links, but an item that is itself a symlink is
+    /// refused rather than unlinked.
+    pub(super) fn admit_item(&self, path: &Path, meta: Metadata) -> Result<(), Error> {
+        if meta.kind == FileKind::Symlink {
+            return Err(self.refuse_symlink(path, path, Path::new("")));
+        }
+        self.refuse_mount_point(path, meta)
     }
 
     /// Refuses an item on another volume than the folder holding it: the root of a
@@ -121,7 +132,7 @@ impl<B: Backend + Sync> Gate<B> {
         meta: Metadata,
         entering: Entering,
     ) -> Result<(), Error> {
-        self.refuse_mount_point(path, meta)?;
+        self.admit_item(path, meta)?;
         self.remove_entry_in_parallel(path, meta, entering)
     }
 

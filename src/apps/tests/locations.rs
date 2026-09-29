@@ -104,7 +104,7 @@ fn with_unsizable_folder(unsizable: &str) -> FakeBackend {
 
 #[test]
 fn an_item_that_cannot_be_sized_fails_the_scan() {
-    let fails = |result: Result<Scanned, Error>| {
+    let fails = |result: Result<Scan, Error>| {
         matches!(
             result,
             Err(Error::Sizing(crate::scan::Problem::Path(fs::Error::Io {
@@ -183,7 +183,7 @@ fn a_matched_placeholder_is_skipped_not_planned() {
 }
 
 /// A leftover location reached across another volume, counting from home for one under
-/// home and from `/` otherwise, is a `Mount` skip and is not listed unless
+/// home and from `/` otherwise, is a mount skip and is not listed unless
 /// `enter_mounts` is on: the volume rule `caches` applies to a fixed rule path.
 #[test]
 fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
@@ -206,7 +206,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
         )
         .expect("app scan")
     };
-    let skips = |scanned: &Scanned| -> Vec<(String, WalkSkip)> {
+    let skips = |scanned: &Scan| -> Vec<(String, WalkSkip)> {
         let skipped = scanned.skipped.iter();
         skipped
             .map(|skip| (skip.path.display().to_string(), skip.reason))
@@ -221,8 +221,11 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
     assert_eq!(
         skips(&closed),
         [
-            ("/Library/LaunchDaemons".to_owned(), WalkSkip::Mount),
-            (lib("Caches"), WalkSkip::Mount),
+            (
+                "/Library/LaunchDaemons".to_owned(),
+                WalkSkip::Closed(Needs::MOUNTS)
+            ),
+            (lib("Caches"), WalkSkip::Closed(Needs::MOUNTS)),
         ]
     );
     let calls = closed_fake.calls();

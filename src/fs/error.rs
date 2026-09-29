@@ -50,7 +50,11 @@ pub enum Error {
     )]
     Misspelled { typed: PathBuf, real: PathBuf },
 
-    #[error("{path} is a mount of another volume; rosie does not delete across volumes", path = path.display())]
+    #[error(
+        "{path} is the mount point of another volume; rosie never deletes a mount point or \
+         crosses into another volume while deleting",
+        path = path.display()
+    )]
     CrossesVolume { path: PathBuf },
 
     #[error(
@@ -103,7 +107,8 @@ pub enum RealPath {
     Unresolved(#[source] Box<Error>),
 }
 
-/// A filesystem primitive, named in errors and in the fake's injected failures.
+/// A filesystem primitive, named in errors and in the fake's injected failures and
+/// crashes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Op {
     ReadDir,

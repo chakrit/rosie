@@ -219,9 +219,17 @@ fn a_denied_fixed_path_is_a_walk_skip() {
     assert!(problems(&scan).is_empty(), "{:?}", problems(&scan));
 }
 
+// A fixed path that is a placeholder is a rule match, and a match is final: it is never
+// planned or entered, with or without `--enter-placeholders`, so a fixed path inside it
+// is not planned either.
 #[test]
 fn a_dataless_fixed_path_is_never_planned() {
     let fake = npm_home();
+    add_rules(
+        &fake,
+        "inner.toml",
+        "[rules.npm-index]\nstrategy = \"path\"\npaths = [\"~/.npm/_cacache\"]\n",
+    );
     fake.make_dataless("/Users/me/.npm");
 
     let closed = caches(&fake);
@@ -236,12 +244,13 @@ fn a_dataless_fixed_path_is_never_planned() {
         },
     );
 
-    assert!(paths(&closed).is_empty());
-    assert_eq!(
-        skipped(&closed),
-        [("/Users/me/.npm", WalkSkip::Placeholder)]
-    );
-    assert!(paths(&opened).is_empty());
+    for scan in [closed, opened] {
+        assert!(paths(&scan).is_empty());
+        assert_eq!(
+            skipped(&scan),
+            [("/Users/me/.npm", WalkSkip::SealedPlaceholder)]
+        );
+    }
 }
 
 #[test]

@@ -41,10 +41,10 @@ pub trait Finish {
 }
 
 pub trait Console {
-    type Out: Write + Send;
+    type Out: Write;
     type Err: Write;
     type Progress: Progress + Finish;
-    type Reporter: Reporter + Send + Finish;
+    type Reporter: Reporter + Finish;
 
     fn terminals(&self) -> Terminals;
     fn stdout(&mut self) -> &mut Self::Out;

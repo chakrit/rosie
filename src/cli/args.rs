@@ -5,7 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
-use crate::plan::WalkSkip;
+use crate::plan::{WalkSetting, WalkSkip};
 use crate::rules::Name;
 use crate::run::elevated;
 
@@ -137,21 +137,49 @@ impl Default for Mode {
 }
 
 impl Mode {
-    /// The flag that would resolve the skip, worded for the parenthetical a walk-skip
-    /// line adds, or `None` when this mode has no flag that could (`docs/spec/cli.md
-    /// #flags`). `app` and `orphans` take no `RuleFlags`, so a bundle or placeholder
-    /// skip there names no flag to try; `Denied` has no flag in any mode.
-    pub fn walk_skip_hint(&self, skip: WalkSkip) -> Option<&'static str> {
-        match skip {
-            WalkSkip::Mount => Some("use --enter-mounts to cross"),
-            WalkSkip::Bundle if matches!(self, Mode::Tree { .. } | Mode::Caches { .. }) => {
-                Some("use --enter-bundles to enter")
-            }
-            WalkSkip::Placeholder if matches!(self, Mode::Tree { .. } | Mode::Caches { .. }) => {
-                Some("use --enter-placeholders to open")
-            }
-            WalkSkip::Bundle | WalkSkip::Placeholder | WalkSkip::Denied => None,
+    /// The flags that would open the skipped path, worded for the parenthetical a
+    /// walk-skip line adds, or `None` when this mode does not take every one of them
+    /// (`docs/spec/cli.md#flags`). Every mode takes `--enter-mounts`; only `tree` and
+    /// `caches` take the bundle and placeholder flags. A sealed skip stays closed
+    /// whatever the flags, and `Denied` has no flag in any mode.
+    pub fn walk_skip_hint(&self, skip: WalkSkip) -> Option<String> {
+        let WalkSkip::Closed(needs) = skip else {
+            return None;
+        };
+        let rule_driven = matches!(self, Mode::Tree { .. } | Mode::Caches { .. });
+        let accepted = |setting: WalkSetting| match setting {
+            WalkSetting::Mounts => true,
+            WalkSetting::Placeholders | WalkSetting::Bundles => rule_driven,
+        };
+        if !needs.settings().all(accepted) {
+            return None;
         }
+
+        let flags: Vec<&str> = needs.settings().map(flag).collect();
+        let outermost = needs.outermost();
+        let hint = match flags.as_slice() {
+            [] | [_] => format!("use {} to {}", flag(outermost), verb(outermost)),
+            [init @ .., last] => format!("use {} and {last} to enter", init.join(", ")),
+        };
+        Some(hint)
+    }
+}
+
+/// The command-line flag that turns `setting` on.
+fn flag(setting: WalkSetting) -> &'static str {
+    match setting {
+        WalkSetting::Placeholders => "--enter-placeholders",
+        WalkSetting::Mounts => "--enter-mounts",
+        WalkSetting::Bundles => "--enter-bundles",
+    }
+}
+
+/// What `setting` lets the walk do to the folder it closes.
+fn verb(setting: WalkSetting) -> &'static str {
+    match setting {
+        WalkSetting::Placeholders => "open",
+        WalkSetting::Mounts => "cross",
+        WalkSetting::Bundles => "enter",
     }
 }
 

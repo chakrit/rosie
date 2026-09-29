@@ -22,8 +22,8 @@ pub enum Subject {
     Command { argv: Argv, output: Vec<String> },
 }
 
-/// `deleted /path (1.2 GB)`, `skipped /path (stale): no longer exists`, or `ran
-/// docker system prune --force` followed by its kept output lines.
+/// `deleted /path (1.2 GB)`, `skipped (stale) /path (1.2 GB): no longer exists`, or
+/// `ran docker system prune --force` followed by its kept output lines.
 impl fmt::Display for ItemResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verb = match (&self.subject, self.outcome) {
@@ -66,6 +66,11 @@ mod tests {
             (SkipReason::RunningProcess, "skipped (running process)"),
             (SkipReason::SudoRefused, "skipped (sudo refused)"),
             (SkipReason::UnsafeToElevate, "skipped (unsafe to elevate)"),
+            (
+                SkipReason::ProcessCheckFailed,
+                "skipped (process check failed)",
+            ),
+            (SkipReason::DeleteRefused, "skipped (delete refused)"),
         ];
         for (reason, verb) in reasons {
             let result = ItemResult {

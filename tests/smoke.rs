@@ -1,7 +1,6 @@
 //! Smoke tier: the real `rosie` binary on temp folders, safety first
-//! (`docs/spec/testing.md#tiers`). Every test runs with `env_clear()` and a sandboxed
-//! `HOME` and `PATH`; the pack folder is pre-seeded so nothing reaches the network, and
-//! nothing here touches the real home or real `sudo`.
+//! (`docs/spec/testing.md#tiers`). Every `rosie` run clears the environment and sets
+//! `PATH`; a run through `SmokeHome` also gets its sandboxed `HOME`.
 
 mod smoke_fixture;
 

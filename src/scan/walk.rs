@@ -14,13 +14,13 @@ use std::path::{Path, PathBuf};
 use rayon::Scope;
 
 use super::RuleMatch;
-use super::entry::{Entry, Readable, Volume};
+use super::entry::{Entry, InFolder, Readable, Sealed, Volume};
 use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
 use crate::config::Walk;
 use crate::fs::{Backend, FileKind, Gate, Metadata};
-use crate::plan::WalkSkip;
+use crate::plan::{Needs, WalkSetting, WalkSkip};
 use crate::rules::{self, Candidate, LuaSandbox, RuleSet};
 
 /// Folder extensions of macOS bundles, which the walk does not enter by default.
@@ -36,14 +36,15 @@ const BUNDLE_EXTENSIONS: [&str; 8] = [
 ];
 
 thread_local! {
-    /// One Lua state per worker thread, started on the thread's first Lua candidate.
+    /// One Lua state per worker thread, started on the thread's first name-matched
+    /// candidate.
     static LUA: RefCell<Option<LuaSandbox>> = const { RefCell::new(None) };
 }
 
 pub(super) struct TreeWalk<'a, B: Backend, P: Progress> {
     pub gate: &'a Gate<B>,
     pub rules: &'a RuleSet,
-    /// The fixed rule paths below the start folder, by path.
+    /// The fixed rule paths at or below the start folder, by path.
     pub fixed: &'a HashMap<PathBuf, Vec<RuleMatch>>,
     pub flags: Walk,
     pub targets: &'a Targets<'a, B, P>,
@@ -91,14 +92,21 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
     }
 
     /// What the walk does with an entry of the folder `folder_meta` describes, in
-    /// order. Symlinks are passed over. A placeholder is skipped before any rule looks
-    /// at it, so it is never a target. Then the entry's volume is told from the two
-    /// `lstat`s: a mount root the walk may not enter ends there, as a `Bundle` skip when
-    /// it is a closed bundle and a `Mount` skip when it is a folder or a fixed path, and
-    /// nothing reads inside it.
-    /// Only then do the rules look at the entry. A match stops the descent; a match on a
-    /// mount root is a `Mount` skip, since the gate refuses to delete a mount point.
-    /// Bundles are matched but not entered.
+    /// order. [`InFolder::of`] first tells a symlink, which is passed over, and a
+    /// sealed entry, a placeholder or a mount root, which is never a target. Then the
+    /// checks that need only the entry's `lstat`, its folder's, and its name: whether it
+    /// is a placeholder the walk may not open, a mount root the walk may not enter (told
+    /// from the two `lstat`s), and a bundle the walk may not enter.
+    ///
+    /// A closed placeholder or closed mount root ends there, and nothing reads it: a
+    /// fixed path is matched without reading it, and otherwise a folder is one `Closed`
+    /// skip carrying every closed setting, the bundle's included, so the settings that
+    /// open it are known from that one skip.
+    ///
+    /// Only then do the rules look at the entry. A match is final: the walk never
+    /// descends into a matched entry, and a matched sealed entry is a sealed skip (see
+    /// `matched_step`). Bundles are matched but not entered: an unmatched closed bundle
+    /// is a `Closed` skip that needs only `enter_bundles`.
     fn step<'p>(
         &self,
         path: &'p Path,
@@ -107,46 +115,56 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         siblings: &[OsString],
         folder_meta: Metadata,
     ) -> Step<'p> {
-        if meta.kind == FileKind::Symlink {
-            return Step::Pass;
-        }
+        let claim = match InFolder::of(path, meta, folder_meta) {
+            InFolder::Symlink => return Step::Pass,
+            InFolder::Sealed(_, sealed) => Err(sealed),
+            InFolder::Entry(entry) => Ok(entry),
+        };
 
         let is_folder = meta.kind == FileKind::Dir;
-        let volume = Volume::of(path, meta, folder_meta, self.flags.into());
-        let Some(entry) = Entry::walked(path, meta) else {
-            return self.placeholder_step(path, is_folder, volume);
-        };
+        let opened_placeholder = is_folder && self.flags.enter_placeholders;
+        let closed_placeholder = meta.is_dataless() && !opened_placeholder;
         let closed_bundle = is_folder && is_bundle(path) && !self.flags.enter_bundles;
-        let wanted = is_folder || self.fixed.contains_key(path);
-        let readable = match (volume, closed_bundle, wanted) {
-            (Volume::Readable(readable), _, _) => readable,
-            (Volume::ClosedMount, true, _) => return Step::Skip(WalkSkip::Bundle),
-            (Volume::ClosedMount, false, true) => return Step::Skip(WalkSkip::Mount),
-            (Volume::ClosedMount, false, false) => return Step::Pass,
+        let bundle = closed_bundle.then_some(WalkSetting::Bundles);
+        let volume = Volume::of(path, meta, folder_meta, self.flags.into());
+        let readable = match (volume, closed_placeholder) {
+            (Volume::Readable(readable), false) => readable,
+            (Volume::Readable(_), true) => {
+                let needs = Needs::PLACEHOLDERS.and(bundle);
+                return self.unread_step(path, claim, is_folder, needs);
+            }
+            (Volume::ClosedMount, _) => {
+                let placeholder = closed_placeholder.then_some(WalkSetting::Placeholders);
+                let needs = Needs::MOUNTS.and(placeholder).and(bundle);
+                return self.unread_step(path, claim, is_folder, needs);
+            }
         };
 
         let rules = self.matching(&readable, name, is_folder, siblings);
-        let matched = !rules.is_empty();
 
-        match (matched, readable.is_mount_root(), is_folder, closed_bundle) {
-            (true, true, _, _) => Step::Skip(WalkSkip::Mount),
-            (true, false, _, _) => Step::Claim(entry, rules),
-            (false, _, false, _) => Step::Pass,
-            (false, _, true, true) => Step::Skip(WalkSkip::Bundle),
-            (false, _, true, false) => Step::Descend(readable),
+        match (rules.is_empty(), is_folder, closed_bundle) {
+            (false, _, _) => matched_step(claim, rules),
+            (true, false, _) => Step::Pass,
+            (true, true, true) => Step::Skip(WalkSkip::Closed(Needs::BUNDLES)),
+            (true, true, false) => Step::Descend(readable),
         }
     }
 
-    /// A dataless placeholder is opened only with `enter_placeholders`, and a mounted
-    /// one only where the walk may also enter the mount.
-    fn placeholder_step<'p>(&self, path: &Path, is_folder: bool, volume: Volume<'p>) -> Step<'p> {
-        let enterable = is_folder && self.flags.enter_placeholders;
-        let wanted = is_folder || self.fixed.contains_key(path);
-        match (enterable, wanted, volume) {
-            (true, _, Volume::Readable(readable)) => Step::Descend(readable),
-            (true, _, Volume::ClosedMount) => Step::Skip(WalkSkip::Mount),
-            (false, true, _) => Step::Skip(WalkSkip::Placeholder),
-            (false, false, _) => Step::Pass,
+    /// An entry nothing may read: a closed placeholder, a closed mount root, or both, as
+    /// `needs` records. Only a fixed path is known to match it (see `matched_step`). Any
+    /// other folder is left closed, since opening it could reveal targets; a file is
+    /// passed over.
+    fn unread_step<'p>(
+        &self,
+        path: &Path,
+        claim: Result<Entry, Sealed>,
+        is_folder: bool,
+        needs: Needs,
+    ) -> Step<'p> {
+        match (self.fixed.get(path), is_folder) {
+            (Some(rules), _) => matched_step(claim, rules.clone()),
+            (None, true) => Step::Skip(WalkSkip::Closed(needs)),
+            (None, false) => Step::Pass,
         }
     }
 
@@ -205,6 +223,16 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
             self.log.problem(Problem::Rule(error));
             Vec::new()
         })
+    }
+}
+
+/// A matched entry is claimed, unless it is sealed: a placeholder or a mount root is
+/// never a target, so it is a `SealedPlaceholder` or `SealedMount` skip as
+/// [`InFolder::of`] tells it.
+fn matched_step<'p>(claim: Result<Entry, Sealed>, rules: Vec<RuleMatch>) -> Step<'p> {
+    match claim {
+        Ok(entry) => Step::Claim(entry, rules),
+        Err(sealed) => Step::Skip(sealed.skip()),
     }
 }
 

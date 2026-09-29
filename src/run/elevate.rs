@@ -6,9 +6,12 @@ use std::path::PathBuf;
 
 use super::header::{Header, Nonce};
 use super::outcomes::{self, Key, Record};
-use super::{ItemResult, Reporter, Runner, Subject, elevated, exit_reason, item_count, unrun};
+use super::{
+    ItemResult, Refusal, Reporter, Runner, Subject, elevated, exit_reason, item_count, path_result,
+    unrun,
+};
 use crate::fs::{Argv, Backend, Home};
-use crate::plan::{Delete, ItemSize, Outcome, Plan, RunAs, Runnable, SkipReason};
+use crate::plan::{Delete, Outcome, Plan, RunAs, Runnable, SkipReason};
 
 /// What launching the elevated child needs, injected by `main`.
 #[derive(Debug, Clone)]
@@ -21,9 +24,12 @@ pub struct Elevation {
 
 impl<B: Backend + Sync> Runner<B> {
     /// Runs the `sudo` part in one elevated child and reads back each item's outcome;
-    /// the child reports each item on stderr itself. When sudo is refused or fails,
-    /// every item is skipped as `sudo refused`. The items are what the child runs of the
-    /// part: every bootout, the deletes that run as root, and the receipts.
+    /// the child reports each item on stderr itself. When sudo cannot start or is
+    /// refused, or the child's report is unreadable or names items it was not sent,
+    /// every item is skipped as `sudo refused`. Otherwise each item takes the outcome the
+    /// child reported, and one it never reported is skipped as `sudo refused`. The items
+    /// are what the child runs of the part: every bootout, the deletes that run as root,
+    /// and the receipts.
     pub(super) fn elevate<R: Reporter>(
         &self,
         part: &Plan,
@@ -64,80 +70,87 @@ impl<B: Backend + Sync> Runner<B> {
     }
 
     /// Deletes, in this process, the user's items of the `sudo` part: the child only
-    /// booted their `system` jobs out. An item whose bootout never ran is skipped with
-    /// it, since its job may still be loaded; one whose bootout ran and failed is
-    /// deleted, as in any part.
-    pub(super) fn delete_after_elevation<R: Reporter + Send>(
+    /// booted their `system` jobs out. An item is deleted only when every one of its
+    /// bootouts is done, or failed (it ran and failed, or could not be started), as in
+    /// any part. One whose bootout the child skipped, or never reported, is kept, since
+    /// its job may still be loaded: it fails when the child's gate refused it, and is
+    /// skipped with the bootout otherwise.
+    pub(super) fn delete_after_elevation<R: Reporter>(
         &self,
         part: &Plan,
         elevated: &[ItemResult],
         reporter: &mut R,
     ) -> Vec<ItemResult> {
-        let mut booted = Vec::new();
-        let mut results = Vec::new();
-        for delete in part.runnable_as(RunAs::User).deletes {
-            match unbooted(delete, elevated) {
-                None => booted.push(delete),
-                Some(reason) => {
-                    let result = ItemResult {
-                        subject: Subject::Path(delete.path.clone()),
-                        size: ItemSize::Known(delete.size),
-                        outcome: SUDO_REFUSED,
-                        reason,
-                    };
-                    reporter.item_finished(&result);
-                    results.push(result);
-                }
-            }
+        let user_part = part.after_elevation();
+        let kept: Vec<ItemResult> = user_part
+            .deletes()
+            .iter()
+            .filter_map(|delete| {
+                let (outcome, reason) = unbooted(delete, elevated)?.of_delete();
+                Some(path_result(delete, outcome, reason))
+            })
+            .collect();
+        for result in &kept {
+            reporter.item_finished(result);
         }
 
-        if !booted.is_empty() {
-            let runnable = Runnable {
-                bootouts: Vec::new(),
-                deletes: booted,
-                tools: Vec::new(),
-                receipts: Vec::new(),
-            };
-            results.extend(self.execute_runnable(&runnable, reporter));
+        let booted = user_part.without(|delete| unbooted(delete, elevated).is_some());
+        let mut results = kept;
+        if !booted.deletes().is_empty() {
+            results.extend(self.execute_runnable(&booted, reporter));
         }
         results
     }
 }
 
-const SUDO_REFUSED: Outcome = Outcome::Skipped(SkipReason::SudoRefused);
+const SUDO_REFUSED: SkipReason = SkipReason::SudoRefused;
 
-/// Why a delete's job may still be loaded: one of its bootouts did not run in the
-/// elevated part. `None` when every one ran, done or failed.
-fn unbooted(delete: &Delete, elevated: &[ItemResult]) -> Option<String> {
+/// Why a delete's job may still be loaded, as the refusal it ends with: one of its
+/// bootouts was skipped in the elevated part, or was never reported. A bootout the
+/// child withheld because its gate refused this delete refuses the delete here too;
+/// any other skip skips the delete for the same reason. `None` only when every one is
+/// done, or failed (it ran and failed, or could not be started).
+fn unbooted(delete: &Delete, elevated: &[ItemResult]) -> Option<Refusal> {
     delete.bootouts.iter().find_map(|bootout| {
         let argv: Argv = bootout.absolute_argv().into();
         let result = elevated.iter().find(
             |result| matches!(&result.subject, Subject::Command { argv: ran, .. } if *ran == argv),
         );
-        match result {
-            Some(result) if matches!(result.outcome, Outcome::Skipped(_)) => {
-                Some(format!("its job was not booted out: {}", result.reason))
-            }
-            Some(_) => None,
-            None => Some(format!("`{argv}` did not run")),
+        let Some(result) = result else {
+            return Some(Refusal::Skipped(
+                SUDO_REFUSED,
+                format!("`{argv}` did not run"),
+            ));
+        };
+        match result.outcome {
+            Outcome::Skipped(SkipReason::DeleteRefused) => Some(Refusal::Refused(
+                "the elevated run refused to delete it".to_owned(),
+            )),
+            Outcome::Skipped(skip) => Some(Refusal::Skipped(
+                skip,
+                "its job was not booted out".to_owned(),
+            )),
+            Outcome::Done | Outcome::Failed => None,
         }
     })
 }
 
 fn not_run<R: Reporter>(
     items: &Runnable,
-    outcome: Outcome,
+    skip: SkipReason,
     reason: &str,
     reporter: &mut R,
 ) -> Vec<ItemResult> {
-    unrun(items, outcome, reason)
+    unrun(items, skip, reason)
         .into_iter()
         .inspect(|result| reporter.item_finished(result))
         .collect()
 }
 
 /// Each item's outcome as the child reported it. An item the child never reported,
-/// because it crashed or was killed first, is skipped as `sudo refused`.
+/// because it crashed or was killed first, is skipped as `sudo refused`. A report naming
+/// an item it was not sent cannot be trusted, so every item is then skipped as `sudo
+/// refused`.
 fn merge<R: Reporter>(
     items: &Runnable,
     records: Vec<Record>,

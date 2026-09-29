@@ -56,6 +56,32 @@ fn orphan_launch_jobs_are_booted_out_and_aggressive_ticks_orphans() {
     );
 }
 
+/// `docs/spec/safety.md#running-processes`: a daemon still running from an orphaned
+/// helper keeps it out of the plan, even while its plist is planned for a bootout.
+#[test]
+fn refuses_an_orphan_a_process_executes_from() {
+    let fake = FakeBackend::new();
+    installed_suite(&fake);
+    let helper = "/Library/PrivilegedHelperTools/com.old.helper";
+    let plist = "/Library/LaunchDaemons/com.old.helper.plist";
+    fake.add_sized_file(helper, 4096);
+    fake.add_file(plist, "<plist/>");
+    running(
+        &fake,
+        &format!("    1     0     0 /sbin/launchd\n  321     1     0 {helper}\n"),
+    );
+
+    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+
+    assert_eq!(deletes(&scanned), [(plist.to_owned(), Status::Ticked)]);
+    let [refused] = scanned.refused.as_slice() else {
+        panic!("one refused item expected: {:?}", scanned.refused);
+    };
+    assert_eq!(refused.path, Path::new(helper));
+    assert_eq!(refused.process.pid, 321);
+    assert_eq!(refused.rules, ["orphans"]);
+}
+
 // entries that vanish while scanning
 
 #[test]

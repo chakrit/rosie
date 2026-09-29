@@ -66,12 +66,13 @@ pub enum Error {
     Placeholder { path: PathBuf },
 
     #[error(
-        "{path} is the root of a mounted volume; rosie does not scan or delete across volumes",
+        "{path} is the root of a mounted volume; rosie never plans a mount point, which \
+         would plan the whole volume",
         path = path.display()
     )]
     Mount { path: PathBuf },
 
-    /// Sizing a planned item met an error other than a walk skip.
+    /// Sizing a matched item, planned or refused, met an error other than a walk skip.
     #[error(transparent)]
     Sizing(scan::Problem),
 }
@@ -81,6 +82,7 @@ impl From<NotAnEntry> for Error {
         match refused {
             NotAnEntry::Fs(error) => Error::Fs(error),
             NotAnEntry::Placeholder { path } => Error::Placeholder { path },
+            NotAnEntry::Mount { path } => Error::Mount { path },
         }
     }
 }

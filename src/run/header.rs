@@ -52,7 +52,7 @@ pub enum Error {
 pub struct Nonce(String);
 
 impl Nonce {
-    /// 128 bits from std's per-process random hash keys: no FFI, no extra crate.
+    /// 128 bits from std's random hash keys: no FFI, no extra crate.
     pub fn generate() -> Self {
         let halves = [0u8, 1].map(|salt| {
             let mut hasher = RandomState::new().build_hasher();

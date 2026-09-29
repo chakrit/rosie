@@ -13,6 +13,6 @@ pub use backend::{
     SystemTool,
 };
 pub use error::{Error, Op, RealPath};
-pub use gate::{Bounds, Exposure, Gate, resolve_dots};
+pub use gate::{Admitted, Bounds, Exposure, Gate, resolve_dots};
 pub use home::Home;
 pub use real::RealBackend;

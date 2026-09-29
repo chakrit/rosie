@@ -8,7 +8,6 @@
 [rules.rubygems-cleanup]
 strategy = "tool"
 cmd = "gem cleanup"
-cmd_aggressive = "gem cleanup"
 
 [rules.bundler-cache]
 strategy = "path"

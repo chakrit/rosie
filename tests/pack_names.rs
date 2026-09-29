@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use pack_fixture::{Canned, NODE_RULE, at, source, url_of};
 use rosie::fs::{Backend, Bounds, Gate, Home, RealBackend};
-use rosie::packs::{self, Error, Source, Store};
+use rosie::packs::{self, Error, SettlePacks, Settled, Source, Store};
 use tarball::Tarball;
 use tempfile::TempDir;
 
@@ -46,6 +46,11 @@ impl RealHome {
         };
         Gate::new(RealBackend, bounds).expect("absolute bounds")
     }
+}
+
+/// The packs folder after settling, for listing what is installed.
+fn settled<'s, 'g>(store: &'s Store<'g, RealBackend>) -> Settled<'s, 'g, RealBackend> {
+    SettlePacks.run(store).expect("settle packs")
 }
 
 #[test]
@@ -92,13 +97,13 @@ fn pull_installs_under_an_owner_stored_in_another_unicode_form() {
     let pulled = packs::pull(&store, &network, &source(decomposed), at(2)).expect("second pull");
 
     assert_eq!(pulled.source, source(composed));
-    let installed = store.installed().expect("list packs");
+    let installed = settled(&store).installed().expect("list packs");
     assert_eq!(installed.len(), 1);
     assert_eq!(installed[0].source, source(composed));
     assert_eq!(installed[0].pulled_at, at(2));
 }
 
-/// APFS also folds `ſ` (long s) onto `s`, which no case mapping in std does.
+/// APFS also folds `ſ` (long s) onto `s`, which the fake's lowercase comparison does not.
 #[test]
 fn pull_refuses_a_pack_the_volume_folds_onto_the_reserved_name_user() {
     let home = RealHome::new();
@@ -118,7 +123,10 @@ fn pull_refuses_a_pack_the_volume_folds_onto_the_reserved_name_user() {
         matches!(&result, Err(Error::ReservedPack { text }) if text == respelled),
         "got {result:?}"
     );
-    assert_eq!(store.sources().expect("list packs"), Vec::<Source>::new());
+    assert_eq!(
+        settled(&store).sources().expect("list packs"),
+        Vec::<Source>::new()
+    );
     let staging = Path::new("packs/someone").join(".u\u{17f}er.new");
     assert!(!home.data().join(staging).exists());
 }

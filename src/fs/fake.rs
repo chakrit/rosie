@@ -17,7 +17,7 @@ mod fixture;
 mod rename;
 mod walk;
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::ffi::OsString;
 use std::io::{self, ErrorKind};
 use std::ops::Bound;
@@ -68,6 +68,7 @@ struct State {
     inodes: HashMap<u64, Node>,
     next_inode: u64,
     failures: HashMap<(PathBuf, Op), ErrorKind>,
+    crashes: HashSet<(PathBuf, Op)>,
     responses: Vec<(Argv, CommandOutput)>,
     sudo_response: Option<CommandOutput>,
     calls: Vec<Call>,
@@ -110,6 +111,7 @@ impl FakeBackend {
             inodes: HashMap::new(),
             next_inode: 2,
             failures: HashMap::new(),
+            crashes: HashSet::new(),
             responses: Vec::new(),
             sudo_response: None,
             calls: Vec::new(),
@@ -127,6 +129,13 @@ impl FakeBackend {
     pub fn fail_on(&self, path: impl AsRef<Path>, op: Op, kind: ErrorKind) {
         let key = (path.as_ref().to_path_buf(), op);
         self.lock().failures.insert(key, kind);
+    }
+
+    /// Makes one operation on one path panic after it is recorded, as a process killed
+    /// during it would stop: that thread does nothing after it.
+    pub fn crash_on(&self, path: impl AsRef<Path>, op: Op) {
+        let key = (path.as_ref().to_path_buf(), op);
+        self.lock().crashes.insert(key);
     }
 
     /// Sets the output a command returns; unknown commands fail as not found.
@@ -162,11 +171,17 @@ impl FakeBackend {
             .expect("fake backend state poisoned by a panicking test")
     }
 
-    /// Records the call, then fails it if a failure was injected for this path and op.
+    /// Records the call, then crashes or fails it if a crash or failure was injected for
+    /// this path and op.
     fn begin(&self, call: Call, path: &Path, op: Op) -> io::Result<MutexGuard<'_, State>> {
         let mut state = self.lock();
         state.calls.push(call);
-        match state.failures.get(&(path.to_path_buf(), op)) {
+        let key = (path.to_path_buf(), op);
+        if state.crashes.contains(&key) {
+            drop(state);
+            panic!("injected crash on {op:?} {}", path.display());
+        }
+        match state.failures.get(&key) {
             Some(kind) => Err(io::Error::from(*kind)),
             None => Ok(state),
         }

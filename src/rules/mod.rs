@@ -13,12 +13,12 @@ mod set;
 
 pub use error::{Error, Problem};
 pub use glob::{Glob, GlobError};
-pub use layers::RuleDirs;
+pub use layers::{PackFolder, RuleLayers};
 pub use lua::LuaSandbox;
 pub use name::{Name, NameError, RuleId};
 pub use pack::load_pack;
 pub use rule::{
-    Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Mode, Rule,
-    Shape, Source, Tier, Twin,
+    Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Rule, Shape,
+    Source, Tier, Twin,
 };
 pub use set::{Candidate, RuleSet, TargetRule};

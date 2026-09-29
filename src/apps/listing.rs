@@ -19,7 +19,7 @@ pub(super) enum Listing {
 /// Lists a fixed folder. A symlink in any component of it is refused, as for any fixed
 /// path (`docs/spec/safety.md#symlinks`).
 pub(super) fn list_folder<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Listing, fs::Error> {
-    let Some(folder) = find_folder(gate, path)? else {
+    let FolderLookup::Found(folder) = find_folder(gate, path)? else {
         return Ok(Listing::NoFolder);
     };
 
@@ -29,16 +29,23 @@ pub(super) fn list_folder<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Lis
     })
 }
 
-/// `lstat`s a fixed folder without listing it; nothing when nothing is there or it is
-/// not a folder. A symlink in any component of it is refused.
+/// What `lstat`ing a fixed folder found.
+pub(super) enum FolderLookup {
+    Found(Folder),
+    /// Nothing is there, or not a folder.
+    Absent,
+}
+
+/// `lstat`s a fixed folder without listing it. A symlink in any component of it is
+/// refused.
 pub(super) fn find_folder<B: Backend>(
     gate: &Gate<B>,
     path: &Path,
-) -> Result<Option<Folder>, fs::Error> {
+) -> Result<FolderLookup, fs::Error> {
     match Folder::lstat(gate, path) {
-        Ok(folder) => Ok(Some(folder)),
-        Err(NotAFolder::Kind { .. }) => Ok(None),
-        Err(NotAFolder::Fs(error)) if error.has_vanished() => Ok(None),
+        Ok(folder) => Ok(FolderLookup::Found(folder)),
+        Err(NotAFolder::Kind { .. }) => Ok(FolderLookup::Absent),
+        Err(NotAFolder::Fs(error)) if error.has_vanished() => Ok(FolderLookup::Absent),
         Err(NotAFolder::Fs(error)) => Err(error),
     }
 }

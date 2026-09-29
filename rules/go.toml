@@ -12,4 +12,3 @@ cmd_aggressive = "go clean -cache -testcache"
 [rules.go-mod-cache]
 strategy = "tool"
 cmd = "go clean -modcache"
-cmd_aggressive = "go clean -modcache"

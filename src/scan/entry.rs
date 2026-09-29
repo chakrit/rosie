@@ -1,7 +1,9 @@
 //! A scan entry that is safe to claim and size: its path has no symlink in any
-//! component and it is not a dataless placeholder (`docs/spec/safety.md#symlinks`,
-//! `#walk-skips`). Whether an entry is a mount, on another volume than the folder
-//! holding it, is decided here and nowhere else.
+//! component, and it is neither a dataless placeholder nor the root of a mount, on
+//! another volume than the folder holding it (`docs/spec/safety.md#symlinks`,
+//! `#walk-skips`). Whether an entry is sealed that way is decided by [`Sealed::of`]
+//! alone, a placeholder before a mount root, for the walk, app mode, fixed paths, and
+//! sizing alike; `/`, which has no folder, is always a mount root.
 
 use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
@@ -10,10 +12,10 @@ use thiserror::Error;
 
 use crate::config::Walk;
 use crate::fs::{self, Backend, FileKind, Gate, Home, Metadata};
-use crate::plan::ItemKind;
+use crate::plan::{ItemKind, WalkSkip};
 
 /// A path with the metadata its own `lstat` gave, free of symlinks along the whole
-/// path and not a dataless placeholder.
+/// path and not sealed: neither a dataless placeholder nor a mount root.
 #[derive(Debug, Clone)]
 pub struct Entry {
     path: PathBuf,
@@ -29,30 +31,29 @@ pub enum NotAnEntry {
 
     #[error("{path} is a dataless placeholder, left unopened", path = path.display())]
     Placeholder { path: PathBuf },
+
+    #[error("{path} is the root of a mounted volume, never claimed or sized", path = path.display())]
+    Mount { path: PathBuf },
 }
 
 impl Entry {
     /// `lstat`s `path` for claiming or sizing. A path through a symlink, or naming
-    /// one, is refused rather than followed, and a dataless placeholder is refused
-    /// rather than opened.
+    /// one, is refused rather than followed; a dataless placeholder is refused rather
+    /// than opened, and a mount root rather than weighed as a whole volume. `/` has no
+    /// folder and is the root of its volume.
     pub fn lstat<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Entry, NotAnEntry> {
         let path = fs::resolve_dots(path)?;
         let meta = gate.lstat_link_free(&path)?;
-        match meta.is_dataless() {
-            true => Err(NotAnEntry::Placeholder { path }),
-            false => Ok(Entry { path, meta }),
-        }
-    }
+        let Some(folder) = path.parent() else {
+            return Err(NotAnEntry::Mount { path });
+        };
+        let folder_meta = gate.lstat(folder)?;
 
-    /// An entry the walk met in a folder it had itself `lstat`ed as a folder, so
-    /// every component above it is link-free; nothing when the entry is a symlink or
-    /// a placeholder.
-    pub(super) fn walked(path: &Path, meta: Metadata) -> Option<Entry> {
-        let claimable = meta.kind != FileKind::Symlink && !meta.is_dataless();
-        claimable.then(|| Entry {
-            path: path.to_path_buf(),
-            meta,
-        })
+        match Sealed::of(meta, folder_meta) {
+            Some(Sealed::Placeholder) => Err(NotAnEntry::Placeholder { path }),
+            Some(Sealed::Mount) => Err(NotAnEntry::Mount { path }),
+            None => Ok(Entry { path, meta }),
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -73,17 +74,7 @@ impl Entry {
         }
     }
 
-    /// Whether the entry is a mount: on another volume than the folder holding it.
-    /// `/` has no folder and is the root of its volume, so it is one.
-    pub fn is_mount<B: Backend>(&self, gate: &Gate<B>) -> Result<bool, fs::Error> {
-        let Some(folder) = self.path.parent() else {
-            return Ok(true);
-        };
-        let folder_meta = gate.lstat(folder)?;
-        Ok(on_another_volume(self.meta, folder_meta))
-    }
-
-    /// Whether the entry, a fixed path, lies behind a volume crossing the walk may not
+    /// Whether the entry, a fixed path, lies behind a volume crossing the scan may not
     /// make: see `behind_a_closed_mount`.
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
@@ -118,14 +109,61 @@ pub enum NotAFolder {
     Kind { path: PathBuf },
 }
 
-/// What one entry of a [`Folder`] is.
+/// What one entry of a folder is, as the walk and `Folder::entry` both tell it.
 #[derive(Debug)]
 pub enum InFolder {
     Entry(Entry),
-    Symlink(PathBuf),
-    /// On another volume than the folder.
-    Mount(PathBuf),
-    Placeholder(PathBuf),
+    Symlink,
+    Sealed(PathBuf, Sealed),
+}
+
+/// Why an entry is never a target, whatever the walk settings.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Sealed {
+    Placeholder,
+    /// On another volume than the folder holding it.
+    Mount,
+}
+
+impl InFolder {
+    /// What the entry at `path` is, from its own `lstat` and that of the folder holding
+    /// it, which was `lstat`ed link-free, so every component above the entry is
+    /// link-free. A symlink is told first, then a sealed entry, as [`Sealed::of`]
+    /// tells it.
+    pub(super) fn of(path: &Path, meta: Metadata, folder_meta: Metadata) -> InFolder {
+        if meta.kind == FileKind::Symlink {
+            return InFolder::Symlink;
+        }
+        match Sealed::of(meta, folder_meta) {
+            Some(sealed) => InFolder::Sealed(path.to_path_buf(), sealed),
+            None => InFolder::Entry(Entry {
+                path: path.to_path_buf(),
+                meta,
+            }),
+        }
+    }
+}
+
+impl Sealed {
+    /// How an entry is sealed, if it is, from its own `lstat` and that of the folder
+    /// holding it: a placeholder is told before a mount root, so an entry that is both
+    /// is a placeholder.
+    pub(super) fn of(meta: Metadata, folder_meta: Metadata) -> Option<Sealed> {
+        let mount = on_another_volume(meta, folder_meta);
+        match (meta.is_dataless(), mount) {
+            (true, _) => Some(Sealed::Placeholder),
+            (false, true) => Some(Sealed::Mount),
+            (false, false) => None,
+        }
+    }
+
+    /// The walk skip a matched entry sealed this way is logged as.
+    pub fn skip(self) -> WalkSkip {
+        match self {
+            Sealed::Placeholder => WalkSkip::SealedPlaceholder,
+            Sealed::Mount => WalkSkip::SealedMount,
+        }
+    }
 }
 
 impl Folder {
@@ -144,7 +182,7 @@ impl Folder {
         &self.path
     }
 
-    /// Whether the folder, a fixed one, lies behind a volume crossing the walk may not
+    /// Whether the folder, a fixed one, lies behind a volume crossing the scan may not
     /// make: see `behind_a_closed_mount`.
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
@@ -155,27 +193,21 @@ impl Folder {
         behind_a_closed_mount(gate, &self.path, self.meta, home, mounts)
     }
 
-    /// `lstat`s the entry `name` of this folder's listing. A mount is told apart
-    /// before a placeholder, as the walk does. A `name` that is not one entry's name,
-    /// such as `..` or one holding `/`, is refused.
-    pub fn entry<B: Backend>(&self, gate: &Gate<B>, name: &OsStr) -> Result<InFolder, fs::Error> {
+    /// `lstat`s the entry `name` of this folder's listing and tells what it is as the
+    /// walk does, through [`InFolder::of`]. A `name` that is not one entry's name, such
+    /// as `..` or one holding `/`, is refused.
+    pub(crate) fn entry<B: Backend>(
+        &self,
+        gate: &Gate<B>,
+        name: &OsStr,
+    ) -> Result<InFolder, fs::Error> {
         if Path::new(name).file_name() != Some(name) {
             let name = name.to_owned();
             return Err(fs::Error::NotAnEntryName { name });
         }
         let path = self.path.join(name);
         let meta = gate.lstat(&path)?;
-
-        if meta.kind == FileKind::Symlink {
-            return Ok(InFolder::Symlink(path));
-        }
-        if on_another_volume(meta, self.meta) {
-            return Ok(InFolder::Mount(path));
-        }
-        Ok(match Entry::walked(&path, meta) {
-            Some(entry) => InFolder::Entry(entry),
-            None => InFolder::Placeholder(path),
-        })
+        Ok(InFolder::of(&path, meta, self.meta))
     }
 }
 
@@ -199,20 +231,19 @@ impl From<Walk> for Mounts {
 /// Where a walked entry sits against the folder listing it, told from the two `lstat`s
 /// alone, before anything reads inside the entry.
 pub(super) enum Volume<'p> {
-    /// The walk may read inside the entry.
+    /// The entry is on the folder's volume, or is the root of a mount the walk enters.
     Readable(Readable<'p>),
     /// The entry is the root of a mount the walk does not enter: nothing inside it is
     /// listed or read.
     ClosedMount,
 }
 
-/// Proof that the walk may read inside the entry at `path`: it is on the volume of the
-/// folder listing it, or it is the root of a mount the walk enters. Only
-/// [`Volume::of`] makes one, and rule detection and descending both need one, so neither
-/// can reach inside a mount the walk may not enter.
+/// Proof that the entry at `path` is on the volume of the folder listing it, or is the
+/// root of a mount the walk enters. Only [`Volume::of`] makes one, and rule detection
+/// and descending both need one, so neither can reach inside a mount the walk may not
+/// enter.
 pub(super) struct Readable<'p> {
     path: &'p Path,
-    mount_root: bool,
 }
 
 impl<'p> Volume<'p> {
@@ -220,7 +251,7 @@ impl<'p> Volume<'p> {
         let mount_root = on_another_volume(meta, folder_meta);
         match (mount_root, mounts) {
             (true, Mounts::Skip) => Volume::ClosedMount,
-            (false, _) | (true, Mounts::Enter) => Volume::Readable(Readable { path, mount_root }),
+            (false, _) | (true, Mounts::Enter) => Volume::Readable(Readable { path }),
         }
     }
 }
@@ -228,12 +259,6 @@ impl<'p> Volume<'p> {
 impl<'p> Readable<'p> {
     pub fn path(&self) -> &'p Path {
         self.path
-    }
-
-    /// Whether the entry is the root of a mount the walk may enter. Such an entry is
-    /// still never a target: the gate refuses to delete a mount point.
-    pub fn is_mount_root(&self) -> bool {
-        self.mount_root
     }
 }
 
@@ -286,19 +311,33 @@ fn on_another_volume(entry: Metadata, folder: Metadata) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::fs::SF_DATALESS;
 
-    fn walked(kind: FileKind) -> Entry {
-        let meta = Metadata {
+    const FOLDER_DEV: u64 = 1;
+
+    fn meta(kind: FileKind, dev: u64, flags: u32) -> Metadata {
+        Metadata {
             kind,
             allocated: 0,
-            dev: 1,
+            dev,
             inode: 2,
             nlink: 1,
             uid: 501,
             mode: 0o644,
-            flags: 0,
-        };
-        Entry::walked(Path::new("/w/entry"), meta).expect("not a symlink or placeholder")
+            flags,
+        }
+    }
+
+    fn in_folder(meta: Metadata) -> InFolder {
+        let folder = self::meta(FileKind::Dir, FOLDER_DEV, 0);
+        InFolder::of(Path::new("/w/entry"), meta, folder)
+    }
+
+    fn walked(kind: FileKind) -> Entry {
+        match in_folder(meta(kind, FOLDER_DEV, 0)) {
+            InFolder::Entry(entry) => entry,
+            other => panic!("expected an entry, got {other:?}"),
+        }
     }
 
     #[test]
@@ -306,5 +345,20 @@ mod tests {
         assert_eq!(walked(FileKind::File).item_kind(), Some(ItemKind::File));
         assert_eq!(walked(FileKind::Dir).item_kind(), Some(ItemKind::Folder));
         assert_eq!(walked(FileKind::Other).item_kind(), None);
+    }
+
+    #[test]
+    fn a_placeholder_that_is_a_mount_root_is_sealed_as_a_placeholder() {
+        let both = meta(FileKind::Dir, FOLDER_DEV + 1, SF_DATALESS);
+        let mount = meta(FileKind::Dir, FOLDER_DEV + 1, 0);
+
+        assert!(matches!(
+            in_folder(both),
+            InFolder::Sealed(_, Sealed::Placeholder)
+        ));
+        assert!(matches!(
+            in_folder(mount),
+            InFolder::Sealed(_, Sealed::Mount)
+        ));
     }
 }

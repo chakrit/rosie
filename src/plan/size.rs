@@ -8,8 +8,6 @@ pub struct Size(u64);
 const UNITS: [&str; 5] = ["KB", "MB", "GB", "TB", "PB"];
 
 impl Size {
-    pub const ZERO: Size = Size(0);
-
     pub const fn bytes(bytes: u64) -> Self {
         Size(bytes)
     }

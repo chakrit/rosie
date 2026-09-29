@@ -1,7 +1,6 @@
 //! What a scan tells the user besides the plan: the paths it did not enter and the
 //! errors that cost it an item or a rule check (`docs/spec/safety.md#walk-skips`).
 
-use std::io::ErrorKind;
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
@@ -129,25 +128,12 @@ enum Failure {
 }
 
 fn classify(error: fs::Error) -> Failure {
-    match io_kind(&error) {
-        Some(ErrorKind::PermissionDenied) => Failure::Denied,
-        _ if is_absent(&error) => Failure::Absent,
-        _ => Failure::Problem(Problem::Path(error)),
-    }
-}
-
-/// Whether an error says the path, or a folder on its way, does not exist.
-fn is_absent(error: &fs::Error) -> bool {
-    matches!(
-        io_kind(error),
-        Some(ErrorKind::NotFound | ErrorKind::NotADirectory)
-    )
-}
-
-fn io_kind(error: &fs::Error) -> Option<ErrorKind> {
-    match error {
-        fs::Error::Io { source, .. } => Some(source.kind()),
-        _ => None,
+    let denied = error.is_permission_denied();
+    let absent = error.has_vanished();
+    match (denied, absent) {
+        (true, _) => Failure::Denied,
+        (false, true) => Failure::Absent,
+        (false, false) => Failure::Problem(Problem::Path(error)),
     }
 }
 

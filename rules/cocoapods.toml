@@ -4,7 +4,6 @@
 [rules.cocoapods-cache]
 strategy = "tool"
 cmd = "pod cache clean --all"
-cmd_aggressive = "pod cache clean --all"
 
 [rules.cocoapods-repos]
 strategy = "path"

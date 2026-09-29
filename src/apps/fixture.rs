@@ -11,7 +11,7 @@ use crate::process::ProcessTable;
 
 pub(super) const HOME: &str = "/Users/me";
 
-/// Every leftover location and app folder as a root.
+/// Every leftover location, `/Applications`, and `~/Applications` as a root.
 pub(super) const ALL_ROOTS: [&str; 5] = [
     "/Users/me/Library",
     "/Users/me/Applications",

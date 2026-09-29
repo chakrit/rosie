@@ -58,10 +58,10 @@ impl<B: Backend> Gate<B> {
         }
     }
 
-    /// Checks a `roots` config entry: refused only when an existing path component is a
-    /// symlink. A path, or the tail of one, that does not exist on disk is valid — a
-    /// seeded tool-cache root is absent on a machine without that tool
-    /// (`docs/spec/safety.md#roots`).
+    /// Checks a `roots` config entry: refused when it is relative, when an existing
+    /// component is a symlink, or when a component cannot be inspected. A path, or the
+    /// tail of one, that does not exist on disk is valid — a seeded tool-cache root is
+    /// absent on a machine without that tool.
     pub fn check_root_entry(&self, path: &Path) -> Result<PathBuf, Error> {
         let path = resolve_dots(path)?;
         self.refuse_symlinks_in_existing(&path)?;

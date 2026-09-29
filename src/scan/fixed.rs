@@ -16,7 +16,7 @@ use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
 use crate::fs::{self, Backend, Gate, Home};
-use crate::plan::WalkSkip;
+use crate::plan::{Needs, WalkSkip};
 use crate::rules::{FixedPath, RuleId, RuleSet, Shape, Tier};
 
 /// Every fixed rule path, resolved, with the rules that list it.
@@ -86,13 +86,14 @@ impl FixedTargets {
     }
 }
 
-/// Claims fixed paths for `caches`, checking each as the walk would have checked it on
-/// the way down. A denied path is a walk skip and an absent one is not planned. A
-/// dataless placeholder is never planned. A path on another volume than its folder is
-/// a mount root and is never planned, even with `enter_mounts`: the gate refuses to
-/// delete a mount point at all. Without `enter_mounts`, a path inside a mount is not
-/// planned either: one reached through a folder on another volume than the folder
-/// above it, counting from home for a path under home and from `/` otherwise.
+/// Claims fixed paths for `caches`, checking each path itself as the walk would, and the
+/// volumes of the folders on its way down; no folder above it is checked for being a
+/// placeholder. A denied path is a walk skip and an absent one is not planned. A dataless
+/// placeholder is never planned. A path on another volume than its folder is a mount
+/// root and is never planned, even with `enter_mounts`: the gate refuses to delete a
+/// mount point at all. Without `enter_mounts`, a path inside a mount is not planned
+/// either: one reached through a folder on another volume than the folder above it,
+/// counting from home for a path under home and from `/` otherwise.
 pub(super) struct FixedClaim<'a, B: Backend, P: Progress> {
     pub gate: &'a Gate<B>,
     pub home: &'a Home,
@@ -106,25 +107,18 @@ impl<B: Backend + Sync, P: Progress> FixedClaim<'_, B, P> {
         let entry = match Entry::lstat(self.gate, &path) {
             Ok(entry) => entry,
             Err(NotAnEntry::Placeholder { path }) => {
-                return self.log.skip(path, WalkSkip::Placeholder);
+                return self.log.skip(path, WalkSkip::SealedPlaceholder);
             }
+            Err(NotAnEntry::Mount { path }) => return self.log.skip(path, WalkSkip::SealedMount),
             Err(NotAnEntry::Fs(error)) => return self.log.entry_failed(path, error),
         };
 
-        match self.behind_a_mount(&entry) {
-            Ok(true) => self.log.skip(path, WalkSkip::Mount),
+        let closed = entry.is_behind_a_closed_mount(self.gate, self.home, self.mounts);
+        match closed {
             Ok(false) => self.targets.claim(scope, entry, rules),
+            Ok(true) => self.log.skip(path, WalkSkip::Closed(Needs::MOUNTS)),
             Err(error) => self.log.problem(Problem::Path(error)),
         }
-    }
-
-    /// Whether the entry is a mount root, or lies inside a mount the walk may not
-    /// enter.
-    fn behind_a_mount(&self, entry: &Entry) -> Result<bool, fs::Error> {
-        if entry.is_mount(self.gate)? {
-            return Ok(true);
-        }
-        entry.is_behind_a_closed_mount(self.gate, self.home, self.mounts)
     }
 }
 

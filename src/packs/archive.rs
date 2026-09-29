@@ -37,8 +37,7 @@ impl Archive {
     pub const FILE_LIMIT: u64 = 1024 * 1024;
 
     /// The most bytes an archive may unpack to, every entry counted, kept or not. It
-    /// bounds a gzip bomb spread over many files below [`Archive::FILE_LIMIT`]; rosie's
-    /// own repository unpacks to under 1 MiB.
+    /// bounds a gzip bomb spread over many files below [`Archive::FILE_LIMIT`].
     pub const UNPACKED_LIMIT: u64 = 32 * 1024 * 1024;
 
     /// Reads a gzipped tarball whose entries all sit in one top folder, as GitHub's
@@ -322,8 +321,9 @@ mod tests {
 
     #[test]
     fn refuses_a_stream_cut_exactly_at_an_entry_boundary_past_the_limit() {
-        // Each entry is one 512-byte header plus one 512-byte body block, so two whole
-        // entries end exactly on a tar block boundary.
+        // The two folder entries are one 512-byte header each, and each file entry one
+        // header plus one 512-byte body block, so the limit falls exactly after the first
+        // file entry.
         let entry_size = 512;
         let block = 512 + entry_size;
         let limit = block * 2;

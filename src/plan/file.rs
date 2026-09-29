@@ -6,6 +6,7 @@
 //! for its format version before anything else in it is read, and unknown keys are
 //! refused: a plan never carries roots.
 
+use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
@@ -15,7 +16,7 @@ use super::{
     Report, RunAs, Selection, Size, Status, Tool, blocked_hint, check_path,
 };
 
-pub const FORMAT_VERSION: u32 = 1;
+const FORMAT_VERSION: u32 = 1;
 
 const PREAMBLE: &str = "\
 # rosie plan. Only entries with status = \"ticked\" run.
@@ -273,7 +274,8 @@ impl DeleteTable {
             .bootout
             .into_iter()
             .map(|table| table.into_bootout(&path))
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<_>, _>>()?;
+        refuse_repeated_plists(&bootouts)?;
 
         Ok(Delete {
             path,
@@ -306,6 +308,19 @@ impl BootoutTable {
             ));
         };
         Ok(Bootout { plist, domain })
+    }
+}
+
+/// A delete carries one bootout per plist, whatever the domain, as the plan builder
+/// writes it.
+fn refuse_repeated_plists(bootouts: &[Bootout]) -> Result<(), String> {
+    let mut seen = HashSet::new();
+    match bootouts.iter().find(|bootout| !seen.insert(&bootout.plist)) {
+        Some(repeated) => Err(format!(
+            "bootout plist {:?} is listed twice",
+            repeated.plist.display().to_string()
+        )),
+        None => Ok(()),
     }
 }
 
@@ -371,7 +386,7 @@ mod tests {
 
     fn found(path: &str, reach: Reach, twin: Twin) -> PathMatch {
         PathMatch {
-            path: PathBuf::from(path),
+            path: crate::plan::idle(path),
             kind: ItemKind::Folder,
             size: Size::bytes(1_234_567),
             run_as: RunAs::User,
@@ -445,15 +460,15 @@ mod tests {
             .add_tool(
                 "rosie/docker",
                 ToolCmds::Twins {
-                    cmd: "docker system prune --force",
-                    cmd_aggressive: "docker system prune --all --force",
+                    cmd: &crate::plan::argv("docker system prune --force"),
+                    cmd_aggressive: &crate::plan::argv("docker system prune --all --force"),
                 },
             )
             .expect("valid");
         builder
             .add_tool(
                 "user/docker",
-                ToolCmds::Normal("docker system prune --force"),
+                ToolCmds::Normal(&crate::plan::argv("docker system prune --force")),
             )
             .expect("valid");
         builder
@@ -485,7 +500,8 @@ mod tests {
 
         assert_eq!(parsed, plan, "{text}");
         assert_eq!(parsed.deletes().len(), 6, "{text}");
-        assert_eq!(parsed.runnable_as(RunAs::User).bootouts.len(), 2, "{text}");
+        let bootouts: usize = parsed.deletes().iter().map(|d| d.bootouts.len()).sum();
+        assert_eq!(bootouts, 3, "{text}");
     }
 
     #[test]
@@ -515,6 +531,26 @@ mod tests {
             refused.to_string(),
             "[[delete]] entry 1: bootout plist \"/w/b/x.plist\" is not inside path \"/w/a\""
         );
+    }
+
+    #[test]
+    fn refuses_a_bootout_plist_listed_twice_in_any_domain() {
+        for second_domain in ["system", "gui/501"] {
+            let text = format!(
+                "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"folder\"\nsize = 1\n\
+                 status = \"ticked\"\n[[delete.bootout]]\nplist = \"/w/a/x.plist\"\n\
+                 domain = \"system\"\n[[delete.bootout]]\nplist = \"/w/a/x.plist\"\n\
+                 domain = \"{second_domain}\"\n"
+            );
+
+            let refused = parse_error(&text);
+
+            assert_eq!(
+                refused.to_string(),
+                "[[delete]] entry 1: bootout plist \"/w/a/x.plist\" is listed twice",
+                "{text}"
+            );
+        }
     }
 
     #[test]

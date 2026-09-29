@@ -2,10 +2,11 @@
 //! (`docs/spec/plan.md`).
 //!
 //! A plan is built by [`PlanBuilder`] during a scan or parsed back from its TOML file
-//! ([`Plan::parse`]); nothing else can create one, and nothing can add entries to a
-//! parsed plan. Only [`Plan::runnable_as`] hands entries to a run, and it yields ticked
-//! entries alone: unticked and blocked entries are kept for the user to see, never
-//! executed.
+//! ([`Plan::parse`]); nothing can add entries to a parsed plan. A run executes only a
+//! [`Runnable`], whose fields are private: the only ways to get one are
+//! [`Plan::runnable_as`] and [`Plan::after_elevation`], which yield only the ticked
+//! entries of one part of a run, and a `Runnable` can only be narrowed from there.
+//! Unticked and blocked entries are kept for the user to see, never executed.
 
 mod builder;
 mod deletes;
@@ -16,6 +17,7 @@ mod size;
 mod stats;
 mod trim;
 
+use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
@@ -26,9 +28,11 @@ use deletes::Deletes;
 
 pub use builder::{AggressiveItems, PathMatch, PlanBuilder, Reach, ToolCmds, Twin};
 pub use error::Error;
-pub use file::FORMAT_VERSION;
 pub use size::Size;
-pub use stats::{ItemSize, Outcome, PlanStats, RunStats, SkipReason, Tally, WalkSkip, WalkSkips};
+pub use stats::{
+    ItemSize, Needs, Outcome, PlanStats, RunStats, SkipReason, Tally, WalkSetting, WalkSkip,
+    WalkSkips,
+};
 pub use trim::Ticked;
 
 /// Everything one scan proposes, grouped by what each entry does.
@@ -57,37 +61,43 @@ impl Plan {
         &self.reports
     }
 
-    /// The ticked entries a process running as `run_as` executes. A bootout runs with
-    /// the part of a run that carries its delete, and every bootout must finish before
-    /// the deletes start, so a launch job is unloaded before its plist is gone
-    /// (`docs/spec/app.md`). Only the deletes that run as `run_as` are included: the
-    /// elevated child boots out the jobs of a user's delete and leaves the delete to the
-    /// user's own process (see [`Delete::phase`]).
+    /// What the part of a run acting as `run_as` executes: the ticked entries of that
+    /// part (see [`Plan::ticked_for`]). A bootout runs with the part that carries its
+    /// delete, and every bootout must finish before the deletes start, so a launch job
+    /// is unloaded before its plist is gone (`docs/spec/app.md`). A user's delete that
+    /// holds a `system` job's plist is in the elevated part for its bootouts only; it
+    /// is deleted by [`Plan::after_elevation`] (see [`Delete::phase`]).
     pub fn runnable_as(&self, run_as: RunAs) -> Runnable<'_> {
-        let ticked: Vec<&Delete> = self
+        let holders: Vec<&Delete> = self
             .deletes
             .iter()
-            .filter(|d| d.status.is_ticked())
+            .filter(|delete| delete.runs_in(run_as))
             .collect();
         Runnable {
-            bootouts: ticked
+            deletes: holders
                 .iter()
-                .flat_map(|delete| delete.bootouts.iter())
-                .collect(),
-            deletes: ticked
-                .into_iter()
+                .copied()
                 .filter(|delete| delete.run_as == run_as)
                 .collect(),
-            tools: self
-                .tools
+            holders,
+            tools: self.tools.iter().filter(|t| t.runs_in(run_as)).collect(),
+            receipts: self.receipts.iter().filter(|r| r.runs_in(run_as)).collect(),
+        }
+    }
+
+    /// The user's ticked deletes of the elevated part, which the user's own process
+    /// deletes once the elevated child has booted their `system` jobs out. They carry
+    /// no bootout, tool, or receipt.
+    pub fn after_elevation(&self) -> Runnable<'_> {
+        Runnable {
+            holders: Vec::new(),
+            deletes: self
+                .deletes
                 .iter()
-                .filter(|t| t.selection.is_ticked())
+                .filter(|delete| delete.runs_in(RunAs::Sudo) && delete.run_as == RunAs::User)
                 .collect(),
-            receipts: self
-                .receipts
-                .iter()
-                .filter(|r| r.selection.is_ticked())
-                .collect(),
+            tools: Vec::new(),
+            receipts: Vec::new(),
         }
     }
 
@@ -95,17 +105,12 @@ impl Plan {
     /// does the user's part itself and pipes the `sudo` part to the elevated child
     /// (`docs/spec/safety.md#elevation`). Tools run as the user; receipts as root.
     pub fn ticked_for(&self, run_as: RunAs) -> Plan {
-        let deletes = self
-            .deletes
-            .retaining(|delete| delete.status.is_ticked() && delete.phase() == run_as);
-        let tools = self
-            .tools
-            .iter()
-            .filter(|tool| tool.selection.is_ticked() && run_as == RunAs::User);
+        let deletes = self.deletes.retaining(|delete| delete.runs_in(run_as));
+        let tools = self.tools.iter().filter(|tool| tool.runs_in(run_as));
         let receipts = self
             .receipts
             .iter()
-            .filter(|receipt| receipt.selection.is_ticked() && receipt.run_as() == run_as);
+            .filter(|receipt| receipt.runs_in(run_as));
 
         Plan {
             deletes,
@@ -160,13 +165,63 @@ fn check_path(path: &Path) -> Result<(), Error> {
     }
 }
 
-/// The ticked entries of a plan, which are the only ones a run may execute.
+/// The ticked entries of a plan that one process of a run executes, which are the only
+/// ones a run may execute. Only [`Plan::runnable_as`] and [`Plan::after_elevation`]
+/// build one; [`Runnable::without`] can only leave entries out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Runnable<'a> {
-    pub bootouts: Vec<&'a Bootout>,
-    pub deletes: Vec<&'a Delete>,
-    pub tools: Vec<&'a Tool>,
-    pub receipts: Vec<&'a Receipt>,
+    /// The ticked deletes whose launch jobs this process boots out.
+    holders: Vec<&'a Delete>,
+    /// The ticked deletes this process deletes.
+    deletes: Vec<&'a Delete>,
+    tools: Vec<&'a Tool>,
+    receipts: Vec<&'a Receipt>,
+}
+
+impl<'a> Runnable<'a> {
+    /// The deletes whose bootouts this process runs. In the elevated child they include
+    /// the user's deletes that hold a `system` job's plist, which the child boots out
+    /// but does not delete.
+    pub fn holders(&self) -> &[&'a Delete] {
+        &self.holders
+    }
+
+    /// Every bootout of [`Runnable::holders`], in plan order.
+    pub fn bootouts(&self) -> impl Iterator<Item = &'a Bootout> + '_ {
+        self.holders
+            .iter()
+            .flat_map(|delete| delete.bootouts.iter())
+    }
+
+    pub fn deletes(&self) -> &[&'a Delete] {
+        &self.deletes
+    }
+
+    pub fn tools(&self) -> &[&'a Tool] {
+        &self.tools
+    }
+
+    pub fn receipts(&self) -> &[&'a Receipt] {
+        &self.receipts
+    }
+
+    /// The same entries without the deletes `refused` selects, which lose their
+    /// bootouts with them.
+    pub fn without(&self, refused: impl Fn(&Delete) -> bool) -> Runnable<'a> {
+        let kept = |deletes: &[&'a Delete]| {
+            deletes
+                .iter()
+                .copied()
+                .filter(|delete| !refused(delete))
+                .collect()
+        };
+        Runnable {
+            holders: kept(&self.holders),
+            deletes: kept(&self.deletes),
+            tools: self.tools.clone(),
+            receipts: self.receipts.clone(),
+        }
+    }
 }
 
 // entries
@@ -178,7 +233,7 @@ pub struct Delete {
     /// What `lstat` reported at scan time; a run skips the entry as stale when it changed.
     pub kind: ItemKind,
     pub size: Size,
-    /// Every rule that matched this path, sorted and without repeats.
+    /// Every rule that matched this path.
     pub rules: Vec<String>,
     pub status: Status,
     pub run_as: RunAs,
@@ -192,13 +247,19 @@ impl Delete {
     /// the delete or any of its bootouts needs root. A delete that runs as the user but
     /// holds a `system` job's plist goes to the elevated part for its bootouts only; the
     /// user's own process deletes it once the elevated part is done. So a plist is never
-    /// deleted before its job is booted out, and root never deletes the user's items.
+    /// deleted before its job is booted out, and root never deletes an entry that runs as
+    /// the user.
     pub fn phase(&self) -> RunAs {
         let bootout_needs_root = self.bootouts.iter().any(|b| b.run_as() == RunAs::Sudo);
         match (self.run_as, bootout_needs_root) {
             (RunAs::User, false) => RunAs::User,
             _ => RunAs::Sudo,
         }
+    }
+
+    /// Whether this delete is ticked and belongs to the part of a run acting as `run_as`.
+    fn runs_in(&self, run_as: RunAs) -> bool {
+        self.status.is_ticked() && self.phase() == run_as
     }
 }
 
@@ -215,8 +276,8 @@ impl Bootout {
         self.argv_for("launchctl")
     }
 
-    /// The command as a run executes it, typed as a system command so nothing but a
-    /// [`SystemTool`] can reach `Runner::run_command`.
+    /// The command as a run executes it: the [`SystemTool`] by its absolute path, so no
+    /// `PATH` lookup can put another program in its place.
     pub fn absolute_argv(&self) -> SystemArgv {
         SystemTool::LAUNCHCTL
             .argv()
@@ -244,10 +305,18 @@ impl Bootout {
 /// A tool's own cleanup command, outside the roots gate. Its size is unknown.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tool {
-    /// Every rule whose trimmed command is this one.
+    /// Every rule whose command has this argv.
     pub rules: Vec<String>,
     pub command: Command,
     pub selection: Selection,
+}
+
+impl Tool {
+    /// Whether this tool is ticked and belongs to the part acting as `run_as`: tools run
+    /// as the user.
+    fn runs_in(&self, run_as: RunAs) -> bool {
+        self.selection.is_ticked() && run_as == RunAs::User
+    }
 }
 
 /// `pkgutil --forget <package>`, a tool command whose size is unknown.
@@ -263,8 +332,8 @@ impl Receipt {
         self.argv_for("pkgutil")
     }
 
-    /// The command as a run executes it, typed as a system command so nothing but a
-    /// [`SystemTool`] can reach `Runner::run_command`.
+    /// The command as a run executes it: the [`SystemTool`] by its absolute path, so no
+    /// `PATH` lookup can put another program in its place.
     pub fn absolute_argv(&self) -> SystemArgv {
         SystemTool::PKGUTIL
             .argv()
@@ -281,6 +350,11 @@ impl Receipt {
     /// Receipts live in root-owned folders.
     pub fn run_as(&self) -> RunAs {
         RunAs::Sudo
+    }
+
+    /// Whether this receipt is ticked and belongs to the part acting as `run_as`.
+    fn runs_in(&self, run_as: RunAs) -> bool {
+        self.selection.is_ticked() && self.run_as() == run_as
     }
 }
 
@@ -338,24 +412,21 @@ pub struct Command {
 }
 
 impl Command {
-    /// Splits rule `rule`'s `cmd` on whitespace (`docs/spec/rules.md#tool-strategy`). A
-    /// `cmd` holding a quote or a backslash is refused rather than split into words its
-    /// author did not mean.
-    pub fn split(rule: &str, cmd: &str) -> Result<Self, Error> {
-        if cmd.contains(['"', '\'', '\\']) {
-            return Err(Error::QuotedCommand {
-                rule: rule.to_owned(),
-                cmd: cmd.to_owned(),
-            });
-        }
-
-        let words = cmd.split_whitespace().map(str::to_owned).collect();
-        Command::from_words(words).map_err(|error| match error {
-            Error::EmptyArgv => Error::EmptyCommand {
-                rule: rule.to_owned(),
-            },
-            other => other,
-        })
+    /// A command from an argv, such as a tool rule's `cmd` as the rule parser split it
+    /// (`docs/spec/rules.md#tool-strategy`). A plan file holds UTF-8 text, so an
+    /// argument that is not UTF-8 is refused.
+    pub fn from_argv(argv: &Argv) -> Result<Self, Error> {
+        let words = std::iter::once(argv.program())
+            .chain(argv.args().iter().map(OsString::as_os_str))
+            .map(|word| {
+                word.to_str()
+                    .map(str::to_owned)
+                    .ok_or_else(|| Error::NonUtf8Word {
+                        word: word.to_string_lossy().into_owned(),
+                    })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        Command::from_words(words)
     }
 
     /// A command from an argv list, such as one read back from a plan file.
@@ -459,7 +530,7 @@ impl Selection {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RunAs {
     User,
-    /// Not owned by the user; done after the user's items, in the one elevated child.
+    /// Done after the user's items, in the one elevated child.
     Sudo,
 }
 
@@ -492,5 +563,24 @@ impl fmt::Display for LaunchDomain {
             LaunchDomain::Gui(uid) => write!(f, "gui/{uid}"),
             LaunchDomain::System => f.write_str("system"),
         }
+    }
+}
+
+/// `text` split on spaces, as the rule parser splits a `cmd`, for tests.
+#[cfg(test)]
+fn argv(text: &str) -> Argv {
+    let mut words = text.split(' ');
+    let program = words.next().unwrap_or_default();
+    words.fold(Argv::new(program), Argv::arg)
+}
+
+/// `path` as an empty process table admits it, for tests that build plans by hand.
+#[cfg(test)]
+fn idle(path: &str) -> crate::process::IdlePath {
+    use crate::process::{Admission, ProcessTable};
+
+    match ProcessTable::empty().admit(PathBuf::from(path)) {
+        Admission::Idle(path) => path,
+        Admission::Running { .. } => unreachable!("an empty process table admits every path"),
     }
 }

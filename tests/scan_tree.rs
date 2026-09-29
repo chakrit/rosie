@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{self, Op, ROOT_UID};
-use rosie::plan::{AggressiveItems, RunAs, Status, WalkSkip};
+use rosie::plan::{AggressiveItems, Needs, RunAs, Status, WalkSetting, WalkSkip};
 use rosie::scan::{Error, NoProgress};
 use scan_fixture::*;
 
@@ -197,7 +197,10 @@ fn a_start_folder_that_is_a_placeholder_is_not_opened_unless_enter_placeholders(
 
     assert!(!closed_listed);
     assert!(paths(&closed).is_empty());
-    assert_eq!(skipped(&closed), [(CODE, WalkSkip::Placeholder)]);
+    assert_eq!(
+        skipped(&closed),
+        [(CODE, WalkSkip::Closed(Needs::PLACEHOLDERS))]
+    );
     assert_eq!(paths(&opened), ["/Users/me/code/app/node_modules"]);
 }
 
@@ -214,7 +217,7 @@ fn bundles_are_not_entered_unless_enter_bundles() {
     assert!(paths(&closed).is_empty());
     assert_eq!(
         skipped(&closed),
-        [("/Users/me/code/Tool.app", WalkSkip::Bundle)]
+        [("/Users/me/code/Tool.app", WalkSkip::Closed(Needs::BUNDLES))]
     );
     assert_eq!(closed.skip_counts().bundles, 1);
     assert_eq!(
@@ -222,6 +225,45 @@ fn bundles_are_not_entered_unless_enter_bundles() {
         ["/Users/me/code/Tool.app/Contents/Resources/node_modules"]
     );
     assert!(entered.skipped.is_empty());
+}
+
+#[test]
+fn a_placeholder_bundle_skip_needs_both_settings_that_open_it() {
+    let fake = node_home();
+    node_project(&fake, "/Users/me/code/Old.xcarchive/Products");
+    fake.make_dataless("/Users/me/code/Old.xcarchive");
+    let placeholder_bundle = Needs::PLACEHOLDERS.and(Some(WalkSetting::Bundles));
+
+    let closed = tree(&fake, CODE);
+    let opened_only = tree_with(
+        &fake,
+        CODE,
+        walk_flags(|walk| walk.enter_placeholders = true),
+    );
+    let both = walk_flags(|walk| {
+        walk.enter_placeholders = true;
+        walk.enter_bundles = true;
+    });
+    let entered = tree_with(&fake, CODE, both);
+
+    assert_eq!(
+        skipped(&closed),
+        [(
+            "/Users/me/code/Old.xcarchive",
+            WalkSkip::Closed(placeholder_bundle)
+        )]
+    );
+    assert_eq!(
+        skipped(&opened_only),
+        [(
+            "/Users/me/code/Old.xcarchive",
+            WalkSkip::Closed(Needs::BUNDLES)
+        )]
+    );
+    assert_eq!(
+        paths(&entered),
+        ["/Users/me/code/Old.xcarchive/Products/node_modules"]
+    );
 }
 
 #[test]
@@ -266,15 +308,22 @@ fn placeholders_are_not_opened_unless_enter_placeholders() {
     assert!(!closed_listed);
     assert_eq!(
         skipped(&closed),
-        [("/Users/me/code/cloud", WalkSkip::Placeholder)]
+        [(
+            "/Users/me/code/cloud",
+            WalkSkip::Closed(Needs::PLACEHOLDERS)
+        )]
     );
     assert_eq!(paths(&opened), ["/Users/me/code/cloud/app/node_modules"]);
 }
 
+// A rule match is final: a matched placeholder is never a target and never entered,
+// even with `--enter-placeholders`, which opens only placeholders no rule matches. So
+// nothing nested inside it is planned on its own.
 #[test]
-fn a_placeholder_is_never_a_target() {
+fn a_placeholder_is_never_a_target_nor_entered_when_matched() {
     let fake = node_home();
     node_project(&fake, "/Users/me/code/app");
+    node_project(&fake, "/Users/me/code/app/node_modules/left-pad");
     fake.make_dataless("/Users/me/code/app/node_modules");
 
     let closed = tree(&fake, CODE);
@@ -287,9 +336,20 @@ fn a_placeholder_is_never_a_target() {
     assert!(paths(&closed).is_empty());
     assert_eq!(
         skipped(&closed),
-        [("/Users/me/code/app/node_modules", WalkSkip::Placeholder)]
+        [(
+            "/Users/me/code/app/node_modules",
+            WalkSkip::Closed(Needs::PLACEHOLDERS)
+        )]
     );
     assert!(paths(&opened).is_empty());
+    assert_eq!(
+        skipped(&opened),
+        [(
+            "/Users/me/code/app/node_modules",
+            WalkSkip::SealedPlaceholder
+        )]
+    );
+    assert!(!listed(&fake, "/Users/me/code/app/node_modules"));
 }
 
 #[test]
@@ -463,9 +523,9 @@ fn sizing_leaves_out_other_volumes_and_placeholders_inside_a_target() {
         [
             (
                 "/Users/me/code/app/node_modules/cloud.bin",
-                WalkSkip::Placeholder
+                WalkSkip::SealedPlaceholder
             ),
-            ("/Users/me/code/app/node_modules/mnt", WalkSkip::Mount),
+            ("/Users/me/code/app/node_modules/mnt", WalkSkip::SealedMount),
         ]
     );
     assert!(!listed(&fake, "/Users/me/code/app/node_modules/mnt"));
@@ -563,7 +623,8 @@ fn sizing_reports_progress_once_per_folder_not_per_entry() {
 
     assert_eq!(size_of(&scan, "/Users/me/code/app/node_modules"), 8000);
     assert_eq!(progress.bytes.into_inner(), 8000);
-    // One report for the target itself, then at most one per folder in it.
+    // One report for the target's own entry, then at most one per folder, the target
+    // included.
     let calls = progress.sized_calls.into_inner();
     assert!((1..=4).contains(&calls), "{calls} progress reports");
 }
@@ -683,7 +744,7 @@ fn a_dataless_fixed_file_under_the_folder_is_skipped_and_plain_dataless_files_ar
         assert!(paths(&scan).is_empty());
         assert_eq!(
             skipped(&scan),
-            [("/Users/me/.lesshst", WalkSkip::Placeholder)]
+            [("/Users/me/.lesshst", WalkSkip::SealedPlaceholder)]
         );
     }
 }
@@ -717,8 +778,11 @@ fn skips_are_listed_in_path_order() {
     assert_eq!(
         skipped(&scan),
         [
-            ("/Users/me/code/a/deep/Tool.app", WalkSkip::Bundle),
-            ("/Users/me/code/b.app", WalkSkip::Bundle),
+            (
+                "/Users/me/code/a/deep/Tool.app",
+                WalkSkip::Closed(Needs::BUNDLES)
+            ),
+            ("/Users/me/code/b.app", WalkSkip::Closed(Needs::BUNDLES)),
         ]
     );
 }

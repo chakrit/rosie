@@ -5,7 +5,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 
 use super::error::Error;
-use super::layers::{self, RuleDirs};
+use super::layers::{self, RuleLayers};
 use super::lua::LuaSandbox;
 use super::name::{Name, RuleId};
 use super::rule::{Detection, Rule, Shape, Tier};
@@ -20,8 +20,8 @@ pub struct RuleSet {
 
 impl RuleSet {
     /// Loads the pulled packs, then the user's rules over them.
-    pub fn load<B: Backend>(gate: &Gate<B>, dirs: &RuleDirs) -> Result<RuleSet, Error> {
-        let rules = layers::load(gate, dirs)?;
+    pub fn load<B: Backend>(gate: &Gate<B>, to_load: &RuleLayers) -> Result<RuleSet, Error> {
+        let rules = layers::load(gate, to_load)?;
         Ok(RuleSet::index(rules))
     }
 

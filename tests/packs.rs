@@ -9,8 +9,8 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use pack_fixture::{
-    Canned, DATA, NODE_RULE, ROSIE_PACK, ROSIE_URL, at, contents, fake_home, gate, home, listing,
-    source, url_of,
+    Canned, DATA, NODE_RULE, ROSIE_PACK, ROSIE_URL, at, contents, fake_home, gate, home, installed,
+    listing, source, sources, url_of,
 };
 use rosie::packs::{self, Error, FirstRun, Installed, MONTH, RemovePack, Source, Store};
 use rosie::rules::{self, Problem};
@@ -41,7 +41,7 @@ fn pull_installs_only_the_rules_folder_into_the_pack_folder() {
     assert!(!fake.exists(format!("{ROSIE_PACK}/README.md")));
     assert!(!fake.exists(format!("{ROSIE_PACK}/config.toml")));
     assert_eq!(
-        store.installed().expect("list packs"),
+        installed(&fake),
         vec![Installed {
             source: Source::default(),
             pulled_at: at(1_000),
@@ -79,7 +79,7 @@ fn pull_replaces_a_pack_wholesale() {
         listing(&fake, &format!("{DATA}/packs/chakrit")),
         vec!["rosie"]
     );
-    assert_eq!(store.installed().expect("list packs")[0].pulled_at, at(2));
+    assert_eq!(installed(&fake)[0].pulled_at, at(2));
 }
 
 #[test]
@@ -116,7 +116,7 @@ fn a_refused_tarball_leaves_the_installed_pack_and_the_home_untouched() {
         contents(&fake, format!("{ROSIE_PACK}/node.toml")),
         NODE_RULE
     );
-    assert_eq!(store.installed().expect("list packs")[0].pulled_at, at(1));
+    assert_eq!(installed(&fake)[0].pulled_at, at(1));
 }
 
 #[test]
@@ -146,7 +146,7 @@ fn pull_refuses_rule_files_the_volume_folds_into_one_name() {
         "got {result:?}"
     );
     assert_eq!(listing(&fake, ROSIE_PACK), vec![".pulled", "node.toml"]);
-    assert_eq!(store.installed().expect("list packs")[0].pulled_at, at(1));
+    assert_eq!(installed(&fake)[0].pulled_at, at(1));
 }
 
 #[test]
@@ -206,7 +206,7 @@ fn pull_refuses_a_pack_whose_rule_fails_to_load_and_keeps_the_installed_one() {
         contents(&fake, format!("{ROSIE_PACK}/node.toml")),
         NODE_RULE
     );
-    assert_eq!(store.installed().expect("list packs")[0].pulled_at, at(1));
+    assert_eq!(installed(&fake)[0].pulled_at, at(1));
 }
 
 #[test]
@@ -254,7 +254,7 @@ fn pull_refuses_a_pack_name_installed_under_another_case() {
         listing(&fake, &format!("{DATA}/packs/chakrit")),
         vec!["rosie"]
     );
-    assert_eq!(store.installed().expect("list packs")[0].pulled_at, at(1));
+    assert_eq!(installed(&fake)[0].pulled_at, at(1));
 }
 
 // GitHub owner names are case-insensitive, so an owner the volume stores under another
@@ -281,7 +281,7 @@ fn pull_replaces_a_pack_whose_owner_is_stored_in_another_case() {
 
     assert_eq!(pulled.source, stored);
     assert_eq!(
-        store.installed().expect("list packs"),
+        installed(&fake),
         vec![Installed {
             source: stored,
             pulled_at: at(2),
@@ -314,7 +314,7 @@ fn pull_installs_a_new_pack_under_the_owner_as_stored() {
         assert_eq!(pulled.source, source("Chakrit/other"));
     }
     assert_eq!(
-        store.sources().expect("list packs"),
+        sources(&fake),
         vec![source("Chakrit/other"), source("Chakrit/rosie")]
     );
 }
@@ -336,7 +336,7 @@ fn pull_refuses_an_owner_the_volume_stores_under_an_invalid_name() {
     let result = packs::pull(&store, &network, &source(&requested), at(1));
 
     assert!(
-        matches!(&result, Err(Error::StrayOwnerFolder { path, .. }) if *path == Path::new(&stray)),
+        matches!(&result, Err(Error::StrayEntry { path, .. }) if *path == Path::new(&stray)),
         "got {result:?}"
     );
     assert_eq!(listing(&fake, &stray), Vec::<std::ffi::OsString>::new());
@@ -359,7 +359,7 @@ fn pull_refuses_a_pack_the_volume_folds_onto_the_reserved_name_user() {
         matches!(&result, Err(Error::ReservedPack { text }) if text == "someone/User"),
         "got {result:?}"
     );
-    assert_eq!(store.sources().expect("list packs"), Vec::<Source>::new());
+    assert_eq!(sources(&fake), Vec::<Source>::new());
     assert!(!fake.exists(format!("{DATA}/packs/someone/.User.new")));
 }
 
@@ -589,7 +589,7 @@ fn refused_pull_keeps_the_installed_pack(files: &[(&str, &str)]) -> rules::Error
         contents(&fake, format!("{ROSIE_PACK}/node.toml")),
         NODE_RULE
     );
-    assert_eq!(store.installed().expect("list packs")[0].pulled_at, at(1));
+    assert_eq!(installed(&fake)[0].pulled_at, at(1));
     match result {
         Err(Error::InvalidRules(inner)) => *inner,
         other => panic!("expected the pack's rules to be refused, got {other:?}"),
@@ -819,7 +819,7 @@ fn seeding_with_a_pack_installed_leaves_the_packs_alone() {
     );
     assert!(!fake.exists(format!("{ROSIE_PACK}/other.toml")));
     assert_eq!(
-        store.installed().expect("list packs"),
+        installed(&fake),
         vec![Installed {
             source: Source::default(),
             pulled_at: at(1),
@@ -851,7 +851,7 @@ fn removes_any_pack_including_rosie() {
 
     assert_eq!(removed, Source::default());
     assert!(!fake.exists(ROSIE_PACK));
-    assert_eq!(store.installed().expect("list packs"), vec![]);
+    assert_eq!(installed(&fake), vec![]);
 }
 
 #[test]
@@ -930,7 +930,7 @@ fn first_run_offline_stops_with_the_reason() {
         error.to_string().contains("the network is unreachable"),
         "the reason is named: {error}"
     );
-    assert_eq!(store.installed().expect("list packs"), vec![]);
+    assert_eq!(installed(&fake), vec![]);
 }
 
 #[test]
@@ -954,7 +954,7 @@ fn removing_the_last_pack_makes_the_next_run_pull_rosie_again() {
 
 // age
 
-fn installed(pulled_at: SystemTime) -> Installed {
+fn pack_at(pulled_at: SystemTime) -> Installed {
     Installed {
         source: Source::default(),
         pulled_at,
@@ -967,8 +967,8 @@ fn warns_once_the_rules_are_six_months_old() {
     let six_months = pulled_at + MONTH * 6;
 
     let just_before =
-        packs::age_warning(&[installed(pulled_at)], six_months - Duration::from_secs(1));
-    let at_six = packs::age_warning(&[installed(pulled_at)], six_months);
+        packs::age_warning(&[pack_at(pulled_at)], six_months - Duration::from_secs(1));
+    let at_six = packs::age_warning(&[pack_at(pulled_at)], six_months);
 
     assert_eq!(just_before, None);
     assert_eq!(
@@ -980,7 +980,7 @@ fn warns_once_the_rules_are_six_months_old() {
 #[test]
 fn ages_the_rules_by_the_oldest_pack() {
     let now = at(100_000_000);
-    let packs = [installed(now - MONTH * 2), installed(now - MONTH * 13)];
+    let packs = [pack_at(now - MONTH * 2), pack_at(now - MONTH * 13)];
 
     let warning = packs::age_warning(&packs, now);
 
@@ -994,7 +994,7 @@ fn ages_the_rules_by_the_oldest_pack() {
 fn a_pull_time_in_the_future_is_not_stale() {
     let now = at(1_000);
 
-    let warning = packs::age_warning(&[installed(now + MONTH * 12)], now);
+    let warning = packs::age_warning(&[pack_at(now + MONTH * 12)], now);
 
     assert_eq!(warning, None);
 }

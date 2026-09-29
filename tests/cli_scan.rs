@@ -55,6 +55,54 @@ fn each_walk_skip_names_its_path_and_reason() {
     );
 }
 
+/// A folder closed several ways at once names every closure and every flag it needs.
+#[test]
+fn a_skip_closed_several_ways_names_every_flag_it_needs() {
+    let sandbox = Sandbox::new();
+    sandbox.fake.add_dir(format!("{CWD}/Old.app"));
+    sandbox.fake.mount(format!("{CWD}/Old.app"), 2);
+    sandbox.fake.make_dataless(format!("{CWD}/Old.app"));
+
+    let ran = sandbox.run(&["scan", "tree", "."]);
+
+    ran.assert_status(ExitStatus::Success);
+    let line = format!(
+        "skipped {CWD}/Old.app: cloud placeholder, not downloaded; another volume; bundle \
+         (use --enter-placeholders, --enter-mounts and --enter-bundles to enter)"
+    );
+    assert!(
+        ran.stderr.lines().any(|shown| shown == line),
+        "{line}\n{}",
+        ran.stderr
+    );
+    assert!(
+        ran.stderr.contains("walk skipped 1 placeholder"),
+        "{}",
+        ran.stderr
+    );
+}
+
+/// A matched mount root is never planned, whatever the flags, so its skip line names no
+/// flag to try, even with `--enter-mounts` already given.
+#[test]
+fn a_matched_mount_root_names_no_flag_to_try() {
+    let sandbox = Sandbox::new();
+    let node_modules = format!("{CWD}/app/node_modules");
+    sandbox.node_project(&format!("{CWD}/app"));
+    sandbox.fake.mount(&node_modules, 2);
+
+    let ran = sandbox.run(&["scan", "tree", ".", "--enter-mounts"]);
+
+    ran.assert_status(ExitStatus::Success);
+    let line = format!("skipped {node_modules}: mount point, never entered or a target");
+    assert!(
+        ran.stderr.lines().any(|shown| shown == line),
+        "{line}\n{}",
+        ran.stderr
+    );
+    assert!(!ran.stdout.contains(&node_modules), "{}", ran.stdout);
+}
+
 #[test]
 fn each_walk_flag_enters_what_it_names() {
     let cases = [
@@ -97,7 +145,7 @@ fn a_target_a_process_runs_from_is_skipped_naming_the_process() {
 
     ran.assert_status(ExitStatus::Success);
     let line = format!(
-        "skipped {CWD}/app/node_modules: in use by process 77 ({CWD}/app/node_modules/.bin/vite)"
+        "skipped {CWD}/app/node_modules (4.1 KB): in use by process 77 ({CWD}/app/node_modules/.bin/vite)"
     );
     assert!(
         ran.stderr.lines().any(|shown| shown == line),
@@ -105,6 +153,29 @@ fn a_target_a_process_runs_from_is_skipped_naming_the_process() {
         ran.stderr
     );
     assert!(!ran.stdout.contains("[[delete]]"), "{}", ran.stdout);
+}
+
+#[test]
+fn clean_counts_a_target_a_process_runs_from_in_the_end_of_run_skips_with_its_size() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+    sandbox.node_project(&format!("{CWD}/lib"));
+    sandbox.processes(&format!(
+        "  77     1   501 {CWD}/app/node_modules/.bin/vite\n"
+    ));
+
+    let ran = sandbox.run_with(Script::terminal().answer("y"), &["clean", "tree", "."]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(sandbox.exists(&format!("{CWD}/app/node_modules/left-pad/index.js")));
+    assert!(!sandbox.exists(&format!("{CWD}/lib/node_modules")));
+    assert!(
+        ran.stderr
+            .lines()
+            .any(|shown| shown == "skipped: 1 item, 4.1 KB (running process 1 item, 4.1 KB)"),
+        "{}",
+        ran.stderr
+    );
 }
 
 // run skips name the path and why

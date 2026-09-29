@@ -1,7 +1,10 @@
 //! `app` and `orphans` modes: search the app-leftover folders for bundle-ID and name
-//! matches and list them as a plan (`docs/spec/app.md`). Scanning only; the runner
-//! executes the plan. Every filesystem item is gated by `roots` through the same FS
-//! layer as every mode.
+//! matches and list them as a plan (`docs/spec/app.md`), in the same [`Scan`] every mode
+//! returns. Scanning only; the runner executes the plan. Every filesystem item is gated
+//! by `roots` through the same FS layer as every mode, and refused, as in every mode,
+//! while a process executes from it.
+//!
+//! [`Scan`]: crate::scan::Scan
 
 mod app;
 mod bundle;
@@ -15,27 +18,10 @@ mod search;
 use std::path::PathBuf;
 
 use crate::fs::{Backend, Gate, Home};
-use crate::plan::{Plan, WalkSkips};
-use crate::scan::Skipped;
 
 pub use app::scan_app;
 pub use error::Error;
 pub use orphans::scan_orphans;
-
-/// What an app or orphan scan found, and what it could not look into.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Scanned {
-    pub plan: Plan,
-    /// Paths the scan or the sizing did not enter, sorted by path.
-    pub skipped: Vec<Skipped>,
-}
-
-impl Scanned {
-    /// Walk-skip counts per reason, for the stats.
-    pub fn skip_counts(&self) -> WalkSkips {
-        self.skipped.iter().map(|skipped| skipped.reason).collect()
-    }
-}
 
 /// The installed apps the `app` picker offers: `.app` bundles in `/Applications` and
 /// `~/Applications` (`docs/spec/cli.md#pickers`), sorted. A folder rosie may not list

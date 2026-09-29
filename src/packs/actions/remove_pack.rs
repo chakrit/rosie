@@ -1,5 +1,5 @@
 use super::clear_copy::{ClearCopy, Discarded};
-use super::settle_packs::SettlePacks;
+use super::settle_packs::{SettlePacks, Settled};
 use crate::fs::Backend;
 use crate::packs::error::Error;
 use crate::packs::source::Source;
@@ -19,8 +19,7 @@ pub struct RemovePack {
 
 impl RemovePack {
     pub fn run<B: Backend>(&self, store: &Store<B>) -> Result<Source, Error> {
-        SettlePacks.run(store)?;
-        let source = self.find(store)?;
+        let source = self.find(&SettlePacks.run(store)?)?;
         let owner_dir = store.owner_dir(&source);
 
         store
@@ -38,8 +37,8 @@ impl RemovePack {
         Ok(source)
     }
 
-    fn find<B: Backend>(&self, store: &Store<B>) -> Result<Source, Error> {
-        let matching: Vec<Source> = store
+    fn find<B: Backend>(&self, settled: &Settled<B>) -> Result<Source, Error> {
+        let matching: Vec<Source> = settled
             .sources()?
             .into_iter()
             .filter(|source| source.pack().as_str() == self.pack)

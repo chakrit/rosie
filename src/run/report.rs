@@ -7,11 +7,12 @@
 
 use std::collections::VecDeque;
 use std::io::{self, Write};
+use std::sync::mpsc::Sender;
 use std::time::Duration;
 
 use indicatif::{ProgressBar, ProgressStyle};
 
-use super::ItemResult;
+use super::{ItemResult, Subject};
 use crate::fs::Argv;
 
 /// How many output lines of a command are shown.
@@ -19,8 +20,12 @@ const WINDOW: usize = 3;
 
 const SPINNER_TICK: Duration = Duration::from_millis(100);
 
-/// Receives a run's progress. Deletes are reported when their part of the run has
-/// finished; commands as they run.
+/// Receives a run's progress. Within each part a process executes, refused and withheld
+/// items are reported first, then commands as they run and deletes as each finishes. For
+/// the elevated part the child reports its own items; the run that launched it then
+/// reports, after them, those the child never reported, or every item of the part when
+/// sudo cannot start, or the child's report is unreadable or names items it was not
+/// sent.
 pub trait Reporter {
     fn command_started(&mut self, argv: &Argv);
 
@@ -31,6 +36,61 @@ pub trait Reporter {
 
     /// The run is about to ask sudo to run `items` items in an elevated child.
     fn elevating(&mut self, items: usize);
+}
+
+/// One reporter call, made on a worker thread and delivered on the thread that owns
+/// the run's reporter.
+pub(super) enum Event {
+    CommandStarted(Argv),
+    CommandOutput(Argv, OutputWindow),
+    ItemFinished(ItemResult),
+    Elevating(usize),
+}
+
+impl Event {
+    pub(super) fn deliver<R: Reporter>(self, reporter: &mut R) {
+        match self {
+            Event::CommandStarted(argv) => reporter.command_started(&argv),
+            Event::CommandOutput(argv, window) => reporter.command_output(&argv, &window),
+            Event::ItemFinished(result) => reporter.item_finished(&result),
+            Event::Elevating(items) => reporter.elevating(items),
+        }
+    }
+}
+
+/// The reporter a worker thread reports through: it sends each call, as an [`Event`],
+/// to the thread that owns the run's reporter.
+#[derive(Clone)]
+pub(super) struct Forwarding(Sender<Event>);
+
+impl Forwarding {
+    pub(super) fn new(sender: Sender<Event>) -> Self {
+        Forwarding(sender)
+    }
+
+    fn send(&self, event: Event) {
+        if self.0.send(event).is_err() {
+            panic!("the thread that owns the run's reporter stopped before its workers");
+        }
+    }
+}
+
+impl Reporter for Forwarding {
+    fn command_started(&mut self, argv: &Argv) {
+        self.send(Event::CommandStarted(argv.clone()));
+    }
+
+    fn command_output(&mut self, argv: &Argv, window: &OutputWindow) {
+        self.send(Event::CommandOutput(argv.clone(), window.clone()));
+    }
+
+    fn item_finished(&mut self, result: &ItemResult) {
+        self.send(Event::ItemFinished(result.clone()));
+    }
+
+    fn elevating(&mut self, items: usize) {
+        self.send(Event::Elevating(items));
+    }
 }
 
 /// The last 3 lines of a command's output.
@@ -103,7 +163,8 @@ impl<W: Write> Reporter for PlainReporter<W> {
 }
 
 /// A spinner with the command and its live 3-line window while a command runs, then
-/// the results as [`PlainReporter`] prints them: for a stderr that is a terminal.
+/// the results as [`PlainReporter`] prints them: for a stderr that is a terminal. A
+/// delete that finishes while a command runs is printed above the spinner.
 pub struct TerminalReporter {
     results: PlainReporter<io::Stderr>,
     spinner: Option<ProgressBar>,
@@ -144,10 +205,18 @@ impl Reporter for TerminalReporter {
     }
 
     fn item_finished(&mut self, result: &ItemResult) {
-        if let Some(spinner) = self.spinner.take() {
-            spinner.finish_and_clear();
+        match (&result.subject, &self.spinner) {
+            (Subject::Path(_), Some(spinner)) => {
+                spinner.suspend(|| self.results.item_finished(result));
+            }
+            (Subject::Path(_), None) => self.results.item_finished(result),
+            (Subject::Command { .. }, _) => {
+                if let Some(spinner) = self.spinner.take() {
+                    spinner.finish_and_clear();
+                }
+                self.results.item_finished(result);
+            }
         }
-        self.results.item_finished(result);
     }
 
     fn elevating(&mut self, items: usize) {

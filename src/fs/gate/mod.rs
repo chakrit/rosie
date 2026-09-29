@@ -4,8 +4,10 @@
 //!   symlink (`docs/spec/safety.md#cleanup-targets`, `#symlinks`).
 //! - Rosie's own data goes through separate methods confined to the injected config and
 //!   data folders, not checked against roots (`docs/spec/safety.md#rosies-own-data`).
-//! - Reads and commands pass through, with errors naming their path or command.
+//! - `read_file` and `lstat_link_free` refuse any symlink in the path; other reads and
+//!   commands pass through. Errors name their path or command.
 
+mod admission;
 mod components;
 mod lexical;
 mod removal;
@@ -17,8 +19,8 @@ use std::path::{Path, PathBuf};
 
 use super::backend::{Argv, Backend, CommandOutput, Exit, Metadata};
 use super::error::{Error, Op};
-use removal::Entering;
 
+pub use admission::Admitted;
 pub use lexical::resolve_dots;
 pub use root_control::Exposure;
 
@@ -238,39 +240,6 @@ impl<B: Backend> Gate<B> {
     }
 }
 
-impl<B: Backend + Sync> Gate<B> {
-    // cleanup targets
-
-    /// Deletes a file, folder tree, or other entry that lies within the roots, the
-    /// entries of each folder in parallel (`docs/spec/performance.md#run`).
-    ///
-    /// Symlinks inside a folder are removed as links, never descended. User-owned
-    /// folders that are not writable are made writable on the way down. A dataless
-    /// cloud placeholder is refused, never opened or unlinked, and so is an entry on
-    /// another volume than its folder, the item itself included. The delete stops at a
-    /// failure and reports it; entries removed before it stay removed.
-    pub fn delete(&self, path: &Path) -> Result<(), Error> {
-        let path = self.confine_to_roots(path)?;
-        let meta = self.lstat_without_symlinks(&path)?;
-        self.remove_item_in_parallel(&path, meta, Entering::OpeningUsersFolders)
-    }
-
-    /// Deletes like [`Gate::delete`], acting as root for the user: only through
-    /// folders no one but root can change (see `root_control`), and without changing
-    /// any permissions.
-    ///
-    /// A folder above the item, the item, or a folder inside it that fails is reported
-    /// as [`Error::NotRootControlled`] before anything below it is touched; entries
-    /// removed before it stay removed. A folder above the item that cannot be
-    /// inspected is [`Error::AboveUnchecked`].
-    pub fn delete_as_root(&self, path: &Path) -> Result<(), Error> {
-        let path = self.confine_to_roots(path)?;
-        self.require_root_controlled_above(&path)?;
-        let meta = self.io(Op::Lstat, &path, self.backend.lstat(&path))?;
-        self.remove_item_in_parallel(&path, meta, Entering::RootControlledOnly)
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use std::ffi::OsStr;
@@ -285,7 +254,7 @@ mod tests {
     const CONFIG: &str = "/Users/me/.config/rosie";
     const DATA: &str = "/Users/me/.local/share/rosie";
 
-    fn gate<'a>(fake: &'a FakeBackend, roots: &[&str]) -> Gate<&'a FakeBackend> {
+    pub(super) fn gate<'a>(fake: &'a FakeBackend, roots: &[&str]) -> Gate<&'a FakeBackend> {
         let bounds = Bounds {
             roots: roots.iter().map(PathBuf::from).collect(),
             config_dir: PathBuf::from(CONFIG),
@@ -295,11 +264,19 @@ mod tests {
         Gate::new(fake, bounds).expect("absolute bounds")
     }
 
-    fn removals(fake: &FakeBackend) -> Vec<Call> {
+    pub(super) fn removals(fake: &FakeBackend) -> Vec<Call> {
         fake.calls()
             .into_iter()
             .filter(|call| matches!(call, Call::RemoveFile(_) | Call::RemoveEmptyDir(_)))
             .collect()
+    }
+
+    fn delete(gate: &Gate<&FakeBackend>, path: &Path) -> Result<(), Error> {
+        gate.delete(gate.admit_delete(path)?)
+    }
+
+    fn delete_as_root(gate: &Gate<&FakeBackend>, path: &Path) -> Result<(), Error> {
+        gate.delete(gate.admit_delete_as_root(path)?)
     }
 
     fn path(text: &str) -> &Path {
@@ -316,8 +293,7 @@ mod tests {
         fake.add_file("/Users/me/code/app/package.json", "{}");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        gate.delete(path("/Users/me/code/app/node_modules"))
-            .expect("delete within root");
+        delete(&gate, path("/Users/me/code/app/node_modules")).expect("delete within root");
 
         assert!(!fake.exists("/Users/me/code/app/node_modules"));
         assert!(fake.exists("/Users/me/code/app/package.json"));
@@ -329,8 +305,7 @@ mod tests {
         fake.add_file("/Users/me/.npm/_cacache/index", "x");
         let gate = gate(&fake, &["/Users/me/.npm/_cacache"]);
 
-        gate.delete(path("/Users/me/.npm/_cacache"))
-            .expect("a root is within itself");
+        delete(&gate, path("/Users/me/.npm/_cacache")).expect("a root is within itself");
 
         assert!(!fake.exists("/Users/me/.npm/_cacache"));
     }
@@ -341,7 +316,7 @@ mod tests {
         fake.add_file("/Users/me/Documents/thesis.tex", "x");
         let gate = gate(&fake, &["/Users/me/code", "/Users/me/Library/Caches"]);
 
-        let result = gate.delete(path("/Users/me/Documents"));
+        let result = delete(&gate, path("/Users/me/Documents"));
 
         assert!(
             matches!(result, Err(Error::OutsideRoots { path }) if path == Path::new("/Users/me/Documents"))
@@ -357,7 +332,7 @@ mod tests {
         fake.add_file("/Users/me/Documents/thesis.tex", "x");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let escaped = gate.delete(path("/Users/me/code/../Documents"));
+        let escaped = delete(&gate, path("/Users/me/code/../Documents"));
 
         assert!(
             matches!(escaped, Err(Error::OutsideRoots { path }) if path == Path::new("/Users/me/Documents"))
@@ -371,8 +346,7 @@ mod tests {
         fake.add_file("/Users/me/code/app/target/debug/app", "x");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        gate.delete(path("/Users/me/code/./app/src/../target"))
-            .expect("stays inside root");
+        delete(&gate, path("/Users/me/code/./app/src/../target")).expect("stays inside root");
 
         assert!(!fake.exists("/Users/me/code/app/target"));
     }
@@ -383,7 +357,7 @@ mod tests {
         fake.add_file("/foobar/keep.txt", "x");
         let gate = gate(&fake, &["/foo"]);
 
-        let result = gate.delete(path("/foobar/keep.txt"));
+        let result = delete(&gate, path("/foobar/keep.txt"));
 
         assert!(matches!(result, Err(Error::OutsideRoots { .. })));
         assert!(fake.exists("/foobar/keep.txt"));
@@ -412,7 +386,7 @@ mod tests {
         let fake = FakeBackend::new();
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = gate.delete(path("code/app"));
+        let result = delete(&gate, path("code/app"));
 
         assert!(matches!(result, Err(Error::Relative { .. })));
     }
@@ -426,7 +400,7 @@ mod tests {
         fake.add_symlink("/Users/me/code/escape", "../projects");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = gate.delete(path("/Users/me/code/escape/app/target"));
+        let result = delete(&gate, path("/Users/me/code/escape/app/target"));
 
         let Err(Error::Symlink { path, link, real }) = result else {
             panic!("expected a symlink refusal, got {result:?}");
@@ -447,10 +421,37 @@ mod tests {
         fake.add_symlink("/Users/me/code/link", "/Users/me/elsewhere");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = gate.delete(path("/Users/me/code/link"));
+        let result = delete(&gate, path("/Users/me/code/link"));
 
         assert!(matches!(result, Err(Error::Symlink { .. })));
         assert!(fake.exists("/Users/me/code/link"));
+    }
+
+    // Every delete entry point refuses an item that is itself a symlink, including the
+    // root delete, whose folders above the item are root-controlled.
+    #[test]
+    fn every_delete_refuses_an_item_that_is_a_symlink() {
+        let fake = FakeBackend::running_as(ROOT_UID);
+        fake.add_dir("/Library/real");
+        fake.add_symlink("/Library/link", "/Library/real");
+        fake.chown_with_ancestors("/Library/link", ROOT_UID);
+        fake.add_dir(format!("{DATA}/real"));
+        fake.add_symlink(format!("{DATA}/link"), "real");
+        let gate = gate(&fake, &["/Library"]);
+
+        let as_user = delete(&gate, path("/Library/link"));
+        let as_root = delete_as_root(&gate, path("/Library/link"));
+        let own = gate.delete_own(&Path::new(DATA).join("link"));
+
+        for result in [as_user, as_root, own] {
+            assert!(
+                matches!(&result, Err(Error::Symlink { .. })),
+                "expected a symlink refusal, got {result:?}"
+            );
+        }
+        assert!(fake.exists("/Library/link"));
+        assert!(fake.exists(format!("{DATA}/link")));
+        assert_eq!(removals(&fake), vec![]);
     }
 
     #[test]
@@ -460,8 +461,7 @@ mod tests {
         fake.add_symlink("/Users/me/code/app/node_modules/lib", "/Users/me/src/lib");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        gate.delete(path("/Users/me/code/app/node_modules"))
-            .expect("delete folder");
+        delete(&gate, path("/Users/me/code/app/node_modules")).expect("delete folder");
 
         assert!(!fake.exists("/Users/me/code/app/node_modules"));
         assert!(fake.exists("/Users/me/src/lib/keep.js"));
@@ -536,7 +536,7 @@ mod tests {
         fake.add_symlink("/Users/me/code/escape", "/tmp");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let deleted = gate.delete(path("/Users/me/code/escape/x"));
+        let deleted = delete(&gate, path("/Users/me/code/escape/x"));
         let typed = gate.check_typed_path(path("/Users/me/code/escape/x"));
 
         for result in [deleted, typed.map(drop)] {
@@ -559,7 +559,7 @@ mod tests {
         );
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = gate.delete(path("/Users/me/code/link/x"));
+        let result = delete(&gate, path("/Users/me/code/link/x"));
 
         assert!(
             matches!(result, Err(Error::Symlink { link, real: RealPath::Unresolved(_), .. }) if link == Path::new("/Users/me/code/link"))
@@ -573,7 +573,7 @@ mod tests {
         fake.add_symlink("/Users/me/code/b", "a");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = gate.delete(path("/Users/me/code/a/x"));
+        let result = delete(&gate, path("/Users/me/code/a/x"));
 
         assert!(matches!(
             result,
@@ -593,8 +593,7 @@ mod tests {
         fake.chmod("/Users/me/go/pkg/mod/x@v1", 0o555);
         let gate = gate(&fake, &["/Users/me/go/pkg/mod"]);
 
-        gate.delete(path("/Users/me/go/pkg/mod/x@v1"))
-            .expect("read-only module deleted");
+        delete(&gate, path("/Users/me/go/pkg/mod/x@v1")).expect("read-only module deleted");
 
         assert!(!fake.exists("/Users/me/go/pkg/mod/x@v1"));
     }
@@ -607,7 +606,7 @@ mod tests {
         fake.chmod("/Library/Caches/tool", 0o555);
         let gate = gate(&fake, &["/Library/Caches"]);
 
-        let result = gate.delete(path("/Library/Caches/tool"));
+        let result = delete(&gate, path("/Library/Caches/tool"));
 
         let Err(Error::Io { op, path, source }) = result else {
             panic!("expected a permission failure, got {result:?}");
@@ -638,7 +637,7 @@ mod tests {
         );
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = gate.delete(path("/Users/me/code/app/target"));
+        let result = delete(&gate, path("/Users/me/code/app/target"));
 
         assert!(
             matches!(result, Err(Error::Io { op: Op::RemoveFile, path, .. }) if path == Path::new("/Users/me/code/app/target/b"))
@@ -655,7 +654,7 @@ mod tests {
         fake.mount("/Users/me/code/app/build/mnt", 9);
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = gate.delete(path("/Users/me/code/app/build"));
+        let result = delete(&gate, path("/Users/me/code/app/build"));
 
         assert!(
             matches!(result, Err(Error::CrossesVolume { path }) if path == Path::new("/Users/me/code/app/build/mnt"))
@@ -675,8 +674,8 @@ mod tests {
         fake.mount(item, 9);
         let gate = gate(&fake, &["/Users/me"]);
 
-        let as_user = gate.delete(path(item));
-        let as_root = gate.delete_as_root(path(item));
+        let as_user = delete(&gate, path(item));
+        let as_root = delete_as_root(&gate, path(item));
 
         for result in [as_user, as_root] {
             assert!(
@@ -721,8 +720,8 @@ mod tests {
         fake.make_dataless("/Users/me/code/b/cloud-file");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let folder = gate.delete(path("/Users/me/code/a"));
-        let file = gate.delete(path("/Users/me/code/b/cloud-file"));
+        let folder = delete(&gate, path("/Users/me/code/a"));
+        let file = delete(&gate, path("/Users/me/code/b/cloud-file"));
 
         assert!(
             matches!(folder, Err(Error::Placeholder { path }) if path == Path::new("/Users/me/code/a/cloud-dir"))

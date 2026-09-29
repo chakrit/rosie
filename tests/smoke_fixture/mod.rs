@@ -9,8 +9,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use tempfile::TempDir;
 
-/// A local port nothing listens on (the discard port), for every proxy variable HTTP
-/// clients read.
+/// A local port nothing listens on (the discard port), for each variable in
+/// `DEAD_PROXIES`.
 const DEAD_PROXY: &str = "http://127.0.0.1:9";
 const DEAD_PROXIES: [&str; 3] = ["HTTPS_PROXY", "HTTP_PROXY", "ALL_PROXY"];
 
@@ -19,8 +19,9 @@ const NODE_RULE: &str = "[rules.node-modules]\n\
                           target = \"node_modules\"\n\
                           marker = [\"package.json\"]\n";
 
-/// A sandboxed `$HOME` with the `rosie` pack already pulled, so a smoke test never
-/// reaches the network. Its own temp folder is dropped, and so removed, with it.
+/// A sandboxed `$HOME` with the `rosie` pack already pulled and `config.toml` written,
+/// so a smoke test never reaches the network. Its temp folder is removed when it is
+/// dropped.
 pub struct SmokeHome {
     _home: TempDir,
     home: PathBuf,
@@ -28,8 +29,8 @@ pub struct SmokeHome {
 
 impl SmokeHome {
     /// A home whose `roots` allowlist holds exactly these folders under it, real paths
-    /// with no symlink component the way a seeded `config.toml` always holds them
-    /// (`docs/spec/safety.md#roots`). Each folder is created.
+    /// with no symlink component, as every loaded `roots` entry must be
+    /// (`docs/spec/safety.md#symlinks`). Each folder is created.
     pub fn with_roots(roots: &[&str]) -> Self {
         let home = tempfile::tempdir().expect("create a sandboxed home");
         // macOS temp folders sit under the `/var` -> `/private/var` link.
@@ -73,8 +74,8 @@ impl SmokeHome {
 
     /// Runs the real `rosie` binary with a clean environment: only `HOME`, `PATH`, and
     /// the proxy variables are set, and stdin is the given text (or closed). The proxies
-    /// point at a local port nothing listens on, so a download the seeded pack should
-    /// have made unnecessary fails loudly instead of reaching the network.
+    /// point at a local port nothing listens on, so a download the pre-written pack and
+    /// config should have made unnecessary fails loudly instead of reaching the network.
     pub fn run(&self, args: &[&str], stdin: Option<&str>) -> Output {
         let mut child = Command::new(env!("CARGO_BIN_EXE_rosie"))
             .args(args)

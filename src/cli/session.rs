@@ -9,8 +9,8 @@ use super::console::Console;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
 use crate::fs::{Backend, Gate, ROOT_UID};
-use crate::packs::{self, FirstRun, Network, Store};
-use crate::rules::{Name, RuleDirs, RuleSet};
+use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
+use crate::rules::{Name, RuleLayers, RuleSet};
 use crate::run::refuse_root;
 
 /// Proof that stdin and stdout are terminals, which [`Session::pick`] takes: only
@@ -126,7 +126,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn rules(&mut self, only: &[Name]) -> Result<RuleSet, Error> {
         let store = self.store();
         let first_run = packs::first_run(&store, self.network, self.env.now)?;
-        let installed = store.installed()?;
+        let settled = SettlePacks.run(&store)?;
+        let installed = settled.installed()?;
+        let packs = settled.pack_folders()?;
         let warning = packs::age_warning(&installed, self.env.now);
 
         self.show_first_run(&first_run)?;
@@ -134,8 +136,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             self.note(&warning.to_string())?;
         }
 
-        let dirs = RuleDirs::new(&self.env.home.bounds(Vec::new(), self.own.user_uid()));
-        let rules = RuleSet::load(&self.own, &dirs)?;
+        let layers = RuleLayers::new(packs, &self.env.home.config_dir());
+        let rules = RuleSet::load(&self.own, &layers)?;
         match only {
             [] => Ok(rules),
             names => Ok(rules.only(names)?),

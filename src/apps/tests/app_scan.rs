@@ -171,13 +171,12 @@ fn launch_agents_boot_out_of_the_users_gui_domain_and_daemons_out_of_system() {
     assert_eq!(daemon.bootouts[0].domain, LaunchDomain::System);
     assert!(helper.bootouts.is_empty());
 
-    let runnable = scanned.plan.runnable_as(RunAs::User);
-    let booted: Vec<&Path> = runnable
-        .bootouts
-        .iter()
-        .map(|b| b.plist.as_path())
-        .collect();
-    assert_eq!(booted, [daemon.path.as_path(), agent.path.as_path()]);
+    let booted = |run_as| -> Vec<PathBuf> {
+        let runnable = scanned.plan.runnable_as(run_as);
+        runnable.bootouts().map(|b| b.plist.clone()).collect()
+    };
+    assert_eq!(booted(RunAs::User), std::slice::from_ref(&agent.path));
+    assert_eq!(booted(RunAs::Sudo), std::slice::from_ref(&daemon.path));
 }
 
 #[test]
@@ -288,7 +287,7 @@ fn login_items_and_system_extensions_are_report_only() {
     );
     assert!(scanned.plan.reports().iter().all(|r| !r.steps().is_empty()));
     assert_eq!(
-        scanned.plan.runnable_as(RunAs::User).deletes.len(),
+        scanned.plan.runnable_as(RunAs::User).deletes().len(),
         1,
         "reports never run"
     );
@@ -339,6 +338,40 @@ fn a_process_from_a_sibling_app_does_not_block_the_plan() {
     assert!(result.is_ok(), "{result:?}");
 }
 
+/// `docs/spec/safety.md#running-processes`: every plan, in every mode, refuses items
+/// that any process is executing from.
+#[test]
+fn refuses_a_leftover_a_process_executes_from_and_plans_the_rest() {
+    let fake = FakeBackend::new();
+    bar_app(&fake);
+    let support = lib("Application Support/com.foo.Bar");
+    fake.add_sized_file(format!("{support}/Updater"), 4096);
+    fake.add_file(lib("Caches/com.foo.Bar/cache.db"), "x");
+    running(
+        &fake,
+        &format!("    1     0     0 /sbin/launchd\n  900     1   501 {support}/Updater\n"),
+    );
+
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Ticked);
+
+    let planned = deletes(&scanned);
+    assert!(
+        planned.iter().all(|(path, _)| *path != support),
+        "{planned:?}"
+    );
+    assert_eq!(entry(&scanned, BAR).status, Status::Ticked);
+    assert_eq!(
+        entry(&scanned, &lib("Caches/com.foo.Bar")).status,
+        Status::Ticked
+    );
+    let [refused] = scanned.refused.as_slice() else {
+        panic!("one refused item expected: {:?}", scanned.refused);
+    };
+    assert_eq!(refused.path, Path::new(&support));
+    assert_eq!(refused.process.pid, 900);
+    assert_eq!(refused.rules, ["app/com.foo.Bar"]);
+}
+
 #[test]
 fn refuses_an_argument_that_is_not_an_app_bundle() {
     let fake = FakeBackend::new();
@@ -377,7 +410,12 @@ fn items_outside_the_roots_are_blocked() {
         ]
     );
     assert!(
-        scanned.plan.runnable_as(RunAs::User).bootouts.is_empty(),
+        scanned
+            .plan
+            .runnable_as(RunAs::User)
+            .bootouts()
+            .next()
+            .is_none(),
         "a blocked plist is not booted out"
     );
 }
@@ -440,7 +478,14 @@ fn folders_in_launch_folders_are_deleted_without_a_bootout() {
     let daemon = entry(&scanned, "/Library/LaunchDaemons/com.foo.Bar.helper");
     assert!(agent.bootouts.is_empty(), "{:?}", agent.bootouts);
     assert!(daemon.bootouts.is_empty(), "{:?}", daemon.bootouts);
-    assert!(scanned.plan.runnable_as(RunAs::User).bootouts.is_empty());
+    assert!(
+        scanned
+            .plan
+            .runnable_as(RunAs::User)
+            .bootouts()
+            .next()
+            .is_none()
+    );
 }
 
 #[test]

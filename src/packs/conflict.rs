@@ -1,26 +1,31 @@
-//! Rules from different packs that clean the same target the same way
-//! (`docs/spec/rules.md#packs`).
+//! Rules from different packs that clean the same thing.
 //!
-//! Two rules clash when their whole rule tables are equal: same strategy, same target,
-//! same detection fields. This compares the TOML tables directly; it needs no rule model.
+//! Two folder rules clash when their target and detection are equal
+//! (`docs/spec/rules.md#packs`), `_aggressive` twins included: the rule model's
+//! `FolderRule` carries both.
+//! Two `path` rules clash when they share a path once `~` is resolved, and two `tool`
+//! rules when they share a command, in either tier. Rules of different shapes never
+//! clash.
 
 use std::fmt;
+use std::path::{Path, PathBuf};
 
-use toml::{Table, Value};
+use crate::fs::Argv;
+use crate::rules::{
+    self, Detection, FixedPaths, FolderRule, Glob, Globs, Markers, Rule, RuleId, Shape, Twin,
+};
 
 use super::archive::RuleFile;
 use super::error::Error;
 use super::source::Source;
 
-const RULES_KEY: &str = "rules";
-
 /// A freshly pulled rule that duplicates a rule of another installed pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Conflict {
-    /// The pulled rule, as `pack/rule`.
-    pub pulled: String,
-    /// The other pack's rule, as `pack/rule`.
-    pub installed: String,
+    /// The freshly pulled rule.
+    pub pulled: RuleId,
+    /// The already-installed rule it duplicates.
+    pub installed: RuleId,
 }
 
 impl fmt::Display for Conflict {
@@ -33,63 +38,119 @@ impl fmt::Display for Conflict {
     }
 }
 
-/// A pack's rules as `pack/rule` names with their tables.
+/// A pack's rules, loaded as the rule layers load them.
 pub(super) struct PackRules {
-    rules: Vec<(String, Value)>,
+    rules: Vec<Rule>,
 }
 
 impl PackRules {
-    /// Parses every rule file of a pack. A file that is not TOML, or whose `rules` key is
-    /// not a table, is an error naming it.
-    pub(super) fn parse(source: &Source, files: &[RuleFile]) -> Result<PackRules, Error> {
-        let per_file = files
+    /// Loads every rule file of a pack with `rules::load_pack`, so a pack refused here is
+    /// exactly a pack the rule layers would refuse.
+    pub(super) fn load(source: &Source, files: &[RuleFile]) -> Result<PackRules, Error> {
+        let labeled: Vec<(PathBuf, &[u8])> = files
             .iter()
-            .map(|file| rules_in(source, file))
-            .collect::<Result<Vec<_>, _>>()?;
+            .map(|file| (file_label(source, file), file.contents()))
+            .collect();
 
-        Ok(PackRules {
-            rules: per_file.into_iter().flatten().collect(),
-        })
+        let rules = rules::load_pack(
+            source.pack(),
+            labeled
+                .iter()
+                .map(|(label, bytes)| (label.as_path(), *bytes)),
+        )
+        .map_err(|source| Error::InvalidRules(Box::new(source)))?;
+        Ok(PackRules { rules })
     }
 
-    /// The rules of `self` that duplicate a rule of `other`.
-    pub(super) fn conflicts_with(&self, other: &PackRules) -> Vec<Conflict> {
+    /// The rules of `self` that duplicate a rule of `other`, with `~` taken as `home`.
+    pub(super) fn conflicts_with(&self, other: &PackRules, home: &Path) -> Vec<Conflict> {
         self.rules
             .iter()
-            .flat_map(|(pulled, table)| {
+            .flat_map(|pulled| {
                 other
                     .rules
                     .iter()
-                    .filter(move |(_, other_table)| other_table == table)
-                    .map(move |(installed, _)| Conflict {
-                        pulled: pulled.clone(),
-                        installed: installed.clone(),
+                    .filter(move |installed| clash(pulled.shape(), installed.shape(), home))
+                    .map(move |installed| Conflict {
+                        pulled: pulled.id().clone(),
+                        installed: installed.id().clone(),
                     })
             })
             .collect()
     }
 }
 
-fn rules_in(source: &Source, file: &RuleFile) -> Result<Vec<(String, Value)>, Error> {
-    let file_label = format!("{source}/{}", file.name().to_string_lossy());
-    let text = std::str::from_utf8(file.contents()).map_err(|_| Error::RuleFileNotText {
-        file: file_label.clone(),
-    })?;
+fn clash(pulled: &Shape, installed: &Shape, home: &Path) -> bool {
+    match (pulled, installed) {
+        (Shape::Folder(pulled), Shape::Folder(installed)) => folder_clash(pulled, installed),
+        (Shape::Paths(pulled), Shape::Paths(installed)) => {
+            let installed = resolved(installed, home);
+            resolved(pulled, home)
+                .iter()
+                .any(|path| installed.contains(path))
+        }
+        (Shape::Tool(pulled), Shape::Tool(installed)) => {
+            let installed = commands(installed);
+            commands(pulled)
+                .iter()
+                .any(|command| installed.contains(command))
+        }
+        (Shape::Folder(_) | Shape::Paths(_) | Shape::Tool(_), _) => false,
+    }
+}
 
-    let mut document: Table = text.parse().map_err(|error| Error::RuleFile {
-        file: file_label.clone(),
-        source: Box::new(error),
-    })?;
-    let Some(rules) = document.remove(RULES_KEY) else {
-        return Ok(Vec::new());
-    };
-    let Value::Table(rules) = rules else {
-        return Err(Error::RulesNotTable { file: file_label });
-    };
+/// Whether two folder rules detect the same folder: the same target, and detection
+/// that names the same marker globs regardless of the order they were written in.
+fn folder_clash(pulled: &FolderRule, installed: &FolderRule) -> bool {
+    pulled.target == installed.target && detection_clash(&pulled.detection, &installed.detection)
+}
 
-    let qualified = rules
-        .into_iter()
-        .map(|(name, table)| (format!("{}/{name}", source.pack()), table))
-        .collect();
-    Ok(qualified)
+fn detection_clash(pulled: &Detection, installed: &Detection) -> bool {
+    match (pulled, installed) {
+        (Detection::Name, Detection::Name) => true,
+        (Detection::Lua(pulled), Detection::Lua(installed)) => pulled == installed,
+        (Detection::Marker(pulled), Detection::Marker(installed)) => {
+            markers_clash(pulled, installed)
+        }
+        (Detection::Name | Detection::Lua(_) | Detection::Marker(_), _) => false,
+    }
+}
+
+fn markers_clash(pulled: &Markers, installed: &Markers) -> bool {
+    same_globs(pulled.sibling(), installed.sibling())
+        && same_globs(pulled.inside(), installed.inside())
+}
+
+/// Whether two optional glob lists name the same patterns, ignoring order.
+fn same_globs(pulled: Option<&Globs>, installed: Option<&Globs>) -> bool {
+    match (pulled, installed) {
+        (None, None) => true,
+        (Some(pulled), Some(installed)) => {
+            let mut pulled: Vec<&str> = pulled.iter().map(Glob::as_str).collect();
+            let mut installed: Vec<&str> = installed.iter().map(Glob::as_str).collect();
+            pulled.sort_unstable();
+            installed.sort_unstable();
+            pulled == installed
+        }
+        (None, Some(_)) | (Some(_), None) => false,
+    }
+}
+
+/// Every path of both tiers, with `~` taken as `home`.
+fn resolved(paths: &Twin<FixedPaths>, home: &Path) -> Vec<PathBuf> {
+    paths
+        .tiers()
+        .flat_map(|(_, paths)| paths.iter())
+        .map(|path| path.resolve(home))
+        .collect()
+}
+
+/// The command of both tiers. The parser already split each on spaces, so commands that
+/// differ only in surrounding or repeated spaces are equal here.
+fn commands(cmd: &Twin<Argv>) -> Vec<&Argv> {
+    cmd.tiers().map(|(_, argv)| argv).collect()
+}
+
+fn file_label(source: &Source, file: &RuleFile) -> PathBuf {
+    PathBuf::from(format!("{source}/{}", file.name().to_string_lossy()))
 }

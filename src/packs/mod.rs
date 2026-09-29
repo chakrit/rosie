@@ -9,7 +9,6 @@ mod age;
 mod archive;
 mod conflict;
 mod error;
-mod name;
 mod network;
 mod source;
 mod store;
@@ -67,7 +66,7 @@ pub fn pull<B: Backend, N: Network>(
     refuse_name_taken(store, source)?;
 
     let archive = DownloadArchive { source }.run(network)?;
-    let pulled_rules = PackRules::parse(source, archive.rules())?;
+    let pulled_rules = PackRules::load(source, archive.rules())?;
     let conflicts = conflicts_with_others(store, source, &pulled_rules, &installed)?;
 
     InstallPack {
@@ -109,12 +108,12 @@ pub fn default_config<N: Network>(network: &N) -> Result<String, Error> {
 /// So a source is refused when the volume finds another installed source under its pack
 /// name; the refusal names that pack as it is spelled on disk.
 fn refuse_name_taken<B: Backend>(store: &Store<B>, source: &Source) -> Result<(), Error> {
-    let named = store.sources_named(source.pack())?;
+    let named = store.sources_named(source.pack().as_str())?;
     let taken = named.into_iter().find(|other| other != source);
 
     match taken {
         Some(other) => Err(Error::PackNameTaken {
-            pack: source.pack().to_owned(),
+            pack: source.pack().to_string(),
             installed: other,
         }),
         None => Ok(()),
@@ -130,8 +129,8 @@ fn conflicts_with_others<B: Backend>(
     let others = installed.iter().filter(|other| *other != source);
     let per_pack = others
         .map(|other| {
-            let rules = PackRules::parse(other, &store.rule_files(other)?)?;
-            Ok(pulled.conflicts_with(&rules))
+            let rules = PackRules::load(other, &store.rule_files(other)?)?;
+            Ok(pulled.conflicts_with(&rules, store.home()))
         })
         .collect::<Result<Vec<_>, Error>>()?;
 

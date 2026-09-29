@@ -6,16 +6,16 @@
 //! each copy means is set out on [`Store`].
 
 use std::collections::BTreeSet;
-use std::ffi::OsStr;
+use std::ffi::{OsStr, OsString};
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::archive::{RULE_EXTENSION, RuleFile};
 use super::error::Error;
-use super::name;
-use super::source::{RESERVED_PACK, Source};
+use super::source::Source;
 use crate::fs::{self, Backend, FileKind, Gate};
+use crate::rules::Name;
 
 const PACKS_FOLDER: &str = "packs";
 const PULLED_FILE: &str = ".pulled";
@@ -40,7 +40,8 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
     seconds.to_string()
 }
 
-/// The context every pack action runs in: the gate and the packs folder.
+/// The context every pack action runs in: the gate, the home folder, and the packs
+/// folder.
 ///
 /// # Copies beside a pack
 ///
@@ -105,6 +106,7 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
 /// pack is installed. A crash while settling leaves a state from the tables above.
 pub struct Store<'g, B: Backend> {
     gate: &'g Gate<B>,
+    home: PathBuf,
     dir: PathBuf,
 }
 
@@ -116,10 +118,12 @@ pub struct Installed {
 }
 
 impl<'g, B: Backend> Store<'g, B> {
-    /// `data_dir` is rosie's injected data folder, `~/.local/share/rosie`.
-    pub fn new(gate: &'g Gate<B>, data_dir: &Path) -> Self {
+    /// `home` is the injected home folder, which a rule's `~` stands for; `data_dir` is
+    /// rosie's injected data folder, `~/.local/share/rosie`.
+    pub fn new(gate: &'g Gate<B>, home: &Path, data_dir: &Path) -> Self {
         Store {
             gate,
+            home: home.into(),
             dir: data_dir.join(PACKS_FOLDER),
         }
     }
@@ -146,10 +150,12 @@ impl<'g, B: Backend> Store<'g, B> {
         Ok(sources)
     }
 
-    /// The rule files of an installed pack.
+    /// The rule files of an installed pack, sorted by name so a duplicate rule's error
+    /// names the same "first" and "second" file on every run, regardless of `read_dir`
+    /// order.
     pub fn rule_files(&self, source: &Source) -> Result<Vec<RuleFile>, Error> {
         let pack = self.pack_dir(source);
-        let names = self.gate.read_dir(&pack)?;
+        let names = sorted(self.gate.read_dir(&pack)?);
         names
             .into_iter()
             .filter(|name| Path::new(name).extension() == Some(OsStr::new(RULE_EXTENSION)))
@@ -166,12 +172,16 @@ impl<'g, B: Backend> Store<'g, B> {
         self.gate
     }
 
+    pub(super) fn home(&self) -> &Path {
+        &self.home
+    }
+
     pub(super) fn owner_dir(&self, source: &Source) -> PathBuf {
         self.dir.join(source.owner())
     }
 
     pub(super) fn pack_dir(&self, source: &Source) -> PathBuf {
-        self.owner_dir(source).join(source.pack())
+        self.owner_dir(source).join(source.pack().as_str())
     }
 
     pub(super) fn staging_dir(&self, source: &Source) -> PathBuf {
@@ -205,7 +215,7 @@ impl<'g, B: Backend> Store<'g, B> {
         };
         stored
             .to_str()
-            .and_then(|stored| Source::from_names(stored, source.pack()))
+            .and_then(|stored| Source::from_names(stored, source.pack().as_str()))
             .ok_or_else(stray)
     }
 
@@ -252,7 +262,7 @@ impl<'g, B: Backend> Store<'g, B> {
     /// `user`: a lookup of the reserved name's staging folder finds `source`'s staging
     /// folder, which must exist.
     pub(super) fn stages_as_reserved(&self, source: &Source) -> Result<bool, Error> {
-        let reserved = format!("{COPY_PREFIX}{RESERVED_PACK}{STAGING_SUFFIX}");
+        let reserved = format!("{COPY_PREFIX}{}{STAGING_SUFFIX}", Name::user_pack());
         let staging = self.staging_dir(source);
 
         let stored = match self
@@ -339,7 +349,7 @@ impl<'g, B: Backend> Store<'g, B> {
         let valid_names = names
             .into_iter()
             .filter_map(|name| name.into_string().ok())
-            .filter(|entry| name::is_valid(entry));
+            .filter(|entry| Name::parse(entry).is_ok());
         valid_names
             .filter_map(|name| match self.gate.lstat(&dir.join(&name)) {
                 Ok(meta) if meta.kind == FileKind::Dir => Some(Ok(name)),
@@ -347,5 +357,37 @@ impl<'g, B: Backend> Store<'g, B> {
                 Err(error) => Some(Err(error.into())),
             })
             .collect()
+    }
+}
+
+/// `names` in a fixed order, independent of the backend's own `read_dir` order.
+fn sorted(mut names: Vec<OsString>) -> Vec<OsString> {
+    names.sort();
+    names
+}
+
+#[cfg(test)]
+mod tests {
+    use std::ffi::OsString;
+
+    use super::sorted;
+
+    #[test]
+    fn sorts_names_regardless_of_read_dir_order() {
+        let names: Vec<OsString> = ["c.toml", "a.toml", "b.toml"]
+            .into_iter()
+            .map(OsString::from)
+            .collect();
+
+        let sorted_names = sorted(names);
+
+        assert_eq!(
+            sorted_names,
+            vec![
+                OsString::from("a.toml"),
+                OsString::from("b.toml"),
+                OsString::from("c.toml"),
+            ]
+        );
     }
 }

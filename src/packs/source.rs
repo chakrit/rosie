@@ -4,29 +4,26 @@ use std::fmt;
 use std::str::FromStr;
 
 use super::error::Error;
-use super::name;
+use crate::rules::Name;
 
 const DEFAULT_OWNER: &str = "chakrit";
 const DEFAULT_REPO: &str = "rosie";
-/// The pack name of the user-rules layer (`docs/spec/rules.md#layers`). A pack name the
-/// volume folds onto it is refused at install, where the volume can be asked.
-pub(super) const RESERVED_PACK: &str = "user";
 
 /// A GitHub repository holding a pack in its `rules/` folder. Both names are valid pack
 /// names, so each is one plain path component, and the pack is never named `user`.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Source {
-    owner: String,
-    repo: String,
+    owner: Name,
+    repo: Name,
 }
 
 impl Source {
     pub fn owner(&self) -> &str {
-        &self.owner
+        self.owner.as_str()
     }
 
     /// The pack name, which is the repository name.
-    pub fn pack(&self) -> &str {
+    pub fn pack(&self) -> &Name {
         &self.repo
     }
 
@@ -39,13 +36,9 @@ impl Source {
     }
 
     pub(super) fn from_names(owner: &str, repo: &str) -> Option<Source> {
-        match name::is_valid(owner) && name::is_valid(repo) && repo != RESERVED_PACK {
-            true => Some(Source {
-                owner: owner.to_owned(),
-                repo: repo.to_owned(),
-            }),
-            false => None,
-        }
+        let owner = Name::parse(owner).ok()?;
+        let repo = Name::parse(repo).ok()?;
+        (!repo.is_user_pack()).then_some(Source { owner, repo })
     }
 }
 
@@ -53,8 +46,8 @@ impl Source {
 impl Default for Source {
     fn default() -> Self {
         Source {
-            owner: DEFAULT_OWNER.to_owned(),
-            repo: DEFAULT_REPO.to_owned(),
+            owner: Name::parse(DEFAULT_OWNER).expect("the default owner is a valid name"),
+            repo: Name::parse(DEFAULT_REPO).expect("the default repo is a valid name"),
         }
     }
 }
@@ -68,7 +61,7 @@ impl FromStr for Source {
         };
 
         let (owner, repo) = text.split_once('/').ok_or_else(bad_source)?;
-        if repo == RESERVED_PACK {
+        if repo == Name::user_pack().as_str() {
             return Err(Error::ReservedPack {
                 text: text.to_owned(),
             });
@@ -88,11 +81,18 @@ mod tests {
     use super::*;
 
     #[test]
+    fn the_default_source_builds() {
+        let source = Source::default();
+
+        assert_eq!(source.to_string(), "chakrit/rosie");
+    }
+
+    #[test]
     fn parses_owner_and_repo() {
         let source: Source = "someone/their-rules".parse().expect("valid source");
 
         assert_eq!(source.owner(), "someone");
-        assert_eq!(source.pack(), "their-rules");
+        assert_eq!(source.pack().as_str(), "their-rules");
     }
 
     #[test]
@@ -125,5 +125,13 @@ mod tests {
         let parsed = "user/their-rules".parse::<Source>();
 
         assert!(parsed.is_ok(), "got {parsed:?}");
+    }
+
+    /// Folder names read back from the volume reach `from_names` without passing
+    /// `from_str`, so it refuses the reserved pack name itself.
+    #[test]
+    fn names_read_back_never_make_a_pack_named_user() {
+        assert_eq!(Source::from_names("someone", "user"), None);
+        assert!(Source::from_names("someone", "users").is_some());
     }
 }

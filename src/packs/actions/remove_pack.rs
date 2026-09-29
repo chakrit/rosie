@@ -42,7 +42,7 @@ impl RemovePack {
         let matching: Vec<Source> = store
             .sources()?
             .into_iter()
-            .filter(|source| source.pack() == self.pack)
+            .filter(|source| source.pack().as_str() == self.pack)
             .collect();
 
         match matching.as_slice() {

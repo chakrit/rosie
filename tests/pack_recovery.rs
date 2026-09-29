@@ -13,8 +13,8 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use pack_fixture::{
-    Canned, DATA, OWNER, ROSIE_PACK, ROSIE_REMOVED, ROSIE_SET_ASIDE, ROSIE_STAGING, ROSIE_URL, at,
-    contents, fake_home, gate, listing,
+    Canned, DATA, HOME, OWNER, ROSIE_PACK, ROSIE_REMOVED, ROSIE_SET_ASIDE, ROSIE_STAGING,
+    ROSIE_URL, at, contents, fake_home, gate, listing,
 };
 use rosie::fs::Op;
 use rosie::fs::fake::FakeBackend;
@@ -74,7 +74,7 @@ fn a_staging_copy_an_interrupted_pull_left_is_cleared_and_the_pack_kept() {
     add_copy(&fake, ROSIE_PACK, V1, 1);
     add_partial_copy(&fake, ROSIE_STAGING, V2);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     let outcome = packs::first_run(&store, &Canned::offline(), at(9)).expect("ready");
 
@@ -88,7 +88,7 @@ fn a_staging_copy_an_interrupted_first_pull_left_is_never_installed() {
     let fake = fake_home();
     add_copy(&fake, ROSIE_STAGING, V1, 1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     assert_offline_first_run_pulls(&store);
     assert_no_copies_beside_the_pack(&fake);
@@ -102,7 +102,7 @@ fn first_run_puts_back_a_pack_an_interrupted_swap_set_aside() {
     add_copy(&fake, ROSIE_SET_ASIDE, V1, 1);
     add_copy(&fake, ROSIE_STAGING, V2, 2);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
     let network = Canned::offline();
 
     let outcome = packs::first_run(&store, &network, at(9)).expect("ready offline");
@@ -119,7 +119,7 @@ fn a_failed_pull_puts_back_a_pack_an_interrupted_swap_set_aside() {
     let fake = fake_home();
     add_copy(&fake, ROSIE_SET_ASIDE, V1, 1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     let result = packs::pull(&store, &Canned::offline(), &Source::default(), at(9));
 
@@ -136,7 +136,7 @@ fn removing_a_pack_an_interrupted_swap_set_aside_removes_it() {
     let fake = fake_home();
     add_copy(&fake, ROSIE_SET_ASIDE, V1, 1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     let removed = remove_rosie(&store).expect("the set-aside pack is still installed");
 
@@ -154,7 +154,7 @@ fn a_failed_swap_whose_restore_also_fails_names_the_set_aside_copy() {
     fake.fail_on(ROSIE_STAGING, Op::Rename, ErrorKind::PermissionDenied);
     fake.fail_on(ROSIE_SET_ASIDE, Op::Rename, ErrorKind::PermissionDenied);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", V2)]).gzip();
 
     let result = packs::pull(
@@ -179,7 +179,7 @@ fn a_stale_copy_beside_a_newer_pack_is_discarded_not_restored() {
     add_copy(&fake, ROSIE_PACK, V2, 2);
     add_copy(&fake, ROSIE_SET_ASIDE, V1, 1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     let outcome = packs::first_run(&store, &Canned::offline(), at(9)).expect("ready");
 
@@ -195,7 +195,7 @@ fn removing_a_pack_with_a_stale_copy_beside_it_does_not_resurrect_the_copy() {
     add_copy(&fake, ROSIE_PACK, V2, 2);
     add_copy(&fake, ROSIE_SET_ASIDE, V1, 1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     remove_rosie(&store).expect("remove rosie");
 
@@ -209,7 +209,7 @@ fn removing_a_pack_with_a_stale_copy_beside_it_does_not_resurrect_the_copy() {
 fn a_failed_discard_after_a_good_swap_leaves_nothing_restorable() {
     let fake = fake_home();
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
     let first = Tarball::pack(&[("node.toml", V1)]).gzip();
     packs::pull(
         &store,
@@ -249,7 +249,7 @@ fn a_partly_discarded_copy_beside_a_newer_pack_is_cleared() {
     add_copy(&fake, ROSIE_PACK, V2, 2);
     add_partial_copy(&fake, ROSIE_REMOVED, V1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     let outcome = packs::first_run(&store, &Canned::offline(), at(9)).expect("ready");
 
@@ -264,7 +264,7 @@ fn removing_a_pack_with_a_partly_discarded_copy_beside_it_removes_both() {
     add_copy(&fake, ROSIE_PACK, V2, 2);
     add_partial_copy(&fake, ROSIE_REMOVED, V1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     remove_rosie(&store).expect("remove rosie");
 
@@ -279,7 +279,7 @@ fn a_removed_copy_an_interrupted_remove_left_is_never_installed() {
     let fake = fake_home();
     add_copy(&fake, ROSIE_REMOVED, V1, 1);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
 
     assert_offline_first_run_pulls(&store);
     assert_no_copies_beside_the_pack(&fake);
@@ -289,7 +289,7 @@ fn a_removed_copy_an_interrupted_remove_left_is_never_installed() {
 fn an_interrupted_remove_does_not_resurrect_the_pack() {
     let fake = fake_home();
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", V1)]).gzip();
     packs::pull(
         &store,
@@ -319,7 +319,7 @@ fn an_empty_owner_folder_an_interrupted_remove_left_is_not_a_pack() {
     let fake = fake_home();
     fake.add_dir(OWNER);
     let gate = gate(&fake);
-    let store = Store::new(&gate, Path::new(DATA));
+    let store = Store::new(&gate, Path::new(HOME), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", V1)]).gzip();
 
     let outcome = packs::first_run(&store, &Canned::serving(ROSIE_URL, tarball), at(9))

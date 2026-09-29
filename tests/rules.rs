@@ -119,6 +119,26 @@ fn names_pulled_rules_by_repo_and_user_rules_by_the_user_pack() {
 }
 
 #[test]
+fn skips_the_pulled_marker_and_dot_named_staging_and_aside_copies() {
+    let fake = FakeBackend::new();
+    fake.add_file(
+        format!("{ROSIE_PACK}/node.toml"),
+        "[rules.npm-cache]\nstrategy = \"path\"\npaths = [\"~/.npm\"]",
+    );
+    fake.add_file(format!("{ROSIE_PACK}/.pulled"), "1000");
+    fake.add_file(
+        format!("{PACKS}/chakrit/.rosie.new/broken.toml"),
+        "[rules.x\n",
+    );
+    fake.add_dir(format!("{PACKS}/chakrit/.rosie.old"));
+    fake.add_dir(format!("{PACKS}/chakrit/.rosie.removed"));
+
+    let rules = loaded(&fake);
+
+    assert_eq!(ids(&rules), vec!["rosie/npm-cache"]);
+}
+
+#[test]
 fn a_user_override_replaces_the_whole_rule_under_its_identity() {
     let fake = FakeBackend::new();
     fake.add_file(

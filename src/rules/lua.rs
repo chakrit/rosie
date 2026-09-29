@@ -83,6 +83,13 @@ const LIBRARIES: [(&str, &[&str]); 4] = [
     ),
 ];
 
+/// A fresh Lua state with no standard library loaded, for parsing and validating rules
+/// (never for running a check, which needs [`LuaSandbox`]'s allowlisted environment).
+pub(super) fn new_parser_state() -> Result<Lua, Error> {
+    Lua::new_with(StdLib::NONE, LuaOptions::default())
+        .map_err(|error| Error::LuaStart(error.to_string()))
+}
+
 /// Compiles a rule's Lua as text, never as binary bytecode, into a function named after
 /// the rule so errors point at it. The function's environment is empty until a check
 /// gives it one.

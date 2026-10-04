@@ -5,7 +5,7 @@ use std::fmt;
 
 use thiserror::Error;
 
-use crate::fs::{self, Backend, Gate};
+use crate::fs::{self, Backend, FsContext};
 use crate::process;
 use crate::shell::quote_word;
 
@@ -60,11 +60,11 @@ impl fmt::Display for RootRefusal {
 /// Refuses to go on when rosie runs as root; the elevated child never comes here.
 /// `args` are rosie's arguments, without the program name.
 pub fn refuse_root<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     pid: u32,
     args: Vec<String>,
 ) -> Result<(), RootError> {
-    match process::effective_uid(gate)? {
+    match process::effective_uid(ctx)? {
         fs::ROOT_UID => Err(RootError::Refused(RootRefusal::new(pid, args))),
         _ => Ok(()),
     }
@@ -72,13 +72,13 @@ pub fn refuse_root<B: Backend>(
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
+    use std::path::Path;
 
     use super::*;
     use crate::fs::fake::FakeBackend;
     use crate::fs::{Argv, Bounds, CommandOutput, Exit};
 
-    fn gate_running_as<'a>(fake: &'a FakeBackend, uid: &str) -> Gate<&'a FakeBackend> {
+    fn ctx_running_as<'a>(fake: &'a FakeBackend, uid: &str) -> FsContext<&'a FakeBackend> {
         fake.respond(
             Argv::new("/usr/bin/id").arg("-u"),
             CommandOutput {
@@ -89,11 +89,10 @@ mod tests {
         );
         let bounds = Bounds {
             roots: vec![],
-            config_dir: PathBuf::from("/var/root/.config/rosie"),
-            data_dir: PathBuf::from("/var/root/.local/share/rosie"),
+            paths: crate::fs::Paths::new(Path::new("/var/root")).expect("absolute home"),
             user_uid: 0,
         };
-        Gate::new(fake, bounds).expect("absolute bounds")
+        FsContext::new(fake, bounds).expect("absolute bounds")
     }
 
     fn args() -> Vec<String> {
@@ -115,9 +114,9 @@ mod tests {
     #[test]
     fn refuses_root_with_a_line_and_the_command_to_run_instead() {
         let fake = FakeBackend::new();
-        let gate = gate_running_as(&fake, "0");
+        let ctx = ctx_running_as(&fake, "0");
 
-        let refused = refuse_root(&gate, 3, args());
+        let refused = refuse_root(&ctx, 3, args());
 
         let Err(RootError::Refused(refusal)) = refused else {
             panic!("expected a refusal, got {refused:?}");
@@ -141,8 +140,8 @@ mod tests {
     #[test]
     fn lets_a_user_through() {
         let fake = FakeBackend::new();
-        let gate = gate_running_as(&fake, "501");
+        let ctx = ctx_running_as(&fake, "501");
 
-        assert!(refuse_root(&gate, 3, args()).is_ok());
+        assert!(refuse_root(&ctx, 3, args()).is_ok());
     }
 }

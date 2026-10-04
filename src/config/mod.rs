@@ -1,9 +1,9 @@
 //! User configuration: `~/.config/rosie/config.toml`
 //! (`docs/spec/cli.md#configuration`).
 //!
-//! All reads and writes go through the gate's own-data methods
+//! All reads and writes are [`crate::fs::Rosie`] ops
 //! (`docs/spec/safety.md#rosies-own-data`); nothing here reads `$HOME` or the
-//! environment directly. `paths` and `config_dir` are always injected by the caller.
+//! environment directly. `config_dir` is always injected by the caller.
 //!
 //! The file is kept as an editable TOML document next to its typed reading, so every
 //! change edits only the key it names: the user's comments, spelling (`~/…`), and layout
@@ -21,7 +21,7 @@ use serde::Deserialize;
 use thiserror::Error;
 use toml_edit::DocumentMut;
 
-use crate::fs::{self, Backend, Gate, Paths};
+use crate::fs::{self, Backend, FsContext, FsOp, Rosie, UserInput};
 
 pub use keys::{Key, WalkFlag};
 
@@ -130,31 +130,26 @@ pub enum Error {
 /// (`docs/spec/safety.md#roots`: a fresh `config.toml` is seeded with ordinary,
 /// editable `roots` entries). The caller supplies the seed text.
 pub fn load_or_seed<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
-    paths: &Paths,
     default_text: &str,
 ) -> Result<ConfigFile, Error> {
-    match load(gate, config_dir, paths) {
-        Err(Error::NotFound) => seed(gate, config_dir, paths, default_text),
+    match load(ctx, config_dir) {
+        Err(Error::NotFound) => seed(ctx, config_dir, default_text),
         loaded => loaded,
     }
 }
 
 /// Loads and validates the user's config file. Returns [`Error::NotFound`] when none
 /// exists yet.
-pub fn load<B: Backend>(
-    gate: &Gate<B>,
-    config_dir: &Path,
-    paths: &Paths,
-) -> Result<ConfigFile, Error> {
+pub fn load<B: Backend>(ctx: &FsContext<B>, config_dir: &Path) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
-    let raw = gate.read_own_file(&path).map_err(load_error)?;
+    let raw = Rosie::read(&path).perform(ctx).map_err(load_error)?;
     let text = str::from_utf8(&raw).map_err(|source| Error::NotUtf8 {
         path: path.clone(),
         source,
     })?;
-    parse(text, &path, gate, paths)
+    parse(text, &path, ctx)
 }
 
 /// Writes `default_text` as the user's config file, first validating it the same way a
@@ -164,15 +159,14 @@ pub fn load<B: Backend>(
 /// Private: `load_or_seed` is the only public seeding path, so a caller can never
 /// overwrite an existing user config.
 fn seed<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
-    paths: &Paths,
     default_text: &str,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
-    let file = parse(default_text, Path::new(DEFAULT_LABEL), gate, paths)
+    let file = parse(default_text, Path::new(DEFAULT_LABEL), ctx)
         .map_err(|source| Error::InvalidDefault(Box::new(source)))?;
-    write_validated(gate, config_dir, &path, default_text, file)
+    write_validated(ctx, config_dir, &path, default_text, file)
 }
 
 // writing
@@ -180,14 +174,13 @@ fn seed<B: Backend>(
 /// Validates `text` as a config, then writes it and returns its loaded form. Nothing is
 /// written when `text` does not load.
 fn store<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
-    paths: &Paths,
     text: &str,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
-    let file = parse(text, &path, gate, paths)?;
-    write_validated(gate, config_dir, &path, text, file)
+    let file = parse(text, &path, ctx)?;
+    write_validated(ctx, config_dir, &path, text, file)
 }
 
 /// Writes an already-validated config's text to `config.toml`, atomically from the
@@ -196,16 +189,16 @@ fn store<B: Backend>(
 /// crash) leaves the user's existing file exactly as it was, instead of a truncated or
 /// empty one.
 fn write_validated<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
     path: &Path,
     text: &str,
     file: ConfigFile,
 ) -> Result<ConfigFile, Error> {
-    gate.create_own_dir_all(config_dir)?;
+    Rosie::create_dir_all(config_dir).perform(ctx)?;
     let sibling = sibling_path(config_dir);
-    gate.write_own_file(&sibling, text.as_bytes())?;
-    gate.rename_own(&sibling, path)?;
+    Rosie::write(&sibling, text.as_bytes()).perform(ctx)?;
+    Rosie::rename(&sibling, path).perform(ctx)?;
     Ok(file)
 }
 
@@ -215,12 +208,7 @@ fn sibling_path(config_dir: &Path) -> PathBuf {
 
 // parsing
 
-fn parse<B: Backend>(
-    text: &str,
-    path: &Path,
-    gate: &Gate<B>,
-    paths: &Paths,
-) -> Result<ConfigFile, Error> {
+fn parse<B: Backend>(text: &str, path: &Path, ctx: &FsContext<B>) -> Result<ConfigFile, Error> {
     let document = parse_syntax(text, path)?;
     validate_shape(&document, path)?;
 
@@ -232,7 +220,7 @@ fn parse<B: Backend>(
     let roots = raw
         .roots
         .iter()
-        .map(|root| paths.resolve(gate, root))
+        .map(|root| UserInput::path(root).perform(ctx))
         .collect::<Result<Vec<_>, _>>()?;
 
     let config = Config { roots, ..raw };
@@ -290,23 +278,21 @@ pub fn config_path(config_dir: &Path) -> PathBuf {
 
 #[cfg(test)]
 mod tests {
-    use crate::fs::Bounds;
     use crate::fs::fake::FakeBackend;
+    use crate::fs::{Bounds, Paths};
 
     use super::*;
 
     const HOME: &str = "/Users/me";
     const CONFIG_DIR: &str = "/Users/me/.config/rosie";
-    const DATA_DIR: &str = "/Users/me/.local/share/rosie";
 
-    fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
+    fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
             roots: Vec::new(),
-            config_dir: PathBuf::from(CONFIG_DIR),
-            data_dir: PathBuf::from(DATA_DIR),
+            paths: paths(),
             user_uid: crate::fs::fake::USER_UID,
         };
-        Gate::new(fake, bounds).expect("absolute bounds")
+        FsContext::new(fake, bounds).expect("absolute bounds")
     }
 
     fn paths() -> Paths {
@@ -325,9 +311,9 @@ mod tests {
             "/Users/me/.config/rosie/config.toml",
             "roots = [\"/Users/me/code\"]\n[walk]\nenter_bundles = true\n",
         );
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let file = load(&gate, config_dir(), &paths()).expect("load config");
+        let file = load(&ctx, config_dir()).expect("load config");
 
         assert_eq!(file.config().roots, vec![PathBuf::from("/Users/me/code")]);
         assert!(file.config().walk.enter_bundles);
@@ -337,9 +323,9 @@ mod tests {
     #[test]
     fn reports_not_found_when_no_config_exists() {
         let fake = FakeBackend::new();
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let result = load(&gate, config_dir(), &paths());
+        let result = load(&ctx, config_dir());
 
         assert!(matches!(result, Err(Error::NotFound)));
     }
@@ -351,9 +337,9 @@ mod tests {
             "/Users/me/.config/rosie/config.toml",
             "roots = []\n[walk]\nenter_bundle = true\n",
         );
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let result = load(&gate, config_dir(), &paths());
+        let result = load(&ctx, config_dir());
 
         let Err(error @ Error::Parse { .. }) = result else {
             panic!("expected a parse error, got {result:?}");
@@ -371,9 +357,9 @@ mod tests {
             "/Users/me/.config/rosie/config.toml",
             "roots = [\"~/Applications\"]\n",
         );
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let file = load(&gate, config_dir(), &paths()).expect("load config");
+        let file = load(&ctx, config_dir()).expect("load config");
 
         assert_eq!(
             file.config().roots,
@@ -388,9 +374,9 @@ mod tests {
             "/Users/me/.config/rosie/config.toml",
             "roots = [\"/opt/homebrew/Cellar\"]\n",
         );
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let file = load(&gate, config_dir(), &paths()).expect("missing root is fine");
+        let file = load(&ctx, config_dir()).expect("missing root is fine");
 
         assert_eq!(
             file.config().roots,
@@ -407,9 +393,9 @@ mod tests {
             "/Users/me/.config/rosie/config.toml",
             "roots = [\"/Users/me/code/app\"]\n",
         );
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let result = load(&gate, config_dir(), &paths());
+        let result = load(&ctx, config_dir());
 
         let Err(Error::Fs(fs::Error::Symlink { link, .. })) = result else {
             panic!("expected a symlink load error, got {result:?}");
@@ -421,14 +407,15 @@ mod tests {
     fn seeds_a_fresh_config_from_the_default_text() {
         let fake = FakeBackend::new();
         fake.add_dir(HOME);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
         let default_text = "roots = []\n[walk]\nenter_bundles = false\n";
 
-        let seeded = seed(&gate, config_dir(), &paths(), default_text).expect("seed config");
+        let seeded = seed(&ctx, config_dir(), default_text).expect("seed config");
 
         assert_eq!(seeded.config(), &Config::default());
         assert_eq!(
-            gate.read_own_file(&config_path(config_dir()))
+            Rosie::read(&config_path(config_dir()))
+                .perform(&ctx)
                 .expect("config written"),
             default_text.as_bytes()
         );
@@ -437,9 +424,9 @@ mod tests {
     #[test]
     fn refuses_to_seed_default_text_that_does_not_parse() {
         let fake = FakeBackend::new();
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let result = seed(&gate, config_dir(), &paths(), "not valid toml [[[");
+        let result = seed(&ctx, config_dir(), "not valid toml [[[");
 
         let Err(error @ Error::InvalidDefault(_)) = result else {
             panic!("expected an invalid default, got {result:?}");
@@ -455,26 +442,19 @@ mod tests {
         let default_text = include_str!("../../config.toml");
         let fake = FakeBackend::new();
         fake.add_dir("/Users/me/code");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
         let comment_lines = |text: &str| text.lines().filter(|l| l.contains('#')).count();
         let tilde_entries = |text: &str| text.matches("\"~/").count();
 
-        let seeded = seed(&gate, config_dir(), &paths(), default_text).expect("seed");
-        let added = roots::add(&gate, config_dir(), &paths(), &seeded, Path::new("~/code"))
+        let seeded = seed(&ctx, config_dir(), default_text).expect("seed");
+        let added = roots::add(&ctx, config_dir(), &paths(), &seeded, Path::new("~/code"))
             .expect("add a root");
-        let set = keys::set(
-            &gate,
-            config_dir(),
-            &paths(),
-            &added,
-            WalkFlag::EnterBundles,
-            "true",
-        )
-        .expect("set a flag");
-        let unset = keys::unset(&gate, config_dir(), &paths(), &set, WalkFlag::EnterBundles)
-            .expect("unset the flag");
+        let set = keys::set(&ctx, config_dir(), &added, WalkFlag::EnterBundles, "true")
+            .expect("set a flag");
+        let unset =
+            keys::unset(&ctx, config_dir(), &set, WalkFlag::EnterBundles).expect("unset the flag");
         roots::remove(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
             &unset,
@@ -483,7 +463,8 @@ mod tests {
         .expect("remove the root under the tool-cache comment");
 
         let text = String::from_utf8(
-            gate.read_own_file(&config_path(config_dir()))
+            Rosie::read(&config_path(config_dir()))
+                .perform(&ctx)
                 .expect("config written"),
         )
         .expect("UTF-8");
@@ -501,9 +482,9 @@ mod tests {
             "/Users/me/.config/rosie/config.toml",
             "roots = []\nwalk = [true, false, false]\n",
         );
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let result = load(&gate, config_dir(), &paths());
+        let result = load(&ctx, config_dir());
 
         assert!(
             matches!(result, Err(Error::InvalidShape { key: "walk", .. })),
@@ -515,9 +496,9 @@ mod tests {
     fn a_non_array_roots_is_a_load_error_naming_the_key() {
         let fake = FakeBackend::new();
         fake.add_file("/Users/me/.config/rosie/config.toml", "roots = \"nope\"\n");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let result = load(&gate, config_dir(), &paths());
+        let result = load(&ctx, config_dir());
 
         assert!(
             matches!(result, Err(Error::InvalidShape { key: "roots", .. })),
@@ -529,12 +510,13 @@ mod tests {
     fn load_or_seed_seeds_only_when_no_config_exists() {
         let fake = FakeBackend::new();
         fake.add_dir(HOME);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let first = load_or_seed(&gate, config_dir(), &paths(), "roots = []\n").expect("seed once");
-        gate.write_own_file(&config_path(config_dir()), b"roots = [\"/Users/me\"]\n")
+        let first = load_or_seed(&ctx, config_dir(), "roots = []\n").expect("seed once");
+        Rosie::write(&config_path(config_dir()), b"roots = [\"/Users/me\"]\n")
+            .perform(&ctx)
             .expect("simulate a user edit");
-        let second = load_or_seed(&gate, config_dir(), &paths(), "roots = []\n")
+        let second = load_or_seed(&ctx, config_dir(), "roots = []\n")
             .expect("load the edited file, not the default again");
 
         assert_eq!(first.config(), &Config::default());
@@ -551,7 +533,7 @@ mod tests {
         fake.add_dir(HOME);
         let original = "roots = []\n[walk]\nenter_bundles = true\n";
         fake.add_file("/Users/me/.config/rosie/config.toml", original);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
         fake.fail_on(
             sibling_path(config_dir()),
             Op::WriteFile,
@@ -559,15 +541,15 @@ mod tests {
         );
 
         let result = store(
-            &gate,
+            &ctx,
             config_dir(),
-            &paths(),
             "roots = []\n[walk]\nenter_bundles = false\n",
         );
 
         assert!(matches!(result, Err(Error::Fs(_))), "{result:?}");
         assert_eq!(
-            gate.read_own_file(&config_path(config_dir()))
+            Rosie::read(&config_path(config_dir()))
+                .perform(&ctx)
                 .expect("original config still there"),
             original.as_bytes()
         );
@@ -578,9 +560,9 @@ mod tests {
     fn a_default_with_an_invalid_shape_is_reported_as_an_invalid_default_and_nothing_is_written() {
         let fake = FakeBackend::new();
         fake.add_dir(HOME);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        let result = seed(&gate, config_dir(), &paths(), "walk = [true]\n");
+        let result = seed(&ctx, config_dir(), "walk = [true]\n");
 
         assert!(
             matches!(result, Err(Error::InvalidDefault(_))),
@@ -593,9 +575,9 @@ mod tests {
     fn a_successful_write_leaves_no_sibling_file_behind() {
         let fake = FakeBackend::new();
         fake.add_dir(HOME);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
-        seed(&gate, config_dir(), &paths(), "roots = []\n").expect("seed config");
+        seed(&ctx, config_dir(), "roots = []\n").expect("seed config");
 
         assert!(!fake.exists(sibling_path(config_dir())));
     }

@@ -1,6 +1,6 @@
-//! Collects what an app or orphan scan found into a plan: each item refused while a
-//! process executes from it, gated by `roots`, marked `sudo` when the user does not own
-//! it, a launch plist carrying its bootout, and sized by the scanner's sizer once the
+//! Collects what an app or orphan scan found into a plan: each item screened by the
+//! context's delete checks (refused while a process runs a program from it, blocked
+//! outside `roots`), marked `sudo` when the user does not own it, a launch plist carrying its bootout, and sized by the scanner's sizer once the
 //! search is done (`docs/spec/app.md`, `docs/spec/plan.md`,
 //! `docs/spec/safety.md#running-processes`).
 //!
@@ -14,13 +14,14 @@ use std::path::PathBuf;
 use super::Error;
 use super::listing::{FolderLookup, Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
-use crate::fs::{Backend, Gate, Paths};
+use crate::fs::{Backend, FsContext, Paths};
 use crate::plan::{
-    AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Reach, Report, RunAs,
-    Twin, WalkSkip,
+    AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Report, RunAs, Twin,
+    WalkSkip,
 };
-use crate::process::ProcessTable;
-use crate::scan::{Entry, InFolder, Log, Mounts, NoProgress, Refusals, Scan, Sizer};
+use crate::scan::{
+    Entry, InFolder, Log, Mounts, NoProgress, Problem, RefusedItems, Scan, Sizer, Verdict, screen,
+};
 
 /// A file or folder a scan may match by name. Symlinks never match, so none is ever a
 /// candidate.
@@ -61,19 +62,16 @@ impl Candidate {
 struct Marks {
     kind: ItemKind,
     launch: Option<LaunchDomain>,
-    reach: Reach,
     run_as: RunAs,
     rule: String,
     twin: Twin,
 }
 
 pub(super) struct Search<'g, B: Backend> {
-    gate: &'g Gate<B>,
+    ctx: &'g FsContext<B>,
     /// Paths anchors the volume check of each leftover location.
     paths: &'g Paths,
     mounts: Mounts,
-    /// Read once per scan; every matched item passes through it before the plan.
-    processes: &'g ProcessTable,
     builder: PlanBuilder,
     matched: Vec<(Entry, Marks)>,
     log: Log,
@@ -81,17 +79,15 @@ pub(super) struct Search<'g, B: Backend> {
 
 impl<'g, B: Backend + Sync> Search<'g, B> {
     pub(super) fn new(
-        gate: &'g Gate<B>,
+        ctx: &'g FsContext<B>,
         paths: &'g Paths,
         mounts: Mounts,
-        processes: &'g ProcessTable,
         aggressive: AggressiveItems,
     ) -> Self {
         Search {
-            gate,
+            ctx,
             paths,
             mounts,
-            processes,
             builder: PlanBuilder::new(aggressive),
             matched: Vec::new(),
             log: Log::default(),
@@ -104,16 +100,16 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
     /// across another volume is a mount skip without `enter_mounts`, as a fixed rule
     /// path is in `caches`, and is not listed.
     pub(super) fn candidates(&mut self, location: &Location) -> Result<Vec<Candidate>, Error> {
-        let FolderLookup::Found(folder) = find_folder(self.gate, &location.path)? else {
+        let FolderLookup::Found(folder) = find_folder(self.ctx, &location.path)? else {
             return Ok(Vec::new());
         };
-        if folder.is_behind_a_closed_mount(self.gate, self.paths, self.mounts)? {
+        if folder.is_behind_a_closed_mount(self.ctx, self.paths, self.mounts)? {
             self.log
                 .skip(location.path.clone(), WalkSkip::Closed(Needs::MOUNTS));
             return Ok(Vec::new());
         }
 
-        let names = match list_found(self.gate, &folder)? {
+        let names = match list_found(self.ctx, &folder)? {
             Listed::Names(names) => names,
             Listed::Denied(_) => {
                 self.log.skip(location.path.clone(), WalkSkip::Denied);
@@ -126,7 +122,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
             let Some(name) = os_name.to_str().map(str::to_owned) else {
                 continue;
             };
-            let found = match folder.entry(self.gate, &os_name) {
+            let found = match folder.entry(self.ctx, &os_name) {
                 Ok(found) => found,
                 Err(error) if error.has_vanished() => continue,
                 Err(error) => return Err(error.into()),
@@ -157,12 +153,8 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                 return Ok(());
             }
         };
-        let user_uid = self.gate.user_uid();
+        let user_uid = self.ctx.user_uid();
 
-        let reach = match self.gate.within_roots(entry.path())? {
-            true => Reach::InRoots,
-            false => Reach::OutsideRoots,
-        };
         let run_as = match entry.meta().uid == user_uid {
             true => RunAs::User,
             false => RunAs::Sudo,
@@ -175,7 +167,6 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         let marks = Marks {
             kind,
             launch,
-            reach,
             run_as,
             rule: rule.to_owned(),
             twin,
@@ -193,45 +184,56 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         self.builder.add_report(report);
     }
 
-    /// Refuses every matched item a process executes from, sizes the rest and the
-    /// refused in parallel, and builds the plan. An error sizing an item, other than a
-    /// walk skip, fails the scan.
+    /// Screens every matched item through the context's delete checks, refusing one a
+    /// process runs a program from and blocking one outside the roots, sizes the rest
+    /// and the refused in parallel, and builds the plan. An item the checks refuse
+    /// otherwise, or an error sizing an item other than a walk skip, fails the scan.
     pub(super) fn finish(self) -> Result<Scan, Error> {
         let Search {
-            gate,
+            ctx,
             paths: _,
             mounts: _,
-            processes,
             mut builder,
             matched,
             log,
         } = self;
 
         let (sized, refused) = {
-            let refusals = Refusals::new(gate, processes, &log);
-            let sizer = Sizer::walking(gate, &NoProgress, &log);
+            let refused = RefusedItems::new(ctx, &log);
+            let sizer = Sizer::walking(ctx, &NoProgress, &log);
             let sized = rayon::scope(|scope| {
                 let started = matched.into_iter().filter_map(|(entry, marks)| {
-                    let rule = || vec![marks.rule.clone()];
-                    let (entry, path) = refusals.admit(scope, entry, rule)?;
-                    Some((path, marks, sizer.measure(scope, entry)))
+                    match screen(ctx, entry.path()) {
+                        Verdict::Planned(reach) => {
+                            let path = entry.path().to_path_buf();
+                            Some((path, marks, reach, sizer.measure(scope, entry)))
+                        }
+                        Verdict::Running { pid, program } => {
+                            refused.refuse(scope, entry, vec![marks.rule], pid, program);
+                            None
+                        }
+                        Verdict::Problem(error) => {
+                            log.problem(Problem::Path(error));
+                            None
+                        }
+                    }
                 });
                 started.collect::<Vec<_>>()
             });
-            (sized, refusals.finish())
+            (sized, refused.finish())
         };
         let (mut skipped, problems) = log.into_parts();
         if let Some(problem) = problems.into_iter().next() {
-            return Err(Error::Sizing(problem));
+            return Err(Error::Item(problem));
         }
 
-        for (path, marks, size) in sized {
+        for (path, marks, reach, size) in sized {
             let found = PathMatch {
                 path,
                 kind: marks.kind,
                 size: size.get(),
                 run_as: marks.run_as,
-                reach: marks.reach,
+                reach,
                 rule: marks.rule,
                 twin: marks.twin,
             };

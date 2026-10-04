@@ -2,8 +2,8 @@
 //!
 //! The network sits beside the FS layer, not inside it: the FS layer covers filesystem,
 //! command, and sudo interaction (`docs/spec/safety.md#fs-interaction-layer`), and a
-//! download writes nothing. Its bytes reach disk only through the gate's own-data
-//! methods. Tests inject canned responses so they never touch the network.
+//! download writes nothing. Its bytes reach disk only through [`crate::fs::Rosie`]
+//! ops. Tests inject canned responses so they never touch the network.
 
 use std::io;
 use std::time::Duration;

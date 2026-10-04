@@ -16,7 +16,6 @@ use rosie::apps::launch_jobs_argv;
 use rosie::cli::{App, Console, Env, ExitStatus, PromptError, Terminals};
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{Argv, CommandOutput, Exit, Paths};
-use rosie::process::ProcessTable;
 use rosie::run::PlainReporter;
 use rosie::run::elevated::Stdin;
 use rosie::scan::NoProgress;
@@ -50,7 +49,7 @@ pub const PIPED: Terminals = Terminals {
 };
 
 /// A fake machine: a home with rosie's `node-modules` rule pulled, a config whose only
-/// root is the home, an empty process table, and rosie running as the user.
+/// root is the home, no running program, and rosie running as the user.
 pub struct Sandbox {
     pub fake: FakeBackend,
     pub net: Canned,
@@ -81,7 +80,6 @@ impl Sandbox {
             now: at(NOW),
         };
         sandbox.running_as("501");
-        sandbox.processes("");
         sandbox.respond(launch_jobs_argv(), "PID\tStatus\tLabel\n");
         sandbox
     }
@@ -126,11 +124,6 @@ impl Sandbox {
     /// What `id -u` prints.
     pub fn running_as(&self, uid: &str) {
         self.respond(Argv::new("/usr/bin/id").arg("-u"), &format!("{uid}\n"));
-    }
-
-    /// What `ps -axo pid=,ppid=,uid=,comm=` prints.
-    pub fn processes(&self, ps: &str) {
-        self.respond(ProcessTable::argv(), ps);
     }
 
     pub fn respond(&self, argv: impl Into<Argv>, stdout: &str) {

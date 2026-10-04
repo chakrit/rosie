@@ -1,5 +1,5 @@
 use super::clear_copy::{ClearCopy, Discarded};
-use crate::fs::Backend;
+use crate::fs::{Backend, FsOp, Rosie};
 use crate::packs::error::Error;
 use crate::packs::source::Source;
 use crate::packs::store::Store;
@@ -58,7 +58,7 @@ impl SettlePack<'_> {
             return Ok(SetAside::Stale);
         }
 
-        store.gate().rename_own(&set_aside, &pack)?;
+        Rosie::rename(&set_aside, &pack).perform(store.ctx())?;
         Ok(SetAside::Gone)
     }
 
@@ -71,10 +71,11 @@ impl SettlePack<'_> {
         match set_aside {
             SetAside::Gone => Ok(()),
             SetAside::Stale => {
-                store.gate().rename_own(
+                Rosie::rename(
                     &store.set_aside_dir(self.source),
                     &store.removed_dir(self.source),
-                )?;
+                )
+                .perform(store.ctx())?;
                 self.clear_copy(store, Discarded::Removed)
             }
         }

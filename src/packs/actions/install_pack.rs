@@ -3,7 +3,7 @@ use std::path::Path;
 use std::time::SystemTime;
 
 use super::settle_pack::{SettlePack, Unsettled};
-use crate::fs::{self, Backend, Gate};
+use crate::fs::{self, Backend, FsContext, FsOp, Rosie};
 use crate::packs::archive::RuleFile;
 use crate::packs::error::Error;
 use crate::packs::source::Source;
@@ -30,7 +30,7 @@ impl InstallPack<'_> {
         settle.run(store)?;
 
         let staging = store.staging_dir(self.source);
-        self.stage(store.gate(), &staging)?;
+        self.stage(store.ctx(), &staging)?;
         self.swap_in(store, &settle, &staging)?;
 
         // The swap leaves the old pack set aside beside the new one; settling discards
@@ -42,15 +42,16 @@ impl InstallPack<'_> {
     /// Writes the rule files and the pull time into the fresh `staging` folder, each as
     /// a new file. A failure leaves the staging folder behind; it is never read as a
     /// pack and the next settle clears it.
-    fn stage<B: Backend>(&self, gate: &Gate<B>, staging: &Path) -> Result<(), Error> {
-        gate.create_own_dir_all(staging)?;
+    fn stage<B: Backend>(&self, ctx: &FsContext<B>, staging: &Path) -> Result<(), Error> {
+        Rosie::create_dir_all(staging).perform(ctx)?;
         for rule in self.rules {
-            gate.create_own_file(&staging.join(rule.name()), rule.contents())
+            Rosie::create(&staging.join(rule.name()), rule.contents())
+                .perform(ctx)
                 .map_err(|error| named_twice(error, rule))?;
         }
 
         let pulled_at = store::pulled_text(self.pulled_at);
-        gate.create_own_file(&store::pulled_file(staging), pulled_at.as_bytes())?;
+        Rosie::create(&store::pulled_file(staging), pulled_at.as_bytes()).perform(ctx)?;
         Ok(())
     }
 
@@ -60,15 +61,15 @@ impl InstallPack<'_> {
         settle: &SettlePack,
         staging: &Path,
     ) -> Result<(), Error> {
-        let gate = store.gate();
+        let ctx = store.ctx();
         let pack = store.pack_dir(self.source);
         let set_aside = store.set_aside_dir(self.source);
         let replacing = store.exists(&pack)?;
         if replacing {
-            gate.rename_own(&pack, &set_aside)?;
+            Rosie::rename(&pack, &set_aside).perform(ctx)?;
         }
 
-        let installed = gate.rename_own(staging, &pack);
+        let installed = Rosie::rename(staging, &pack).perform(ctx);
         match (installed, replacing) {
             (Ok(()), _) => Ok(()),
             (Err(error), false) => Err(error.into()),
@@ -111,7 +112,6 @@ fn named_twice(error: fs::Error, rule: &RuleFile) -> Error {
 mod tests {
     use std::ffi::OsString;
     use std::io::ErrorKind;
-    use std::path::PathBuf;
     use std::time::{Duration, UNIX_EPOCH};
 
     use super::*;
@@ -123,14 +123,13 @@ mod tests {
     const PACK: &str = "/Users/me/.local/share/rosie/packs/chakrit/rosie";
     const STAGING: &str = "/Users/me/.local/share/rosie/packs/chakrit/.rosie.new";
 
-    fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
+    fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
             roots: vec![],
-            config_dir: PathBuf::from("/Users/me/.config/rosie"),
-            data_dir: PathBuf::from(DATA),
+            paths: Paths::new(Path::new(HOME)).expect("absolute home"),
             user_uid: USER_UID,
         };
-        Gate::new(fake, bounds).expect("absolute bounds")
+        FsContext::new(fake, bounds).expect("absolute bounds")
     }
 
     fn rule(name: &str, body: &str) -> RuleFile {
@@ -143,9 +142,9 @@ mod tests {
         fake.add_file(format!("{PACK}/old.toml"), "old");
         fake.add_file(format!("{PACK}/.pulled"), "1");
         fake.fail_on(STAGING, Op::Rename, ErrorKind::PermissionDenied);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
         let store = Store::new(
-            &gate,
+            &ctx,
             &Paths::new(Path::new(HOME)).expect("absolute home"),
             Path::new(DATA),
         );
@@ -177,9 +176,9 @@ mod tests {
     fn clears_a_staging_folder_an_interrupted_pull_left_behind() {
         let fake = FakeBackend::new();
         fake.add_file(format!("{STAGING}/stale.toml"), "stale");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
         let store = Store::new(
-            &gate,
+            &ctx,
             &Paths::new(Path::new(HOME)).expect("absolute home"),
             Path::new(DATA),
         );

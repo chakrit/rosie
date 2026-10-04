@@ -25,7 +25,7 @@
 use std::fmt;
 use std::path::Path;
 
-use super::Gate;
+use super::FsContext;
 use crate::fs::backend::{Backend, FileKind, Metadata, ROOT_UID};
 use crate::fs::error::{Error, Op};
 
@@ -62,7 +62,7 @@ enum Place {
     ParentOrBelow,
 }
 
-impl<B: Backend> Gate<B> {
+impl<B: Backend> FsContext<B> {
     /// Checks every folder from `/` down to the parent of the resolved `path`, by
     /// `lstat`. A folder that cannot be inspected fails the check.
     pub(super) fn require_root_controlled_above(&self, path: &Path) -> Result<(), Error> {

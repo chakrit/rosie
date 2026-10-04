@@ -22,12 +22,10 @@ fn targets_a_process_executes_from_are_refused() {
     );
     node_project(&fake, "/Users/me/code/app");
     node_project(&fake, "/Users/me/code/lib");
-    running(
-        &fake,
-        "    1     0     0 /sbin/launchd\n\
-            42     1   501 /Users/me/code/app/node_modules/.bin/server\n\
-            43     1   501 node_modules\n",
-    );
+    fake.respond_running(&[
+        (1, "/sbin/launchd"),
+        (42, "/Users/me/code/app/node_modules/.bin/server"),
+    ]);
 
     let scan = tree(&fake, CODE);
 
@@ -37,7 +35,7 @@ fn targets_a_process_executes_from_are_refused() {
     };
     assert_eq!(refused.path, Path::new("/Users/me/code/app/node_modules"));
     assert_eq!(refused.rules, ["rosie/node-modules", "rosie/z-pinned"]);
-    assert_eq!(refused.process.pid, 42);
+    assert_eq!(refused.pid, 42);
     assert_eq!(refused.size, Size::bytes(4096));
 }
 
@@ -56,10 +54,7 @@ fn a_refused_target_is_sized_apart_from_the_plan() {
         "/Users/me/code/lib/node_modules/shared.js",
     );
     fake.add_sized_file("/Users/me/code/app/node_modules/own.js", 300);
-    running(
-        &fake,
-        "   42     1   501 /Users/me/code/app/node_modules/own.js\n",
-    );
+    fake.respond_running(&[(42, "/Users/me/code/app/node_modules/own.js")]);
     let progress = Recording::default();
 
     let scan = scanner(&fake, Options::default())
@@ -82,10 +77,7 @@ fn a_mount_inside_a_refused_target_is_not_counted_as_a_scan_skip() {
     fake.add_sized_file("/Users/me/code/app/node_modules/ok.js", 100);
     fake.add_sized_file("/Users/me/code/app/node_modules/mnt/huge", 1_000_000);
     fake.mount("/Users/me/code/app/node_modules/mnt", 9);
-    running(
-        &fake,
-        "   42     1   501 /Users/me/code/app/node_modules/ok.js\n",
-    );
+    fake.respond_running(&[(42, "/Users/me/code/app/node_modules/ok.js")]);
 
     let scan = tree(&fake, CODE);
 
@@ -108,10 +100,7 @@ fn a_denied_folder_inside_a_refused_target_is_not_counted_as_a_scan_skip() {
         Op::ReadDir,
         ErrorKind::PermissionDenied,
     );
-    running(
-        &fake,
-        "   42     1   501 /Users/me/code/app/node_modules/ok.js\n",
-    );
+    fake.respond_running(&[(42, "/Users/me/code/app/node_modules/ok.js")]);
 
     let scan = tree(&fake, CODE);
 
@@ -135,10 +124,7 @@ fn a_non_permission_error_inside_a_refused_target_is_a_problem_not_a_silent_loss
         Op::ReadDir,
         ErrorKind::InvalidData,
     );
-    running(
-        &fake,
-        "   42     1   501 /Users/me/code/app/node_modules/ok.js\n",
-    );
+    fake.respond_running(&[(42, "/Users/me/code/app/node_modules/ok.js")]);
 
     let scan = tree(&fake, CODE);
 
@@ -165,10 +151,7 @@ fn a_denied_entry_inside_a_refused_target_is_not_counted_as_a_scan_skip() {
         Op::Lstat,
         ErrorKind::PermissionDenied,
     );
-    running(
-        &fake,
-        "   42     1   501 /Users/me/code/app/node_modules/ok.js\n",
-    );
+    fake.respond_running(&[(42, "/Users/me/code/app/node_modules/ok.js")]);
 
     let scan = tree(&fake, CODE);
 
@@ -188,10 +171,7 @@ fn a_placeholder_inside_a_refused_target_is_not_counted_as_a_scan_skip() {
     fake.add_sized_file("/Users/me/code/app/node_modules/ok.js", 100);
     fake.add_sized_file("/Users/me/code/app/node_modules/cloud.bin", 900);
     fake.make_dataless("/Users/me/code/app/node_modules/cloud.bin");
-    running(
-        &fake,
-        "   42     1   501 /Users/me/code/app/node_modules/ok.js\n",
-    );
+    fake.respond_running(&[(42, "/Users/me/code/app/node_modules/ok.js")]);
 
     let scan = tree(&fake, CODE);
 
@@ -204,19 +184,25 @@ fn a_placeholder_inside_a_refused_target_is_not_counted_as_a_scan_skip() {
 }
 
 #[test]
-fn a_failing_process_table_fails_the_scan() {
+fn unreadable_running_programs_fail_the_scan() {
     let fake = node_home();
     node_project(&fake, "/Users/me/code/app");
     fake.respond(
-        rosie::process::ProcessTable::argv(),
+        rosie::fs::running_argv(),
         rosie::fs::CommandOutput {
             exit: rosie::fs::Exit::Code(1),
             stdout: Vec::new(),
-            stderr: b"ps: no".to_vec(),
+            stderr: b"lsof: no".to_vec(),
         },
     );
 
     let result = scanner(&fake, Options::default()).tree(Path::new(CODE), &NoProgress);
 
-    assert!(matches!(result, Err(Error::Process(_))), "{result:?}");
+    assert!(
+        matches!(
+            result,
+            Err(Error::Fs(rosie::fs::Error::RunningUnknown { .. }))
+        ),
+        "{result:?}"
+    );
 }

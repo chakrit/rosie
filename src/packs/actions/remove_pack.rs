@@ -1,6 +1,6 @@
 use super::clear_copy::{ClearCopy, Discarded};
 use super::settle_packs::{SettlePacks, Settled};
-use crate::fs::Backend;
+use crate::fs::{Backend, FsOp, Rosie};
 use crate::packs::error::Error;
 use crate::packs::source::Source;
 use crate::packs::store::Store;
@@ -22,17 +22,16 @@ impl RemovePack {
         let source = self.find(&SettlePacks.run(store)?)?;
         let owner_dir = store.owner_dir(&source);
 
-        store
-            .gate()
-            .rename_own(&store.pack_dir(&source), &store.removed_dir(&source))?;
+        Rosie::rename(&store.pack_dir(&source), &store.removed_dir(&source))
+            .perform(store.ctx())?;
         ClearCopy {
             source: &source,
             copy: Discarded::Removed,
         }
         .run(store)?;
 
-        if store.gate().read_dir(&owner_dir)?.is_empty() {
-            store.gate().delete_own(&owner_dir)?;
+        if Rosie::read_dir(&owner_dir).perform(store.ctx())?.is_empty() {
+            Rosie::delete(&owner_dir).perform(store.ctx())?;
         }
         Ok(source)
     }

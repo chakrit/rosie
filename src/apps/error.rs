@@ -56,11 +56,14 @@ pub enum Error {
         source: fs::Error,
     },
 
-    #[error(
-        "{app} is running (process {pid}); quit it, then scan again",
-        app = app.display()
-    )]
-    Running { app: PathBuf, pid: u32 },
+    /// The app's own bundle fails a delete check, so nothing of it is cleaned
+    /// (`docs/spec/app.md`).
+    #[error("cannot clean {app}: {source}", app = app.display())]
+    Refused {
+        app: PathBuf,
+        #[source]
+        source: fs::Error,
+    },
 
     #[error(
         "cannot read `launchctl list`, so the IDs of loaded launch jobs cannot be told from \
@@ -78,9 +81,9 @@ pub enum Error {
     )]
     Mount { path: PathBuf },
 
-    /// Sizing a matched item, planned or refused, met an error other than a walk skip.
+    /// Screening or sizing a matched item met an error other than a walk skip.
     #[error(transparent)]
-    Sizing(scan::Problem),
+    Item(scan::Problem),
 }
 
 impl From<NotAnEntry> for Error {

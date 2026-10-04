@@ -48,7 +48,7 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
     fake.fail_on(lib("Caches"), Op::ReadDir, ErrorKind::Other);
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
@@ -79,7 +79,7 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
     );
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
@@ -107,7 +107,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     let fails = |result: Result<Scan, Error>| {
         matches!(
             result,
-            Err(Error::Sizing(crate::scan::Problem::Path(fs::Error::Io {
+            Err(Error::Item(crate::scan::Problem::Path(fs::Error::Io {
                 op: Op::ReadDir,
                 ..
             })))
@@ -115,7 +115,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     };
     let app_scan = |fake: &FakeBackend| {
         scan_app(
-            &gate(fake, &ALL_ROOTS),
+            &ctx(fake, &ALL_ROOTS),
             Path::new(BAR),
             &paths(),
             AggressiveItems::Unticked,
@@ -131,7 +131,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     assert!(fails(app_scan(&leftover)), "a leftover of the app");
     assert!(
         fails(scan_orphans(
-            &gate(&orphan, &ALL_ROOTS),
+            &ctx(&orphan, &ALL_ROOTS),
             &paths(),
             AggressiveItems::Unticked,
             Mounts::Skip
@@ -198,7 +198,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
     };
     let scan = |fake: &FakeBackend, mounts: Mounts| {
         scan_app(
-            &gate(fake, &ALL_ROOTS),
+            &ctx(fake, &ALL_ROOTS),
             Path::new(BAR),
             &paths(),
             AggressiveItems::Unticked,

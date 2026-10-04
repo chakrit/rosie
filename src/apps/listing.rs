@@ -3,7 +3,7 @@
 use std::ffi::OsString;
 use std::path::Path;
 
-use crate::fs::{self, Backend, Gate};
+use crate::fs::{self, Backend, Cleanup, FsContext, FsOp};
 use crate::scan::{Folder, NotAFolder};
 
 /// What a fixed folder holds.
@@ -18,12 +18,15 @@ pub(super) enum Listing {
 
 /// Lists a fixed folder. A symlink in any component of it is refused, as for any fixed
 /// path (`docs/spec/safety.md#symlinks`).
-pub(super) fn list_folder<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Listing, fs::Error> {
-    let FolderLookup::Found(folder) = find_folder(gate, path)? else {
+pub(super) fn list_folder<B: Backend>(
+    ctx: &FsContext<B>,
+    path: &Path,
+) -> Result<Listing, fs::Error> {
+    let FolderLookup::Found(folder) = find_folder(ctx, path)? else {
         return Ok(Listing::NoFolder);
     };
 
-    Ok(match list_found(gate, &folder)? {
+    Ok(match list_found(ctx, &folder)? {
         Listed::Names(names) => Listing::Entries(names),
         Listed::Denied(error) => Listing::Denied(error),
     })
@@ -39,10 +42,10 @@ pub(super) enum FolderLookup {
 /// `lstat`s a fixed folder without listing it. A symlink in any component of it is
 /// refused.
 pub(super) fn find_folder<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     path: &Path,
 ) -> Result<FolderLookup, fs::Error> {
-    match Folder::lstat(gate, path) {
+    match Folder::lstat(ctx, path) {
         Ok(folder) => Ok(FolderLookup::Found(folder)),
         Err(NotAFolder::Kind { .. }) => Ok(FolderLookup::Absent),
         Err(NotAFolder::Fs(error)) if error.has_vanished() => Ok(FolderLookup::Absent),
@@ -58,8 +61,11 @@ pub(super) enum Listed {
 }
 
 /// Lists a folder [`find_folder`] found.
-pub(super) fn list_found<B: Backend>(gate: &Gate<B>, folder: &Folder) -> Result<Listed, fs::Error> {
-    match gate.read_dir(folder.path()) {
+pub(super) fn list_found<B: Backend>(
+    ctx: &FsContext<B>,
+    folder: &Folder,
+) -> Result<Listed, fs::Error> {
+    match Cleanup::read_dir(folder.path()).perform(ctx) {
         Ok(names) => Ok(Listed::Names(names)),
         Err(error) if error.is_permission_denied() => Ok(Listed::Denied(error)),
         Err(error) => Err(error),

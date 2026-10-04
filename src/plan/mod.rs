@@ -573,14 +573,3 @@ fn argv(text: &str) -> Argv {
     let program = words.next().unwrap_or_default();
     words.fold(Argv::new(program), Argv::arg)
 }
-
-/// `path` as an empty process table admits it, for tests that build plans by hand.
-#[cfg(test)]
-fn idle(path: &str) -> crate::process::IdlePath {
-    use crate::process::{Admission, ProcessTable};
-
-    match ProcessTable::empty().admit(PathBuf::from(path)) {
-        Admission::Idle(path) => path,
-        Admission::Running { .. } => unreachable!("an empty process table admits every path"),
-    }
-}

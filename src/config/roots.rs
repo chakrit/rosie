@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{Config, ConfigFile, Error, document, store};
-use crate::fs::{Backend, Gate, Paths};
+use crate::fs::{Backend, FsContext, FsOp, Paths, UserInput};
 
 /// The current `roots` allowlist, for `rosie roots`.
 pub fn list(config: &Config) -> &[PathBuf] {
@@ -17,13 +17,13 @@ pub fn list(config: &Config) -> &[PathBuf] {
 /// user typed `~` and the path is still under home. Adding an already-listed root writes
 /// nothing.
 pub fn add<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
     paths: &Paths,
     file: &ConfigFile,
     path: &Path,
 ) -> Result<ConfigFile, Error> {
-    let checked = paths.resolve(gate, path)?;
+    let checked = UserInput::path(path).perform(ctx)?;
     if file.config.roots.contains(&checked) {
         return Ok(file.clone());
     }
@@ -34,13 +34,13 @@ pub fn add<B: Backend>(
     })?;
     let edited = document::with_root(&file.document, entry);
 
-    store(gate, config_dir, paths, &edited.to_string())
+    store(ctx, config_dir, &edited.to_string())
 }
 
 /// `roots remove <path>`: `path` is matched the way entries are read, with `~` expanded
 /// and dots resolved. A path that is not listed is refused and nothing is written.
 pub fn remove<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
     paths: &Paths,
     file: &ConfigFile,
@@ -55,7 +55,7 @@ pub fn remove<B: Backend>(
         .ok_or(Error::NotARoot { path: target })?;
 
     let edited = document::without_root(&file.document, index);
-    store(gate, config_dir, paths, &edited.to_string())
+    store(ctx, config_dir, &edited.to_string())
 }
 
 /// The checked path, written back under `~` when the user typed it that way.
@@ -70,7 +70,7 @@ fn spelled_as_typed(typed: &Path, checked: &Path, paths: &Paths) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use crate::fs::fake::FakeBackend;
-    use crate::fs::{Bounds, RealPath};
+    use crate::fs::{Bounds, RealPath, Rosie};
 
     use super::super::load;
     use super::*;
@@ -78,16 +78,14 @@ mod tests {
     const HOME: &str = "/Users/me";
     const CONFIG_DIR: &str = "/Users/me/.config/rosie";
     const CONFIG_FILE: &str = "/Users/me/.config/rosie/config.toml";
-    const DATA_DIR: &str = "/Users/me/.local/share/rosie";
 
-    fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
+    fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
             roots: Vec::new(),
-            config_dir: PathBuf::from(CONFIG_DIR),
-            data_dir: PathBuf::from(DATA_DIR),
+            paths: paths(),
             user_uid: crate::fs::fake::USER_UID,
         };
-        Gate::new(fake, bounds).expect("absolute bounds")
+        FsContext::new(fake, bounds).expect("absolute bounds")
     }
 
     fn paths() -> Paths {
@@ -98,13 +96,13 @@ mod tests {
         Path::new(CONFIG_DIR)
     }
 
-    fn loaded(gate: &Gate<&FakeBackend>) -> ConfigFile {
-        load(gate, config_dir(), &paths()).expect("load config")
+    fn loaded(ctx: &FsContext<&FakeBackend>) -> ConfigFile {
+        load(ctx, config_dir()).expect("load config")
     }
 
-    fn file_text(gate: &Gate<&FakeBackend>) -> String {
-        let bytes = gate
-            .read_own_file(Path::new(CONFIG_FILE))
+    fn file_text(ctx: &FsContext<&FakeBackend>) -> String {
+        let bytes = Rosie::read(Path::new(CONFIG_FILE))
+            .perform(ctx)
             .expect("config file exists");
         String::from_utf8(bytes).expect("config file is UTF-8")
     }
@@ -114,19 +112,19 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_dir("/Users/me/code");
         fake.add_file(CONFIG_FILE, "roots = []\n");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
         let updated = add(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
-            &loaded(&gate),
+            &loaded(&ctx),
             Path::new("/Users/me/code"),
         )
         .expect("add a real folder");
 
         assert_eq!(list(updated.config()), &[PathBuf::from("/Users/me/code")]);
-        assert_eq!(loaded(&gate).config().roots, updated.config().roots);
+        assert_eq!(loaded(&ctx).config().roots, updated.config().roots);
     }
 
     #[test]
@@ -136,13 +134,13 @@ mod tests {
         fake.add_dir("/Users/me/Library/Caches");
         let original = "# my config\nroots = [\n  # apps\n  \"~/Applications\",\n]\n";
         fake.add_file(CONFIG_FILE, original);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
         let updated = add(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
-            &loaded(&gate),
+            &loaded(&ctx),
             Path::new("~/Library/Caches"),
         )
         .expect("add a tilde path");
@@ -154,7 +152,7 @@ mod tests {
                 PathBuf::from("/Users/me/Library/Caches"),
             ]
         );
-        let text = file_text(&gate);
+        let text = file_text(&ctx);
         assert!(text.contains("# my config"), "{text}");
         assert!(text.contains("# apps"), "{text}");
         assert!(text.contains("\"~/Applications\""), "{text}");
@@ -167,13 +165,13 @@ mod tests {
         fake.add_dir("/Users/me/elsewhere");
         fake.add_symlink("/Users/me/code", "elsewhere");
         fake.add_file(CONFIG_FILE, "roots = []\n");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
         let result = add(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
-            &loaded(&gate),
+            &loaded(&ctx),
             Path::new("/Users/me/code"),
         );
 
@@ -192,13 +190,13 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_dir("/Users/me/Code");
         fake.add_file(CONFIG_FILE, "roots = []\n");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
         let result = add(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
-            &loaded(&gate),
+            &loaded(&ctx),
             Path::new("/Users/me/code"),
         );
 
@@ -214,19 +212,19 @@ mod tests {
         fake.add_dir("/Users/me/code");
         let original = "roots = [ \"/Users/me/code\" ] # mine\n";
         fake.add_file(CONFIG_FILE, original);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
         let updated = add(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
-            &loaded(&gate),
+            &loaded(&ctx),
             Path::new("/Users/me/code"),
         )
         .expect("re-add the same root");
 
         assert_eq!(list(updated.config()), &[PathBuf::from("/Users/me/code")]);
-        assert_eq!(file_text(&gate), original);
+        assert_eq!(file_text(&ctx), original);
     }
 
     #[test]
@@ -234,13 +232,13 @@ mod tests {
         let fake = FakeBackend::new();
         let original = "roots = [\n  \"/Users/me/code\",\n\n  # apps\n  \"~/Applications\",\n  \"~/Library/Caches\",\n]\n";
         fake.add_file(CONFIG_FILE, original);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
         let updated = remove(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
-            &loaded(&gate),
+            &loaded(&ctx),
             Path::new("~/Applications"),
         )
         .expect("remove a root");
@@ -252,11 +250,11 @@ mod tests {
                 PathBuf::from("/Users/me/Library/Caches"),
             ]
         );
-        let text = file_text(&gate);
+        let text = file_text(&ctx);
         assert!(!text.contains("~/Applications"), "{text}");
         assert!(text.contains("# apps"), "{text}");
         assert!(text.contains("\"~/Library/Caches\""), "{text}");
-        assert_eq!(loaded(&gate).config().roots, updated.config().roots);
+        assert_eq!(loaded(&ctx).config().roots, updated.config().roots);
     }
 
     #[test]
@@ -264,13 +262,13 @@ mod tests {
         let fake = FakeBackend::new();
         let original = "# mine\nroots = [\"/Users/me/code\"]\n";
         fake.add_file(CONFIG_FILE, original);
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
 
         let result = remove(
-            &gate,
+            &ctx,
             config_dir(),
             &paths(),
-            &loaded(&gate),
+            &loaded(&ctx),
             Path::new("/Users/me/other"),
         );
 
@@ -278,6 +276,6 @@ mod tests {
             panic!("expected a not-a-root refusal, got {result:?}");
         };
         assert_eq!(path, PathBuf::from("/Users/me/other"));
-        assert_eq!(file_text(&gate), original);
+        assert_eq!(file_text(&ctx), original);
     }
 }

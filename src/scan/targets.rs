@@ -1,6 +1,7 @@
-//! Claiming found targets: the running-process refusal, the item marks, and the start
+//! Claiming found targets: the context's delete checks, the item marks, and the start
 //! of sizing (`docs/spec/safety.md#running-processes`, `#roots`, `#elevation`).
 
+use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
 
 use rayon::Scope;
@@ -8,17 +9,16 @@ use rayon::Scope;
 use super::entry::Entry;
 use super::log::{Log, Problem, SizingLog};
 use super::progress::Progress;
-use super::refusal::{Refusals, Refused};
+use super::refusal::{Refused, RefusedItems, Verdict, screen};
 use super::sizing::{Measure, Sizer};
 use super::{RuleMatch, plan_twin};
-use crate::fs::{Backend, Gate};
+use crate::fs::{Backend, FsContext};
 use crate::plan::{ItemKind, PathMatch, Reach, RunAs};
-use crate::process::{IdlePath, ProcessTable};
 
 /// Takes every target the walk or the fixed paths find, from any worker.
 pub(super) struct Targets<'a, B: Backend, P: Progress> {
-    gate: &'a Gate<B>,
-    refusals: Refusals<'a, B>,
+    ctx: &'a FsContext<B>,
+    refused: RefusedItems<'a, B>,
     sizer: Sizer<'a, B, P>,
     log: &'a Log,
     progress: &'a P,
@@ -35,7 +35,7 @@ pub(super) struct Found {
 /// A path to delete, with its marks and its running size.
 #[derive(Debug)]
 pub(super) struct Target {
-    path: IdlePath,
+    path: PathBuf,
     kind: ItemKind,
     rules: Vec<RuleMatch>,
     run_as: RunAs,
@@ -59,11 +59,11 @@ impl Target {
 }
 
 impl<'a, B: Backend + Sync, P: Progress> Targets<'a, B, P> {
-    pub fn new(gate: &'a Gate<B>, table: &'a ProcessTable, log: &'a Log, progress: &'a P) -> Self {
+    pub fn new(ctx: &'a FsContext<B>, log: &'a Log, progress: &'a P) -> Self {
         Targets {
-            gate,
-            refusals: Refusals::new(gate, table, log),
-            sizer: Sizer::new(gate, progress, SizingLog::walked(log)),
+            ctx,
+            refused: RefusedItems::new(ctx, log),
+            sizer: Sizer::new(ctx, progress, SizingLog::walked(log)),
             log,
             progress,
             claimed: Mutex::default(),
@@ -72,25 +72,21 @@ impl<'a, B: Backend + Sync, P: Progress> Targets<'a, B, P> {
 
     /// Claims `entry` for the rules that matched it, and starts sizing it on `scope`.
     pub fn claim<'s>(&'s self, scope: &Scope<'s>, entry: Entry, rules: Vec<RuleMatch>) {
-        let names = || {
-            rules
-                .iter()
-                .map(|matched| matched.rule.to_string())
-                .collect()
+        let reach = match screen(self.ctx, entry.path()) {
+            Verdict::Planned(reach) => reach,
+            Verdict::Running { pid, program } => {
+                let names = rules.iter().map(|matched| matched.rule.to_string());
+                return self
+                    .refused
+                    .refuse(scope, entry, names.collect(), pid, program);
+            }
+            Verdict::Problem(error) => return self.log.problem(Problem::Path(error)),
         };
-        let Some((entry, path)) = self.refusals.admit(scope, entry, names) else {
-            return;
-        };
+        let path = entry.path().to_path_buf();
         let Some(kind) = entry.item_kind() else {
-            let path = path.into_path();
             return self.log.problem(Problem::Special { path });
         };
-        let reach = match self.gate.within_roots(path.as_path()) {
-            Ok(true) => Reach::InRoots,
-            Ok(false) => Reach::OutsideRoots,
-            Err(error) => return self.log.problem(Problem::Path(error)),
-        };
-        let run_as = match entry.meta().uid == self.gate.user_uid() {
+        let run_as = match entry.meta().uid == self.ctx.user_uid() {
             true => RunAs::User,
             false => RunAs::Sudo,
         };
@@ -117,7 +113,7 @@ impl<'a, B: Backend + Sync, P: Progress> Targets<'a, B, P> {
             .expect("no scan worker panics while claiming");
         Found {
             targets,
-            refused: self.refusals.finish(),
+            refused: self.refused.finish(),
         }
     }
 

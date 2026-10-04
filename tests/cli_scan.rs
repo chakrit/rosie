@@ -137,9 +137,9 @@ fn each_walk_flag_enters_what_it_names() {
 fn a_target_a_process_runs_from_is_skipped_naming_the_process() {
     let sandbox = Sandbox::new();
     sandbox.node_project(&format!("{CWD}/app"));
-    sandbox.processes(&format!(
-        "  77     1   501 {CWD}/app/node_modules/.bin/vite\n"
-    ));
+    sandbox
+        .fake
+        .respond_running(&[(77, &format!("{CWD}/app/node_modules/.bin/vite"))]);
 
     let ran = sandbox.run(&["scan", "tree", "."]);
 
@@ -160,9 +160,9 @@ fn clean_counts_a_target_a_process_runs_from_in_the_end_of_run_skips_with_its_si
     let sandbox = Sandbox::new();
     sandbox.node_project(&format!("{CWD}/app"));
     sandbox.node_project(&format!("{CWD}/lib"));
-    sandbox.processes(&format!(
-        "  77     1   501 {CWD}/app/node_modules/.bin/vite\n"
-    ));
+    sandbox
+        .fake
+        .respond_running(&[(77, &format!("{CWD}/app/node_modules/.bin/vite"))]);
 
     let ran = sandbox.run_with(Script::terminal().answer("y"), &["clean", "tree", "."]);
 
@@ -218,7 +218,9 @@ fn an_entry_a_process_runs_from_is_skipped_at_run_naming_the_process() {
     let sandbox = Sandbox::new();
     let busy = format!("{CWD}/busy");
     sandbox.fake.add_file(format!("{busy}/bin/tool"), "x");
-    sandbox.processes(&format!("  88     1   501 {busy}/bin/tool\n"));
+    sandbox
+        .fake
+        .respond_running(&[(88, &format!("{busy}/bin/tool"))]);
 
     let ran = sandbox.run_with(
         Script::piped().stdin(&plan(&[delete_entry(&busy, false)])),

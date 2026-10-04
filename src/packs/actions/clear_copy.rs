@@ -1,4 +1,4 @@
-use crate::fs::Backend;
+use crate::fs::{Backend, FsOp, Rosie};
 use crate::packs::error::Error;
 use crate::packs::source::Source;
 use crate::packs::store::Store;
@@ -29,7 +29,7 @@ impl ClearCopy<'_> {
             return Ok(());
         }
 
-        store.gate().delete_own(&path)?;
+        Rosie::delete(&path).perform(store.ctx())?;
         Ok(())
     }
 }

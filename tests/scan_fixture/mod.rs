@@ -8,10 +8,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use rosie::config::Walk;
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, CommandOutput, Exit, Gate, Paths};
+use rosie::fs::{Bounds, FsContext, Paths};
 use rosie::packs::{SettlePacks, Store};
 use rosie::plan::{AggressiveItems, Status};
-use rosie::process::ProcessTable;
 use rosie::rules::{Name, RuleLayers, RuleSet};
 use rosie::scan::{Progress, Scan, Scanner, Settings};
 
@@ -20,11 +19,10 @@ pub const CONFIG: &str = "/Users/me/.config/rosie";
 pub const DATA: &str = "/Users/me/.local/share/rosie";
 pub const PACK: &str = "/Users/me/.local/share/rosie/packs/chakrit/rosie";
 
-/// A fake home with a canned, empty process table.
+/// A fake home where no program runs.
 pub fn fake_home() -> FakeBackend {
     let fake = FakeBackend::new();
     fake.add_dir(HOME);
-    running(&fake, "");
     fake
 }
 
@@ -48,16 +46,6 @@ pub fn node_project(fake: &FakeBackend, dir: &str) {
 /// Installs a rule file in the `rosie` pack.
 pub fn add_rules(fake: &FakeBackend, file: &str, text: &str) {
     fake.add_file(format!("{PACK}/{file}"), text);
-}
-
-/// Sets what `ps -axo pid=,ppid=,uid=,comm=` prints.
-pub fn running(fake: &FakeBackend, ps: &str) {
-    let output = CommandOutput {
-        exit: Exit::Code(0),
-        stdout: ps.as_bytes().to_vec(),
-        stderr: Vec::new(),
-    };
-    fake.respond(ProcessTable::argv(), output);
 }
 
 /// How a test scans: the roots, the walk flags, `--aggressive`, and `--only`.
@@ -87,32 +75,31 @@ impl Default for Options {
 pub fn bounds_with_roots(roots: Vec<PathBuf>) -> Bounds {
     Bounds {
         roots,
-        config_dir: PathBuf::from(CONFIG),
-        data_dir: PathBuf::from(DATA),
+        paths: Paths::new(Path::new(HOME)).expect("absolute home"),
         user_uid: USER_UID,
     }
 }
 
 /// A gate over `fake` bounded to `roots`, with the fixture's config and data dirs.
-pub fn gate_with_roots(fake: &FakeBackend, roots: Vec<PathBuf>) -> Gate<&FakeBackend> {
-    Gate::new(fake, bounds_with_roots(roots)).expect("absolute bounds")
+pub fn ctx_with_roots(fake: &FakeBackend, roots: Vec<PathBuf>) -> FsContext<&FakeBackend> {
+    FsContext::new(fake, bounds_with_roots(roots)).expect("absolute bounds")
 }
 
 /// A gate over `fake` bounded to home, with the fixture's config and data dirs.
-pub fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
-    gate_with_roots(fake, vec![PathBuf::from(HOME)])
+pub fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
+    ctx_with_roots(fake, vec![PathBuf::from(HOME)])
 }
 
 pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     let bounds = bounds_with_roots(options.roots);
-    let gate = Gate::new(fake, bounds.clone()).expect("absolute bounds");
+    let ctx = FsContext::new(fake, bounds.clone()).expect("absolute bounds");
     let home = Paths::new(Path::new(HOME)).expect("absolute home");
     let packs = SettlePacks
-        .run(&Store::new(&gate, &home, Path::new(DATA)))
+        .run(&Store::new(&ctx, &home, Path::new(DATA)))
         .and_then(|settled| settled.pack_folders())
         .expect("installed packs list");
-    let rules =
-        RuleSet::load(&gate, &RuleLayers::new(packs, &bounds.config_dir)).expect("rules load");
+    let rules = RuleSet::load(&ctx, &RuleLayers::new(packs, &bounds.paths.config_dir()))
+        .expect("rules load");
     let rules = match options.only.is_empty() {
         true => rules,
         false => rules.only(&names(&options.only)).expect("known rule names"),
@@ -122,7 +109,7 @@ pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
         walk: options.walk,
         aggressive: options.aggressive,
     };
-    Scanner::new(gate, rules, settings)
+    Scanner::new(ctx, rules, settings)
 }
 
 pub fn names(texts: &[&str]) -> Vec<Name> {

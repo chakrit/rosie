@@ -23,12 +23,12 @@ use rayon::Scope;
 use super::entry::{Entry, Sealed};
 use super::log::{Log, SizingLog};
 use super::progress::Progress;
-use crate::fs::{Backend, FileKind, Gate, Metadata};
+use crate::fs::{Backend, Cleanup, FileKind, FsContext, FsOp, Metadata};
 use crate::plan::Size;
 
 /// Sizes targets against one shared set of counted entries.
 pub struct Sizer<'a, B: Backend, P: Progress> {
-    gate: &'a Gate<B>,
+    ctx: &'a FsContext<B>,
     progress: &'a P,
     log: SizingLog<'a>,
     counted: InodeSet,
@@ -58,13 +58,13 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
     /// Builds a sizer for a target the caller has entered and claimed: what it meets
     /// while sizing counts as part of that scan's walk. This is the only way to build a
     /// [`Sizer`] from outside `scan`; the refused-target sink stays internal to the scan.
-    pub fn walking(gate: &'a Gate<B>, progress: &'a P, log: &'a Log) -> Self {
-        Self::new(gate, progress, SizingLog::walked(log))
+    pub fn walking(ctx: &'a FsContext<B>, progress: &'a P, log: &'a Log) -> Self {
+        Self::new(ctx, progress, SizingLog::walked(log))
     }
 
-    pub(super) fn new(gate: &'a Gate<B>, progress: &'a P, log: SizingLog<'a>) -> Self {
+    pub(super) fn new(ctx: &'a FsContext<B>, progress: &'a P, log: SizingLog<'a>) -> Self {
         Sizer {
-            gate,
+            ctx,
             progress,
             log,
             counted: InodeSet::new(),
@@ -95,7 +95,7 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
         folder_meta: Metadata,
         total: Measure,
     ) {
-        let names = match self.gate.read_dir(&folder) {
+        let names = match Cleanup::read_dir(&folder).perform(self.ctx) {
             Ok(names) => names,
             Err(error) => return self.log.entry_failed(folder, error),
         };
@@ -103,7 +103,7 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
         let mut sum = 0u64;
         for name in names {
             let path = folder.join(name);
-            let meta = match self.gate.lstat(&path) {
+            let meta = match Cleanup::lstat(&path).perform(self.ctx) {
                 Ok(meta) => meta,
                 Err(error) => {
                     self.log.entry_failed(path, error);

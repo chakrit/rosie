@@ -19,7 +19,7 @@ fn refuses_an_app_argument_through_a_symlink() {
     fake.add_symlink("/Users/me/Bar.app", BAR);
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new("/Users/me/Bar.app"),
         &paths(),
         AggressiveItems::Unticked,
@@ -52,14 +52,14 @@ fn a_symlinked_info_plist_is_refused_by_app_and_orphan_scans() {
     bar_app_with_a_linked_plist(&fake);
 
     let app = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
     let orphans = scan_orphans(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
@@ -83,7 +83,7 @@ fn is_symlink_refusal(result: &Result<Scan, Error>) -> bool {
 
 fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
-        &gate(fake, &ALL_ROOTS),
+        &ctx(fake, &ALL_ROOTS),
         Path::new(app),
         &paths(),
         AggressiveItems::Unticked,
@@ -93,7 +93,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
 
 fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {
     scan_orphans(
-        &gate(fake, &ALL_ROOTS),
+        &ctx(fake, &ALL_ROOTS),
         &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
@@ -147,7 +147,7 @@ fn a_symlinked_app_folder_fails_every_installed_app_listing() {
 
     let app = app_scan(&fake, BAR);
     let orphans = orphan_scan(&fake);
-    let picker = picker_apps(&gate(&fake, &ALL_ROOTS), &paths());
+    let picker = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths());
 
     assert!(is_symlink_refusal(&app), "{app:?}");
     assert!(is_symlink_refusal(&orphans), "{orphans:?}");

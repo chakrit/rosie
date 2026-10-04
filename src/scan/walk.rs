@@ -2,7 +2,7 @@
 //! `docs/spec/safety.md#walk-skips`).
 //!
 //! Every folder is listed on its own rayon task, so idle workers steal folders. Each
-//! entry is `lstat`ed through the gate before anything else happens to it, and a
+//! entry is `lstat`ed through the context before anything else happens to it, and a
 //! folder is only ever listed after its own `lstat` said it is a folder, not a
 //! symlink: every path the walk builds is free of links by construction.
 
@@ -19,7 +19,7 @@ use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
 use crate::config::Walk;
-use crate::fs::{Backend, FileKind, Gate, Metadata};
+use crate::fs::{Backend, Cleanup, FileKind, FsContext, FsOp, Metadata};
 use crate::plan::{Needs, WalkSetting, WalkSkip};
 use crate::rules::{self, Candidate, LuaSandbox, RuleSet};
 
@@ -42,7 +42,7 @@ thread_local! {
 }
 
 pub(super) struct TreeWalk<'a, B: Backend, P: Progress> {
-    pub gate: &'a Gate<B>,
+    pub ctx: &'a FsContext<B>,
     pub rules: &'a RuleSet,
     /// The fixed rule paths at or below the start folder, by path.
     pub fixed: &'a HashMap<PathBuf, Vec<RuleMatch>>,
@@ -64,14 +64,14 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
     /// it. Each entry's volume is compared with this folder's, so an entry inside a
     /// mount the walk entered is not taken for the root of one.
     pub fn visit<'s>(&'s self, scope: &Scope<'s>, folder: PathBuf, folder_meta: Metadata) {
-        let names = match self.gate.read_dir(&folder) {
+        let names = match Cleanup::read_dir(&folder).perform(self.ctx) {
             Ok(names) => names,
             Err(error) => return self.log.entry_failed(folder, error),
         };
 
         for name in &names {
             let path = folder.join(name);
-            let meta = match self.gate.lstat(&path) {
+            let meta = match Cleanup::lstat(&path).perform(self.ctx) {
                 Ok(meta) => meta,
                 Err(error) => {
                     self.log.entry_failed(path, error);
@@ -206,7 +206,7 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         let checked = with_lua(|lua| {
             named
                 .iter()
-                .filter_map(|rule| match rule.matches(self.gate, lua, candidate) {
+                .filter_map(|rule| match rule.matches(self.ctx, lua, candidate) {
                     Ok(true) => Some(RuleMatch {
                         rule: rule.id().clone(),
                         tier: rule.tier(),

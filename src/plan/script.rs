@@ -137,6 +137,8 @@ mod tests {
     use std::process::Command;
     use std::sync::{Arc, Mutex, Weak};
 
+    use std::path::PathBuf;
+
     use tempfile::TempDir;
 
     use super::*;
@@ -149,7 +151,7 @@ mod tests {
 
     fn found(path: &str, reach: Reach, twin: Twin) -> PathMatch {
         PathMatch {
-            path: crate::plan::idle(path),
+            path: PathBuf::from(path),
             kind: ItemKind::Folder,
             size: Size::bytes(2_000_000),
             run_as: RunAs::User,

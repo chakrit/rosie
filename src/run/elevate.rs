@@ -55,7 +55,7 @@ impl<B: Backend + Sync> Runner<B> {
             .arg(nonce.as_str());
 
         reporter.elevating(item_count(&items));
-        let output = match self.gate.sudo(&argv, &stdin) {
+        let output = match self.ctx.sudo(&argv, &stdin) {
             Ok(output) => output,
             Err(error) => return not_run(&items, SUDO_REFUSED, &error.to_string(), reporter),
         };

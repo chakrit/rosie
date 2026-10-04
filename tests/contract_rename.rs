@@ -9,7 +9,7 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use common::{Harness, contract, empty_bounds, error_kind, sorted};
-use rosie::fs::{Backend, Error, FileKind, Gate};
+use rosie::fs::{Backend, Error, FileKind, FsContext, FsOp, Rosie};
 
 contract!(
     renames_a_folder_tree,
@@ -399,17 +399,17 @@ fn a_trailing_slash_follows_the_final_link_and_demands_a_folder(h: &impl Harness
 fn gate_refuses_to_rename_an_own_folder_itself(h: &impl Harness) {
     let backend = h.backend();
     let bounds = empty_bounds(h);
-    let (config, data) = (bounds.config_dir.clone(), bounds.data_dir.clone());
+    let (config, data) = (bounds.paths.config_dir(), bounds.paths.data_dir());
     let staged = data.join("staging");
     backend.create_dir_all(&config).expect("create config");
     backend.create_dir_all(&staged).expect("create staging");
     backend
         .write_file(&data.join("packs.toml"), b"x")
         .expect("write");
-    let gate = Gate::new(backend, bounds).expect("gate");
+    let ctx = FsContext::new(backend, bounds).expect("ctx");
 
-    let moved_away = gate.rename_own(&data, &config.join("moved"));
-    let replaced = gate.rename_own(&staged, &config);
+    let moved_away = Rosie::rename(&data, &config.join("moved")).perform(&ctx);
+    let replaced = Rosie::rename(&staged, &config).perform(&ctx);
 
     for result in [moved_away, replaced] {
         assert!(

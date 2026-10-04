@@ -2,8 +2,8 @@
 //! (`docs/spec/rules.md#packs`).
 //!
 //! A pack is pulled from a GitHub `owner/repo` as a tarball, checked entry by entry in
-//! memory, and installed through the gate's own-data methods
-//! (`docs/spec/safety.md#rosies-own-data`). The network is injected beside the gate.
+//! memory, and installed through [`crate::fs::Rosie`] ops
+//! (`docs/spec/safety.md#rosies-own-data`). The network is injected beside the context.
 
 mod actions;
 mod age;

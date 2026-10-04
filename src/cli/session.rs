@@ -1,4 +1,4 @@
-//! One command's run: the `sudo rosie` refusal, then the gates, config, and rules each
+//! One command's run: the `sudo rosie` refusal, then the FS contexts, config, and rules each
 //! command needs, loaded through the modules that own them.
 
 use std::io::{self, Write};
@@ -8,7 +8,7 @@ use super::args::UserCommand;
 use super::console::Console;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
-use crate::fs::{Backend, Gate, ROOT_UID};
+use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, UserInput};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
 use crate::rules::{Name, RuleLayers, RuleSet};
 use crate::run::refuse_root;
@@ -58,7 +58,7 @@ pub(super) struct Session<'a, B: Backend, N: Network, C: Console> {
     pub env: &'a Env,
     /// Acts for the user on rosie's own data; it has no roots, so it deletes no cleanup
     /// target.
-    pub own: Gate<&'a B>,
+    pub own: FsContext<&'a B>,
 }
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
@@ -72,11 +72,11 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         env: &'a Env,
         typed: Vec<String>,
     ) -> Result<Self, Error> {
-        let probe = Gate::new(backend, env.paths.bounds(Vec::new(), ROOT_UID))?;
+        let probe = FsContext::new(backend, env.paths.bounds(Vec::new(), ROOT_UID))?;
         refuse_root(&probe, env.pid, typed)?;
-        let user_uid = probe.lstat(env.paths.home())?.uid;
+        let user_uid = UserInput::lstat(env.paths.home()).perform(&probe)?.uid;
 
-        let own = Gate::new(backend, env.paths.bounds(Vec::new(), user_uid))?;
+        let own = FsContext::new(backend, env.paths.bounds(Vec::new(), user_uid))?;
         Ok(Session {
             backend,
             network,
@@ -104,14 +104,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// when none is installed yet.
     pub fn config(&mut self) -> Result<ConfigFile, Error> {
         let dir = self.env.paths.config_dir();
-        match config::load(&self.own, &dir, &self.env.paths) {
+        match config::load(&self.own, &dir) {
             Err(config::Error::NotFound) => {}
             loaded => return Ok(loaded?),
         }
 
         let seed = packs::seed_config(&self.store(), self.network, self.env.now)?;
         self.show_first_run(&seed.first_run)?;
-        let seeded = config::load_or_seed(&self.own, &dir, &self.env.paths, &seed.config)?;
+        let seeded = config::load_or_seed(&self.own, &dir, &seed.config)?;
         let path = config::config_path(&dir);
         self.note(&format!(
             "created {} from the default config",
@@ -145,12 +145,12 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     /// A gate bounded by the config's roots: the only kind that deletes cleanup targets.
-    pub fn roots_gate(&self, config: &Config) -> Result<Gate<&'a B>, Error> {
+    pub fn roots_ctx(&self, config: &Config) -> Result<FsContext<&'a B>, Error> {
         let bounds = self
             .env
             .paths
             .bounds(config.roots.clone(), self.own.user_uid());
-        Ok(Gate::new(self.backend, bounds)?)
+        Ok(FsContext::new(self.backend, bounds)?)
     }
 
     pub fn store(&self) -> Store<'_, &'a B> {

@@ -386,7 +386,7 @@ mod tests {
 
     fn found(path: &str, reach: Reach, twin: Twin) -> PathMatch {
         PathMatch {
-            path: crate::plan::idle(path),
+            path: PathBuf::from(path),
             kind: ItemKind::Folder,
             size: Size::bytes(1_234_567),
             run_as: RunAs::User,

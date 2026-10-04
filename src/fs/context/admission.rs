@@ -9,57 +9,35 @@ use std::path::{Path, PathBuf};
 
 use super::removal::Entering;
 use super::{Acting, FsContext, resolve_dots};
-use crate::fs::backend::{Backend, Metadata};
-use crate::fs::error::{Error, Op};
+use crate::fs::backend::Backend;
+use crate::fs::error::Error;
 
 /// A cleanup target the context has admitted for deletion: no process runs a program
-/// from inside it, it lies within the roots, it is reached through no symlink (or,
-/// acting as root, only through folders no one but root can change), and it is neither
-/// a symlink nor the root of a mounted volume. Only [`FsContext::admit_delete`] builds
-/// one, so no delete can skip a check.
+/// from inside it, it lies within the roots, it is reached through no symlink, and it
+/// is neither a symlink nor the root of a mounted volume. Only
+/// [`FsContext::admit_delete`] builds one, so no delete can skip a check.
 #[derive(Debug)]
 pub(in crate::fs) struct Admitted {
     path: PathBuf,
-    entering: Entering,
 }
 
 impl<B: Backend> FsContext<B> {
-    /// Admits a file, folder tree, or other entry for [`FsContext::delete`] as whoever
-    /// the context acts as. Acting as root, every folder above it must be one no one but
-    /// root can change (see `root_control`): a folder that fails is
-    /// [`Error::NotRootControlled`], and one that cannot be inspected is
-    /// [`Error::AboveUnchecked`].
+    /// Admits a file, folder tree, or other entry for [`FsContext::delete`]. The checks
+    /// are the same whoever the context acts as (`docs/spec/safety.md#elevation`).
     pub(in crate::fs) fn admit_delete(&self, path: &Path) -> Result<Admitted, Error> {
-        self.admit_delete_as(path, self.acting)
-    }
-
-    /// Admits an entry as `acting` would delete it, whoever this context acts as.
-    pub(in crate::fs) fn admit_delete_as(
-        &self,
-        path: &Path,
-        acting: Acting,
-    ) -> Result<Admitted, Error> {
-        let entering = match acting {
-            Acting::User => Entering::OpeningUsersFolders,
-            Acting::Root => Entering::RootControlledOnly,
-        };
-
         let path = resolve_dots(path)?;
         self.refuse_running(&path)?;
         let path = self.confine_to_roots(&path)?;
-        let meta = self.lstat_item(&path, entering)?;
+        let meta = self.lstat_real(&path)?;
         self.admit_item(&path, meta)?;
-        Ok(Admitted { path, entering })
+        Ok(Admitted { path })
     }
 
-    /// Checks the folders above an already confined item and `lstat`s it.
-    fn lstat_item(&self, path: &Path, entering: Entering) -> Result<Metadata, Error> {
-        match entering {
-            Entering::OpeningUsersFolders => self.lstat_real(path),
-            Entering::RootControlledOnly => {
-                self.require_root_controlled_above(path)?;
-                self.io(Op::Lstat, path, self.backend.lstat(path))
-            }
+    /// How a delete acting as whoever this context acts as enters folders.
+    fn entering(&self) -> Entering {
+        match self.acting {
+            Acting::User => Entering::OpeningUsersFolders,
+            Acting::Root => Entering::AsFound,
         }
     }
 }
@@ -71,15 +49,13 @@ impl<B: Backend + Sync> FsContext<B> {
     ///
     /// Symlinks inside a folder are removed as links, never descended. Acting as the
     /// user, user-owned folders that are not writable are made writable on the way
-    /// down; acting as root, only folders no one but root can change are entered, and
-    /// no permissions are changed, so a folder inside the item that fails is reported
-    /// as [`Error::NotRootControlled`] before anything below it is touched. A dataless
-    /// cloud placeholder is refused, never opened or unlinked, and so is an entry on
-    /// another volume than its folder. The delete stops at the first failure and reports
-    /// it; entries already removed, or being removed in parallel, stay removed.
+    /// down; acting as root, no permissions are changed. A dataless cloud placeholder is
+    /// refused, never opened or unlinked, and so is an entry on another volume than its
+    /// folder. The delete stops at the first failure and reports it; entries already
+    /// removed, or being removed in parallel, stay removed.
     pub(in crate::fs) fn delete(&self, item: Admitted) -> Result<(), Error> {
-        let meta = self.lstat_item(&item.path, item.entering)?;
-        self.remove_item_in_parallel(&item.path, meta, item.entering)
+        let meta = self.lstat_real(&item.path)?;
+        self.remove_item_in_parallel(&item.path, meta, self.entering())
     }
 }
 

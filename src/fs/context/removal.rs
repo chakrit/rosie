@@ -15,7 +15,6 @@ use std::path::{Path, PathBuf};
 use rayon::prelude::*;
 
 use super::FsContext;
-use super::root_control::require_root_controlled;
 use crate::fs::backend::{Backend, FileKind, Metadata};
 use crate::fs::error::{Error, Op};
 
@@ -27,9 +26,8 @@ const OWNER_RWX: u32 = 0o700;
 pub(super) enum Entering {
     /// Acting as the user: the user's own closed folders are opened on the way.
     OpeningUsersFolders,
-    /// Acting as root: only folders no one but root can change are entered, and no
-    /// permissions are changed.
-    RootControlledOnly,
+    /// Acting as root: folders are entered as they are; root never changes permissions.
+    AsFound,
 }
 
 impl<B: Backend> FsContext<B> {
@@ -92,7 +90,7 @@ impl<B: Backend> FsContext<B> {
     ) -> Result<Vec<(PathBuf, Metadata)>, Error> {
         match entering {
             Entering::OpeningUsersFolders => self.open_for_removal(path, meta)?,
-            Entering::RootControlledOnly => require_root_controlled(path, meta)?,
+            Entering::AsFound => {}
         }
 
         let names = self.io(Op::ReadDir, path, self.backend.read_dir(path))?;

@@ -65,7 +65,6 @@ mod tests {
             (SkipReason::Stale, "skipped (stale)"),
             (SkipReason::RunningProcess, "skipped (running process)"),
             (SkipReason::SudoRefused, "skipped (sudo refused)"),
-            (SkipReason::UnsafeToElevate, "skipped (unsafe to elevate)"),
             (
                 SkipReason::ProcessCheckFailed,
                 "skipped (process check failed)",

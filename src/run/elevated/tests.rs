@@ -301,7 +301,7 @@ fn boots_the_job_out_before_deleting_its_plist() {
 }
 
 #[test]
-fn never_opens_the_users_read_only_folders_as_root() {
+fn deletes_the_users_read_only_folders_as_root_without_changing_permissions() {
     let fake = machine("0", SUDO_CHAIN);
     fake.add_file("/Library/LaunchDaemons/mine/sub/x", "x");
     fake.chown("/Library/LaunchDaemons/mine", ROOT_UID);
@@ -318,7 +318,7 @@ fn never_opens_the_users_read_only_folders_as_root() {
 
     elevate(&fake, invocation(stdin)).0.expect("admitted");
 
-    assert!(fake.exists("/Library/LaunchDaemons/mine/sub/x"));
+    assert!(!fake.exists("/Library/LaunchDaemons/mine"));
     assert!(!fake.calls().iter().any(|c| matches!(c, Call::SetMode(..))));
 }
 

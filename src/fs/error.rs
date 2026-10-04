@@ -4,7 +4,6 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::backend::Argv;
-use super::context::Exposure;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -62,12 +61,6 @@ pub enum Error {
         path = path.display(),
     )]
     Placeholder { path: PathBuf },
-
-    #[error("{folder} {exposure}", folder = folder.display())]
-    NotRootControlled { folder: PathBuf, exposure: Exposure },
-
-    #[error("cannot check the folders above it: {0}")]
-    AboveUnchecked(#[source] Box<Error>),
 
     #[error("process {pid} runs {program}", program = program.display())]
     Running {

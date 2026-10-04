@@ -5,7 +5,8 @@
 //! - an item the checks pass is planned inside the roots;
 //! - one outside the roots is planned blocked, with its `rosie roots add` hint;
 //! - one a process runs a program from is left out of the plan, sized, and reported;
-//! - one the checks refuse otherwise, such as a mount point, is a scan problem.
+//! - a mount point is a walk skip, never planned (`docs/spec/safety.md#walk-skips`);
+//! - one the checks refuse otherwise is a scan problem.
 //!
 //! A refused item is sized too, for the end-of-run stats, by a sizer of its own: a file
 //! it shares with a planned item still weighs in the plan, and its bytes stay out of the
@@ -21,13 +22,18 @@ use super::log::{Log, SizingLog};
 use super::progress::NoProgress;
 use super::sizing::{Measure, Sizer};
 use crate::fs::{self, Backend, Cleanup, FsContext};
-use crate::plan::{Reach, Size};
+use crate::plan::{Reach, Size, WalkSkip};
 
 /// What the context's delete checks say about a found item.
 #[derive(Debug)]
 pub(crate) enum Verdict {
     Planned(Reach),
-    Running { pid: u32, program: PathBuf },
+    Running {
+        pid: u32,
+        program: PathBuf,
+    },
+    /// Never planned, whatever the settings; logged as a walk skip.
+    Skipped(WalkSkip),
     Problem(fs::Error),
 }
 
@@ -37,6 +43,7 @@ pub(crate) fn screen<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Verdict {
         Ok(()) => Verdict::Planned(Reach::InRoots),
         Err(fs::Error::OutsideRoots { .. }) => Verdict::Planned(Reach::OutsideRoots),
         Err(fs::Error::Running { pid, program, .. }) => Verdict::Running { pid, program },
+        Err(fs::Error::CrossesVolume { .. }) => Verdict::Skipped(WalkSkip::SealedMount),
         Err(error) => Verdict::Problem(error),
     }
 }
@@ -129,4 +136,38 @@ fn sorted(mut rules: Vec<String>) -> Vec<String> {
     rules.sort();
     rules.dedup();
     rules
+}
+
+#[cfg(test)]
+mod tests {
+    use std::path::Path;
+
+    use super::*;
+    use crate::fs::fake::{FakeBackend, USER_UID};
+    use crate::fs::{Bounds, Paths};
+
+    fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
+        let bounds = Bounds {
+            roots: vec![PathBuf::from("/Users/me")],
+            paths: Paths::new(Path::new("/Users/me")).expect("absolute home"),
+            user_uid: USER_UID,
+        };
+        FsContext::new(fake, bounds).expect("absolute bounds")
+    }
+
+    /// A mount point is never planned and is not a scan problem
+    /// (`docs/spec/safety.md#walk-skips`).
+    #[test]
+    fn a_matched_mount_point_is_a_mount_skip() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/.npm");
+        fake.mount("/Users/me/.npm", 9);
+
+        let verdict = screen(&ctx(&fake), Path::new("/Users/me/.npm"));
+
+        assert!(
+            matches!(verdict, Verdict::Skipped(WalkSkip::SealedMount)),
+            "got {verdict:?}"
+        );
+    }
 }

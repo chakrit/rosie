@@ -185,7 +185,7 @@ fn refuses_to_delete_a_symlink_given_as_the_target() {
 }
 
 // Every delete entry point refuses an item that is itself a symlink, including the
-// root delete, whose folders above the item are root-controlled.
+// root delete.
 #[test]
 fn every_delete_refuses_an_item_that_is_a_symlink() {
     let fake = FakeBackend::running_as(ROOT_UID);

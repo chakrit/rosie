@@ -166,10 +166,14 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
 
     /// Looks at the folder a followed `link` leads to as if the walk had found it at
     /// its own `target` path: matched against the rules beside its own siblings, and
-    /// entered on the same terms as any entry of its folder.
+    /// entered on the same terms as any entry of its folder. `/` has no folder and no
+    /// name for a rule to match, so a link to it, with `/` among the roots, is entered.
     fn follow<'s>(&'s self, scope: &Scope<'s>, link: &Path, target: PathBuf, meta: Metadata) {
         let (Some(folder), Some(name)) = (target.parent(), target.file_name()) else {
-            return self.log.skip(link.to_path_buf(), WalkSkip::LinkWalked);
+            return match self.walked.first_time(&target) {
+                true => scope.spawn(move |scope| self.visit(scope, target, meta)),
+                false => self.arrived_again(Some(link)),
+            };
         };
         let folder_meta = match Cleanup::lstat(folder).perform(self.ctx) {
             Ok(folder_meta) => folder_meta,

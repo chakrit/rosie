@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use super::Error;
 use super::listing::{Listing, list_folder};
-use crate::fs::{self, Backend, FileKind, Gate, Paths, SystemArgv, SystemTool};
+use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Paths, SystemArgv, SystemTool};
 use crate::plan::Report;
 use crate::process;
 
@@ -93,14 +93,14 @@ fn bundle_stem(path: &Path) -> String {
 }
 
 /// Reads the identity of the bundle at `path`, a folder already checked.
-pub(super) fn read_bundle<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Bundle, Error> {
-    let plist = locate_info_plist(gate, path)?;
-    let id = match read_id_at(gate, &plist) {
+pub(super) fn read_bundle<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Result<Bundle, Error> {
+    let plist = locate_info_plist(ctx, path)?;
+    let id = match read_id_at(ctx, &plist) {
         Ok(id) => Some(id),
         Err(Error::MissingKey { .. }) => None,
         Err(error) => return Err(error),
     };
-    let name = match extract(gate, &plist, NAME_KEY) {
+    let name = match extract(ctx, &plist, NAME_KEY) {
         Ok(name) => BundleName::parse(name),
         Err(Error::MissingKey { .. }) => None,
         Err(error) => return Err(error),
@@ -113,13 +113,13 @@ pub(super) fn read_bundle<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Bun
     })
 }
 
-fn read_id<B: Backend>(gate: &Gate<B>, bundle: &Path) -> Result<BundleId, Error> {
-    let plist = locate_info_plist(gate, bundle)?;
-    read_id_at(gate, &plist)
+fn read_id<B: Backend>(ctx: &FsContext<B>, bundle: &Path) -> Result<BundleId, Error> {
+    let plist = locate_info_plist(ctx, bundle)?;
+    read_id_at(ctx, &plist)
 }
 
-fn read_id_at<B: Backend>(gate: &Gate<B>, plist: &Path) -> Result<BundleId, Error> {
-    let text = extract(gate, plist, ID_KEY)?;
+fn read_id_at<B: Backend>(ctx: &FsContext<B>, plist: &Path) -> Result<BundleId, Error> {
+    let text = extract(ctx, plist, ID_KEY)?;
     let plist = plist.to_path_buf();
     BundleId::parse(&text).ok_or(Error::InvalidBundleId { plist, id: text })
 }
@@ -133,20 +133,20 @@ pub(super) fn info_plist(bundle: &Path) -> PathBuf {
 /// than followed by `plutil`: `Contents/Info.plist` for a Mac app, or, for an iPhone or
 /// iPad app installed on a Mac with Apple silicon, the plist of the one `.app` in its
 /// `Wrapper/` folder. Such a bundle's `WrappedBundle` symlink is never used.
-fn locate_info_plist<B: Backend>(gate: &Gate<B>, bundle: &Path) -> Result<PathBuf, Error> {
+fn locate_info_plist<B: Backend>(ctx: &FsContext<B>, bundle: &Path) -> Result<PathBuf, Error> {
     let no_info_plist = || Error::NoInfoPlist {
         bundle: bundle.to_path_buf(),
     };
 
     let mac = info_plist(bundle);
-    match gate.lstat_link_free(&mac) {
+    match Cleanup::lstat_link_free(&mac).perform(ctx) {
         Ok(_) => return Ok(mac),
         Err(error) if error.has_vanished() => {}
         Err(error) => return Err(error.into()),
     }
 
     let wrapper = bundle.join("Wrapper");
-    let names = match list_folder(gate, &wrapper)? {
+    let names = match list_folder(ctx, &wrapper)? {
         Listing::Entries(names) => names,
         // A missing `Wrapper/` folder holds no apps, which the length check below
         // already refuses with the same error.
@@ -163,7 +163,7 @@ fn locate_info_plist<B: Backend>(gate: &Gate<B>, bundle: &Path) -> Result<PathBu
     };
 
     let plist = wrapped.join("Info.plist");
-    match gate.lstat_link_free(&plist) {
+    match Cleanup::lstat_link_free(&plist).perform(ctx) {
         Ok(_) => Ok(plist),
         Err(error) if error.has_vanished() => Err(no_info_plist()),
         Err(error) => Err(error.into()),
@@ -184,8 +184,12 @@ pub(super) fn extract_argv(plist: &Path, key: &str) -> SystemArgv {
 
 /// One string value of an `Info.plist` found by [`locate_info_plist`]. A missing key is
 /// [`Error::MissingKey`].
-fn extract<B: Backend>(gate: &Gate<B>, plist: &Path, key: &'static str) -> Result<String, Error> {
-    let text = match process::run_tool_text(gate, &extract_argv(plist, key)) {
+fn extract<B: Backend>(
+    ctx: &FsContext<B>,
+    plist: &Path,
+    key: &'static str,
+) -> Result<String, Error> {
+    let text = match process::run_tool_text(ctx, &extract_argv(plist, key)) {
         Err(process::Error::Failed { stderr, .. }) if stderr.contains(NO_VALUE) => {
             let plist = plist.to_path_buf();
             return Err(Error::MissingKey { plist, key });
@@ -254,7 +258,7 @@ pub(super) struct Installed {
 }
 
 /// The installed apps and their bundle IDs, read in parallel.
-pub(super) fn installed_apps<B>(gate: &Gate<B>, paths: &Paths) -> Result<Installed, Error>
+pub(super) fn installed_apps<B>(ctx: &FsContext<B>, paths: &Paths) -> Result<Installed, Error>
 where
     B: Backend + Sync,
 {
@@ -263,13 +267,13 @@ where
         paths.home().join("Applications"),
         PathBuf::from("/System/Applications"),
     ];
-    let found = bundles_in(gate, &folders)?;
+    let found = bundles_in(ctx, &folders)?;
 
     let reads: Vec<(PathBuf, Result<BundleId, Error>)> = found
         .bundles
         .into_par_iter()
         .map(|path| {
-            let id = read_id(gate, &path);
+            let id = read_id(ctx, &path);
             (path, id)
         })
         .collect();
@@ -311,16 +315,19 @@ enum Subfolder {
 /// as `/Applications/Utilities`, sorted. Symlinked bundles are not followed. A missing
 /// folder holds none; a folder rosie may not list is recorded as unlistable, since the
 /// answer is incomplete without it.
-pub(super) fn bundles_in<B: Backend>(gate: &Gate<B>, folders: &[PathBuf]) -> Result<Found, Error> {
+pub(super) fn bundles_in<B: Backend>(
+    ctx: &FsContext<B>,
+    folders: &[PathBuf],
+) -> Result<Found, Error> {
     let mut found = Found {
         bundles: Vec::new(),
         unlistable: Vec::new(),
     };
     for folder in folders {
-        for subfolder in found.list_subfolders_recording_unlistable(gate, folder)? {
+        for subfolder in found.list_subfolders_recording_unlistable(ctx, folder)? {
             let apps = match subfolder {
                 Subfolder::App(path) => vec![path],
-                Subfolder::Plain(path) => found.apps_directly_in(gate, &path)?,
+                Subfolder::Plain(path) => found.apps_directly_in(ctx, &path)?,
             };
             found.bundles.extend(apps);
         }
@@ -334,10 +341,10 @@ impl Found {
     /// The `.app` folders directly in `folder`; plain folders in it are not searched.
     fn apps_directly_in<B: Backend>(
         &mut self,
-        gate: &Gate<B>,
+        ctx: &FsContext<B>,
         folder: &Path,
     ) -> Result<Vec<PathBuf>, Error> {
-        let subfolders = self.list_subfolders_recording_unlistable(gate, folder)?;
+        let subfolders = self.list_subfolders_recording_unlistable(ctx, folder)?;
         let apps = subfolders
             .into_iter()
             .filter_map(|subfolder| match subfolder {
@@ -352,10 +359,10 @@ impl Found {
     /// the caller has no folder to report back.
     fn list_subfolders_recording_unlistable<B: Backend>(
         &mut self,
-        gate: &Gate<B>,
+        ctx: &FsContext<B>,
         folder: &Path,
     ) -> Result<Vec<Subfolder>, Error> {
-        let names = match list_folder(gate, folder)? {
+        let names = match list_folder(ctx, folder)? {
             Listing::Entries(names) => names,
             Listing::NoFolder => return Ok(Vec::new()),
             Listing::Denied(cause) => {
@@ -368,7 +375,7 @@ impl Found {
         let mut found = Vec::new();
         for name in names {
             let path = folder.join(name);
-            let kind = match gate.lstat(&path) {
+            let kind = match Cleanup::lstat(&path).perform(ctx) {
                 Ok(meta) => meta.kind,
                 Err(error) if error.has_vanished() => continue,
                 Err(error) => return Err(error.into()),

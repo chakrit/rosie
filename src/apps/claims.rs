@@ -7,7 +7,7 @@ use std::path::Path;
 use super::Error;
 use super::bundle::InstalledApp;
 use super::matching::mentions;
-use crate::fs::{Backend, Gate, SystemArgv, SystemTool};
+use crate::fs::{Backend, Cleanup, FsContext, FsOp, SystemArgv, SystemTool};
 use crate::process;
 
 /// The folders Homebrew installs formulae into, one folder per formula, on Apple silicon
@@ -26,10 +26,10 @@ pub(super) struct Claims {
 impl Claims {
     /// Reads what claims IDs on this machine. A listing rosie cannot read fails: an ID
     /// it would have claimed could otherwise be listed as an orphan.
-    pub fn read<B: Backend>(gate: &Gate<B>, installed: &[InstalledApp]) -> Result<Self, Error> {
+    pub fn read<B: Backend>(ctx: &FsContext<B>, installed: &[InstalledApp]) -> Result<Self, Error> {
         let vendors = installed.iter().map(|app| vendor_prefix(app.id.as_str()));
-        let jobs = loaded_jobs(gate)?;
-        let formulae = installed_formulae(gate)?;
+        let jobs = loaded_jobs(ctx)?;
+        let formulae = installed_formulae(ctx)?;
         let services = formulae
             .into_iter()
             .map(|formula| format!("{HOMEBREW_SERVICE}{formula}"));
@@ -56,8 +56,8 @@ fn vendor_prefix(id: &str) -> String {
 
 /// The labels of the loaded launchd jobs: the third column of `launchctl list` below its
 /// `PID Status Label` header.
-fn loaded_jobs<B: Backend>(gate: &Gate<B>) -> Result<Vec<String>, Error> {
-    let listed = process::run_tool_text(gate, &launch_jobs_argv())?;
+fn loaded_jobs<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Error> {
+    let listed = process::run_tool_text(ctx, &launch_jobs_argv())?;
     let mut lines = listed.lines();
     let unreadable = |line: &str| Error::LaunchJobs {
         line: line.to_owned(),
@@ -76,10 +76,10 @@ fn loaded_jobs<B: Backend>(gate: &Gate<B>) -> Result<Vec<String>, Error> {
 }
 
 /// The names of the installed Homebrew formulae: the folders in each Cellar there is.
-fn installed_formulae<B: Backend>(gate: &Gate<B>) -> Result<Vec<String>, Error> {
+fn installed_formulae<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Error> {
     let mut formulae = Vec::new();
     for cellar in CELLARS {
-        let names = match gate.read_dir(Path::new(cellar)) {
+        let names = match Cleanup::read_dir(Path::new(cellar)).perform(ctx) {
             Ok(names) => names,
             Err(absent) if absent.has_vanished() => continue,
             Err(error) => return Err(error.into()),

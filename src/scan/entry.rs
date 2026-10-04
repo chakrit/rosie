@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::config::Walk;
-use crate::fs::{self, Backend, FileKind, Gate, Metadata, Paths};
+use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, Paths};
 use crate::plan::{ItemKind, WalkSkip};
 
 /// A path with the metadata its own `lstat` gave, free of symlinks along the whole
@@ -41,13 +41,13 @@ impl Entry {
     /// one, is refused rather than followed; a dataless placeholder is refused rather
     /// than opened, and a mount root rather than weighed as a whole volume. `/` has no
     /// folder and is the root of its volume.
-    pub fn lstat<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Entry, NotAnEntry> {
+    pub fn lstat<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Result<Entry, NotAnEntry> {
         let path = fs::resolve_dots(path)?;
-        let meta = gate.lstat_link_free(&path)?;
+        let meta = Cleanup::lstat_link_free(&path).perform(ctx)?;
         let Some(folder) = path.parent() else {
             return Err(NotAnEntry::Mount { path });
         };
-        let folder_meta = gate.lstat(folder)?;
+        let folder_meta = Cleanup::lstat(folder).perform(ctx)?;
 
         match Sealed::of(meta, folder_meta) {
             Some(Sealed::Placeholder) => Err(NotAnEntry::Placeholder { path }),
@@ -78,11 +78,11 @@ impl Entry {
     /// make: see `behind_a_closed_mount`.
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
-        gate: &Gate<B>,
+        ctx: &FsContext<B>,
         paths: &Paths,
         mounts: Mounts,
     ) -> Result<bool, fs::Error> {
-        behind_a_closed_mount(gate, &self.path, self.meta, paths, mounts)
+        behind_a_closed_mount(ctx, &self.path, self.meta, paths, mounts)
     }
 
     pub(super) fn into_path(self) -> PathBuf {
@@ -169,9 +169,9 @@ impl Sealed {
 impl Folder {
     /// `lstat`s `path` as a folder whose entries will be checked. A path through a
     /// symlink, or naming one, is refused rather than followed.
-    pub fn lstat<B: Backend>(gate: &Gate<B>, path: &Path) -> Result<Folder, NotAFolder> {
+    pub fn lstat<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Result<Folder, NotAFolder> {
         let path = fs::resolve_dots(path)?;
-        let meta = gate.lstat_link_free(&path)?;
+        let meta = Cleanup::lstat_link_free(&path).perform(ctx)?;
         match meta.kind {
             FileKind::Dir => Ok(Folder { path, meta }),
             FileKind::File | FileKind::Symlink | FileKind::Other => Err(NotAFolder::Kind { path }),
@@ -186,11 +186,11 @@ impl Folder {
     /// make: see `behind_a_closed_mount`.
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
-        gate: &Gate<B>,
+        ctx: &FsContext<B>,
         paths: &Paths,
         mounts: Mounts,
     ) -> Result<bool, fs::Error> {
-        behind_a_closed_mount(gate, &self.path, self.meta, paths, mounts)
+        behind_a_closed_mount(ctx, &self.path, self.meta, paths, mounts)
     }
 
     /// `lstat`s the entry `name` of this folder's listing and tells what it is as the
@@ -198,7 +198,7 @@ impl Folder {
     /// as `..` or one holding `/`, is refused.
     pub(crate) fn entry<B: Backend>(
         &self,
-        gate: &Gate<B>,
+        ctx: &FsContext<B>,
         name: &OsStr,
     ) -> Result<InFolder, fs::Error> {
         if Path::new(name).file_name() != Some(name) {
@@ -206,7 +206,7 @@ impl Folder {
             return Err(fs::Error::NotAnEntryName { name });
         }
         let path = self.path.join(name);
-        let meta = gate.lstat(&path)?;
+        let meta = Cleanup::lstat(&path).perform(ctx)?;
         Ok(InFolder::of(&path, meta, self.meta))
     }
 }
@@ -267,7 +267,7 @@ impl<'p> Readable<'p> {
 /// its anchor is on another volume than the folder above it. The anchor is home for a
 /// path under home and `/` otherwise; folders above the anchor are not looked at.
 fn behind_a_closed_mount<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     path: &Path,
     meta: Metadata,
     paths: &Paths,
@@ -283,7 +283,7 @@ fn behind_a_closed_mount<B: Backend>(
         .skip(1)
         .take_while(|folder| folder.starts_with(anchor));
     let folder_metas = folders
-        .map(|folder| gate.lstat(folder))
+        .map(|folder| Cleanup::lstat(folder).perform(ctx))
         .collect::<Result<Vec<_>, _>>()?;
     let metas: Vec<Metadata> = std::iter::once(meta).chain(folder_metas).collect();
 

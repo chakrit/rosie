@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::backend::Argv;
-use super::gate::Exposure;
+use super::context::Exposure;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -68,6 +68,16 @@ pub enum Error {
 
     #[error("cannot check the folders above it: {0}")]
     AboveUnchecked(#[source] Box<Error>),
+
+    #[error("process {pid} runs {program}", program = program.display())]
+    Running {
+        path: PathBuf,
+        pid: u32,
+        program: PathBuf,
+    },
+
+    #[error("cannot check for running processes: {reason}")]
+    RunningUnknown { reason: String },
 
     #[error("{path} is outside rosie's own folders", path = path.display())]
     OutsideOwnData { path: PathBuf },

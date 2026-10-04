@@ -23,7 +23,7 @@ use thiserror::Error;
 use super::header::{self, Header, Nonce};
 use super::{ItemResult, OutputWindow, Reporter, Runner, outcomes};
 use crate::config;
-use crate::fs::{self, Argv, Backend, Gate, Paths, ROOT_UID};
+use crate::fs::{self, Argv, Backend, FsContext, FsOp, Paths, ROOT_UID, UserInput};
 use crate::plan::{self, Plan, RunStats};
 use crate::process::{self, Process, ProcessTable};
 
@@ -120,14 +120,14 @@ where
     if !plan.tools().is_empty() {
         return Err(Error::ToolElevated);
     }
-    let gate = user_gate(backend, &header.paths)?;
+    let ctx = root_ctx(backend, &header.paths)?;
 
     let mut reporting = ReportingToRun {
         reporter,
         writer: outcomes::Writer::begin(out)?,
         failure: None,
     };
-    let results = Runner::as_root(gate).execute(&plan, &mut reporting);
+    let results = Runner::new(ctx).execute(&plan, &mut reporting);
     if let Some(error) = reporting.failure {
         return Err(error.into());
     }
@@ -185,12 +185,12 @@ fn admit<'a, B: Backend>(
         return Err(Error::NonceMismatch);
     }
 
-    let gate = Gate::new(backend, header.paths.bounds(Vec::new(), ROOT_UID))?;
-    let uid = process::effective_uid(&gate)?;
+    let ctx = FsContext::new(backend, header.paths.bounds(Vec::new(), ROOT_UID))?;
+    let uid = process::effective_uid(&ctx)?;
     if uid != ROOT_UID {
         return Err(Error::NotRoot { uid });
     }
-    let processes = ProcessTable::query(&gate)?;
+    let processes = ProcessTable::query(&ctx)?;
     let under_sudo = processes
         .ancestors(invocation.pid)
         .iter()
@@ -208,16 +208,19 @@ fn is_root_sudo(process: &Process) -> bool {
     process.uid == ROOT_UID && process.comm.file_name() == Some("sudo".as_ref())
 }
 
-/// A gate acting for the user whose home this is, bounded by the roots in their
-/// config. The user is the owner of the home folder. The child deletes through it only
-/// what `Gate::admit_delete_as_root` admits, which changes no permissions.
-fn user_gate<'b, B: Backend>(backend: &'b B, paths: &Paths) -> Result<Gate<&'b B>, Error> {
-    let bootstrap = Gate::new(backend, paths.bounds(Vec::new(), ROOT_UID))?;
-    let user_uid = bootstrap.lstat(paths.home())?.uid;
-    let file = config::load(&bootstrap, &paths.config_dir(), paths)?;
+/// A context acting as root for the user whose home this is, bounded by the roots in
+/// their config. The user is the owner of the home folder. Acting as root, it deletes
+/// only through folders no one but root can change, and changes no permissions.
+fn root_ctx<'b, B: Backend>(backend: &'b B, paths: &Paths) -> Result<FsContext<&'b B>, Error> {
+    let bootstrap = FsContext::new(backend, paths.bounds(Vec::new(), ROOT_UID))?;
+    let user_uid = UserInput::lstat(paths.home()).perform(&bootstrap)?.uid;
+    let file = config::load(&bootstrap, &paths.config_dir())?;
 
     let roots = file.config().roots.clone();
-    Ok(Gate::new(backend, paths.bounds(roots, user_uid))?)
+    Ok(FsContext::new_as_root(
+        backend,
+        paths.bounds(roots, user_uid),
+    )?)
 }
 
 #[cfg(test)]

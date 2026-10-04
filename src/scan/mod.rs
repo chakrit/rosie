@@ -7,8 +7,9 @@
 //! - `caches` takes the fixed rule paths and the tool rules.
 //!
 //! Every target is sized as soon as it is found, while the walk goes on, and is marked
-//! blocked when outside the roots and `sudo` when not owned by the user. Targets a
-//! running process executes from are refused and listed apart from the plan.
+//! blocked when outside the roots and `sudo` when not owned by the user. Every target passes
+//! the context's delete checks: one a running process runs a program from is refused
+//! and listed apart from the plan.
 
 mod entry;
 mod fixed;
@@ -24,16 +25,15 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::config::Walk;
-use crate::fs::{self, Backend, FileKind, Gate, Paths};
+use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Paths, UserInput};
 use crate::plan::{self, AggressiveItems, Needs, Plan, PlanBuilder, ToolCmds, WalkSkip, WalkSkips};
-use crate::process::{self, ProcessTable};
 use crate::rules::{RuleId, RuleSet, Shape, Tier, Twin};
 
 pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry, Sealed};
 pub use log::{Log, Problem, Skipped};
 pub use progress::{NoProgress, Progress, StderrProgress};
-pub(crate) use refusal::Refusals;
 pub use refusal::Refused;
+pub(crate) use refusal::{RefusedItems, Verdict, screen};
 pub use sizing::{Measure, Sizer};
 
 use fixed::{FixedClaim, FixedTargets};
@@ -47,9 +47,6 @@ pub enum Error {
 
     #[error("{path} is not a folder", path = path.display())]
     NotAFolder { path: PathBuf },
-
-    #[error(transparent)]
-    Process(#[from] process::Error),
 }
 
 /// What a scan is told beyond the rules: the injected home for `~`, the walk flags
@@ -90,15 +87,15 @@ pub(crate) struct RuleMatch {
 }
 
 pub struct Scanner<B: Backend> {
-    gate: Gate<B>,
+    ctx: FsContext<B>,
     rules: RuleSet,
     settings: Settings,
 }
 
 impl<B: Backend + Sync> Scanner<B> {
-    pub fn new(gate: Gate<B>, rules: RuleSet, settings: Settings) -> Self {
+    pub fn new(ctx: FsContext<B>, rules: RuleSet, settings: Settings) -> Self {
         Scanner {
-            gate,
+            ctx,
             rules,
             settings,
         }
@@ -109,20 +106,20 @@ impl<B: Backend + Sync> Scanner<B> {
     /// walk looks at everything below it. A folder that is a dataless placeholder is
     /// not opened unless the walk may enter placeholders.
     pub fn tree<P: Progress>(&self, dir: &Path, progress: &P) -> Result<Scan, Error> {
-        let root = self.settings.paths.resolve(&self.gate, dir)?;
-        let root_meta = self.gate.lstat(&root)?;
+        let root = UserInput::path(dir).perform(&self.ctx)?;
+        let root_meta = Cleanup::lstat(&root).perform(&self.ctx)?;
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }
-        let table = ProcessTable::query(&self.gate)?;
+        self.ctx.snapshot_running()?;
         let log = Log::default();
         let fixed = FixedTargets::of(&self.rules, &self.settings.paths).under(&root);
-        fixed.report_symlinked(&self.gate, &log);
+        fixed.report_symlinked(&self.ctx, &log);
         let fixed = fixed.into_map();
 
-        let targets = Targets::new(&self.gate, &table, &log, progress);
+        let targets = Targets::new(&self.ctx, &log, progress);
         let walk = TreeWalk {
-            gate: &self.gate,
+            ctx: &self.ctx,
             rules: &self.rules,
             fixed: &fixed,
             flags: self.settings.walk,
@@ -142,13 +139,13 @@ impl<B: Backend + Sync> Scanner<B> {
     /// Scans the fixed rule paths, with `~` taken as the injected home, and lists the
     /// tool rules' commands. An absent path is not planned.
     pub fn caches<P: Progress>(&self, progress: &P) -> Result<Scan, Error> {
-        let table = ProcessTable::query(&self.gate)?;
+        self.ctx.snapshot_running()?;
         let log = Log::default();
         let fixed = FixedTargets::of(&self.rules, &self.settings.paths).outermost();
 
-        let targets = Targets::new(&self.gate, &table, &log, progress);
+        let targets = Targets::new(&self.ctx, &log, progress);
         let claim = FixedClaim {
-            gate: &self.gate,
+            ctx: &self.ctx,
             paths: &self.settings.paths,
             mounts: self.settings.walk.into(),
             targets: &targets,

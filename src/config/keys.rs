@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::{Config, ConfigFile, Error, document, store};
-use crate::fs::{Backend, Gate, Paths};
+use crate::fs::{Backend, FsContext};
 
 /// A config key, as `rosie config` and `config get` show it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -102,9 +102,8 @@ pub fn get(key: Key, config: &Config) -> String {
 
 /// `config set <key> <value>`: writes the flag into `config.toml`.
 pub fn set<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
-    paths: &Paths,
     file: &ConfigFile,
     flag: WalkFlag,
     value: &str,
@@ -112,22 +111,21 @@ pub fn set<B: Backend>(
     let on = parse_bool(flag, value)?;
 
     let edited = document::with_flag(&file.document, flag, on);
-    store(gate, config_dir, paths, &edited.to_string())
+    store(ctx, config_dir, &edited.to_string())
 }
 
 /// `config unset <key>`: deletes the flag from `config.toml` so its default applies. A
 /// flag the file does not set is left alone and nothing is written.
 pub fn unset<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     config_dir: &Path,
-    paths: &Paths,
     file: &ConfigFile,
     flag: WalkFlag,
 ) -> Result<ConfigFile, Error> {
     let Some(edited) = document::without_flag(&file.document, flag) else {
         return Ok(file.clone());
     };
-    store(gate, config_dir, paths, &edited.to_string())
+    store(ctx, config_dir, &edited.to_string())
 }
 
 fn parse_bool(flag: WalkFlag, value: &str) -> Result<bool, Error> {
@@ -143,10 +141,8 @@ fn parse_bool(flag: WalkFlag, value: &str) -> Result<bool, Error> {
 
 #[cfg(test)]
 mod tests {
-    use std::path::PathBuf;
-
-    use crate::fs::Bounds;
     use crate::fs::fake::FakeBackend;
+    use crate::fs::{Bounds, FsOp, Paths, Rosie};
 
     use super::super::load;
     use super::*;
@@ -154,16 +150,14 @@ mod tests {
     const HOME: &str = "/Users/me";
     const CONFIG_DIR: &str = "/Users/me/.config/rosie";
     const CONFIG_FILE: &str = "/Users/me/.config/rosie/config.toml";
-    const DATA_DIR: &str = "/Users/me/.local/share/rosie";
 
-    fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
+    fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
             roots: Vec::new(),
-            config_dir: PathBuf::from(CONFIG_DIR),
-            data_dir: PathBuf::from(DATA_DIR),
+            paths: paths(),
             user_uid: crate::fs::fake::USER_UID,
         };
-        Gate::new(fake, bounds).expect("absolute bounds")
+        FsContext::new(fake, bounds).expect("absolute bounds")
     }
 
     fn paths() -> Paths {
@@ -174,9 +168,9 @@ mod tests {
         Path::new(CONFIG_DIR)
     }
 
-    fn file_text(gate: &Gate<&FakeBackend>) -> String {
-        let bytes = gate
-            .read_own_file(Path::new(CONFIG_FILE))
+    fn file_text(ctx: &FsContext<&FakeBackend>) -> String {
+        let bytes = Rosie::read(Path::new(CONFIG_FILE))
+            .perform(ctx)
             .expect("config file exists");
         String::from_utf8(bytes).expect("config file is UTF-8")
     }
@@ -205,24 +199,17 @@ mod tests {
     fn set_writes_the_flag_into_the_file() {
         let fake = FakeBackend::new();
         fake.add_file(CONFIG_FILE, "roots = []\n");
-        let gate = gate(&fake);
-        let file = load(&gate, config_dir(), &paths()).expect("load");
+        let ctx = ctx(&fake);
+        let file = load(&ctx, config_dir()).expect("load");
 
-        let updated = set(
-            &gate,
-            config_dir(),
-            &paths(),
-            &file,
-            WalkFlag::EnterMounts,
-            "true",
-        )
-        .expect("set a flag");
+        let updated =
+            set(&ctx, config_dir(), &file, WalkFlag::EnterMounts, "true").expect("set a flag");
 
         assert_eq!(
             get(Key::Walk(WalkFlag::EnterMounts), updated.config()),
             "true"
         );
-        let reloaded = load(&gate, config_dir(), &paths()).expect("reload");
+        let reloaded = load(&ctx, config_dir()).expect("reload");
         assert!(reloaded.config().walk.enter_mounts);
     }
 
@@ -230,20 +217,13 @@ mod tests {
     fn refuses_a_value_that_is_not_true_or_false() {
         let fake = FakeBackend::new();
         fake.add_file(CONFIG_FILE, "roots = []\n");
-        let gate = gate(&fake);
-        let file = load(&gate, config_dir(), &paths()).expect("load");
+        let ctx = ctx(&fake);
+        let file = load(&ctx, config_dir()).expect("load");
 
-        let result = set(
-            &gate,
-            config_dir(),
-            &paths(),
-            &file,
-            WalkFlag::EnterBundles,
-            "yes",
-        );
+        let result = set(&ctx, config_dir(), &file, WalkFlag::EnterBundles, "yes");
 
         assert!(matches!(result, Err(Error::InvalidValue { .. })));
-        assert_eq!(file_text(&gate), "roots = []\n");
+        assert_eq!(file_text(&ctx), "roots = []\n");
     }
 
     #[test]
@@ -253,15 +233,15 @@ mod tests {
             CONFIG_FILE,
             "roots = []\n[walk]\nenter_bundles = true\nenter_mounts = true\n",
         );
-        let gate = gate(&fake);
-        let file = load(&gate, config_dir(), &paths()).expect("load");
+        let ctx = ctx(&fake);
+        let file = load(&ctx, config_dir()).expect("load");
 
-        unset(&gate, config_dir(), &paths(), &file, WalkFlag::EnterBundles).expect("unset");
+        unset(&ctx, config_dir(), &file, WalkFlag::EnterBundles).expect("unset");
 
-        let text = file_text(&gate);
+        let text = file_text(&ctx);
         assert!(!text.contains("enter_bundles"), "{text}");
         assert!(text.contains("enter_mounts = true"), "{text}");
-        let reloaded = load(&gate, config_dir(), &paths()).expect("reload");
+        let reloaded = load(&ctx, config_dir()).expect("reload");
         assert!(!reloaded.config().walk.enter_bundles);
     }
 
@@ -271,28 +251,13 @@ mod tests {
         fake.add_dir("/Users/me/Applications");
         let original = "# my config\nroots = [\n  # apps\n  \"~/Applications\",\n]\n";
         fake.add_file(CONFIG_FILE, original);
-        let gate = gate(&fake);
-        let file = load(&gate, config_dir(), &paths()).expect("load");
+        let ctx = ctx(&fake);
+        let file = load(&ctx, config_dir()).expect("load");
 
-        let set_file = set(
-            &gate,
-            config_dir(),
-            &paths(),
-            &file,
-            WalkFlag::EnterBundles,
-            "true",
-        )
-        .expect("set");
-        let after_set = file_text(&gate);
-        unset(
-            &gate,
-            config_dir(),
-            &paths(),
-            &set_file,
-            WalkFlag::EnterBundles,
-        )
-        .expect("unset");
-        let after_unset = file_text(&gate);
+        let set_file = set(&ctx, config_dir(), &file, WalkFlag::EnterBundles, "true").expect("set");
+        let after_set = file_text(&ctx);
+        unset(&ctx, config_dir(), &set_file, WalkFlag::EnterBundles).expect("unset");
+        let after_unset = file_text(&ctx);
 
         assert!(after_set.starts_with(original), "{after_set}");
         assert!(after_set.contains("enter_bundles = true"), "{after_set}");

@@ -267,10 +267,7 @@ fn fixed_paths_get_the_same_marks_as_walked_ones() {
     fake.add_file("/Users/me/Library/Caches/rooted/f", "x");
     fake.chown("/Users/me/Library/Caches/rooted", ROOT_UID);
     fake.add_file("/Users/me/Library/Caches/busy/bin/daemon", "x");
-    running(
-        &fake,
-        "  77  1  501 /Users/me/Library/Caches/busy/bin/daemon\n",
-    );
+    fake.respond_running(&[(77, "/Users/me/Library/Caches/busy/bin/daemon")]);
 
     let scan = caches(&fake);
 
@@ -294,7 +291,7 @@ fn fixed_paths_get_the_same_marks_as_walked_ones() {
     let refused: Vec<(PathBuf, u32)> = scan
         .refused
         .iter()
-        .map(|refused| (refused.path.clone(), refused.process.pid))
+        .map(|refused| (refused.path.clone(), refused.pid))
         .collect();
     assert_eq!(
         refused,
@@ -346,7 +343,7 @@ fn a_rule_listing_one_path_twice_names_it_once() {
         "[rules.npm-cache]\nstrategy = \"path\"\npaths = [\"~/.npm\", \"/Users/me/.npm\"]\n",
     );
     fake.add_file("/Users/me/.npm/bin/npm-daemon", "x");
-    running(&fake, "  9  1  501 /Users/me/.npm/bin/npm-daemon\n");
+    fake.respond_running(&[(9, "/Users/me/.npm/bin/npm-daemon")]);
 
     let scan = caches(&fake);
 

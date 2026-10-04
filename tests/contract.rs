@@ -9,7 +9,10 @@ use std::io::ErrorKind;
 use std::path::Path;
 
 use common::{Harness, RealHarness, contract, empty_bounds, error_kind, sorted};
-use rosie::fs::{Backend, Bounds, Error, FileKind, Gate, RealBackend};
+use rosie::fs::{
+    Backend, Bounds, Cleanup, Error, FileKind, FsContext, FsOp, Paths, RealBackend, Rosie,
+    UserInput,
+};
 
 contract!(
     writes_reads_and_overwrites_files,
@@ -272,15 +275,13 @@ fn gate_deletes_a_tree_with_links_and_read_only_folders(h: &impl Harness) {
         .expect("make read-only");
     let bounds = Bounds {
         roots: vec![code],
-        config_dir: h.root().join("config/rosie"),
-        data_dir: h.root().join("data/rosie"),
+        paths: Paths::new(h.root()).expect("absolute root"),
         user_uid: h.user_uid(),
     };
-    let gate = Gate::new(backend, bounds).expect("gate");
+    let ctx = FsContext::new(backend, bounds).expect("ctx");
 
-    let admitted = gate.admit_delete(&target).expect("admit tree");
-    gate.delete(admitted).expect("delete tree");
-    let refused = gate.admit_delete(&outside);
+    Cleanup::delete(&target).perform(&ctx).expect("delete tree");
+    let refused = Cleanup::delete(&outside).verify(&ctx);
 
     assert_eq!(error_kind(backend.lstat(&target)), ErrorKind::NotFound);
     assert_eq!(
@@ -406,17 +407,17 @@ fn a_symlink_loop_fails_to_resolve(h: &impl Harness) {
 fn gate_refuses_own_data_through_a_symlink(h: &impl Harness) {
     let backend = h.backend();
     let victim = h.root().join("victim");
-    let packs = h.root().join("data/rosie/packs");
+    let packs = h.root().join(".local/share/rosie/packs");
     backend.create_dir_all(&victim).expect("create victim");
     backend
         .write_file(&victim.join("precious.txt"), b"keep")
         .expect("write victim");
     backend.create_dir_all(&packs).expect("create packs");
     h.symlink(&packs.join("evil"), &victim);
-    let gate = Gate::new(backend, empty_bounds(h)).expect("gate");
+    let ctx = FsContext::new(backend, empty_bounds(h)).expect("ctx");
 
-    let deleted = gate.delete_own(&packs.join("evil/precious.txt"));
-    let written = gate.write_own_file(&packs.join("evil/planted.txt"), b"x");
+    let deleted = Rosie::delete(&packs.join("evil/precious.txt")).perform(&ctx);
+    let written = Rosie::write(&packs.join("evil/planted.txt"), b"x").perform(&ctx);
 
     assert!(matches!(deleted, Err(Error::Symlink { .. })), "{deleted:?}");
     assert!(matches!(written, Err(Error::Symlink { .. })), "{written:?}");
@@ -481,9 +482,9 @@ fn real_gate_refuses_a_unicode_form_mismatch_naming_the_disk_spelling() {
     RealBackend
         .create_dir_all(&decomposed)
         .expect("create NFD folder");
-    let gate = Gate::new(RealBackend, empty_bounds(&h)).expect("gate");
+    let ctx = FsContext::new(RealBackend, empty_bounds(&h)).expect("ctx");
 
-    let result = gate.check_real(&h.root().join("Caf\u{e9}"));
+    let result = UserInput::path(&h.root().join("Caf\u{e9}")).perform(&ctx);
 
     assert!(matches!(result, Err(Error::Misspelled { real, .. }) if real == decomposed));
 }
@@ -493,9 +494,9 @@ fn real_gate_refuses_a_case_mismatch_naming_the_disk_spelling() {
     let h = RealHarness::new();
     let spelled = h.root().join("Code");
     RealBackend.create_dir_all(&spelled).expect("create folder");
-    let gate = Gate::new(RealBackend, empty_bounds(&h)).expect("gate");
+    let ctx = FsContext::new(RealBackend, empty_bounds(&h)).expect("ctx");
 
-    let result = gate.check_real(&h.root().join("code"));
+    let result = UserInput::path(&h.root().join("code")).perform(&ctx);
 
     assert!(matches!(result, Err(Error::Misspelled { real, .. }) if real == spelled));
 }

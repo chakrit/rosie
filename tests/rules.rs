@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, Gate, Op, Paths};
+use rosie::fs::{Bounds, Cleanup, FsContext, FsOp, Op, Paths};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
     Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source, Tier,
@@ -21,27 +21,26 @@ const ROSIE_PACK: &str = "/Users/me/.local/share/rosie/packs/chakrit/rosie";
 fn bounds() -> Bounds {
     Bounds {
         roots: vec![PathBuf::from("/Users/me/code")],
-        config_dir: PathBuf::from("/Users/me/.config/rosie"),
-        data_dir: PathBuf::from("/Users/me/.local/share/rosie"),
+        paths: Paths::new(Path::new(HOME)).expect("absolute home"),
         user_uid: USER_UID,
     }
 }
 
-fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
-    Gate::new(fake, bounds()).expect("absolute bounds")
+fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
+    FsContext::new(fake, bounds()).expect("absolute bounds")
 }
 
 /// Loads the rules of the packs the pack store lists, then the user's rules. What the
 /// store refuses in the packs folder is tested with the store.
 fn load(fake: &FakeBackend) -> Result<RuleSet, Error> {
-    let gate = gate(fake);
+    let ctx = ctx(fake);
     let bounds = bounds();
     let paths = Paths::new(Path::new(HOME)).expect("absolute paths");
     let packs = SettlePacks
-        .run(&Store::new(&gate, &paths, &bounds.data_dir))
+        .run(&Store::new(&ctx, &paths, &bounds.paths.data_dir()))
         .and_then(|settled| settled.pack_folders())
         .expect("installed packs list");
-    RuleSet::load(&gate, &RuleLayers::new(packs, &bounds.config_dir))
+    RuleSet::load(&ctx, &RuleLayers::new(packs, &bounds.paths.config_dir()))
 }
 
 fn loaded(fake: &FakeBackend) -> RuleSet {
@@ -58,11 +57,11 @@ fn ids(rules: &RuleSet) -> Vec<String> {
 
 /// The rules that accept `path`, with their tier, given the names in its parent.
 fn matching(fake: &FakeBackend, rules: &RuleSet, path: &str) -> Vec<(String, Tier)> {
-    let gate = gate(fake);
+    let ctx = ctx(fake);
     let lua = LuaSandbox::new().expect("lua starts");
     let path = Path::new(path);
-    let siblings: Vec<OsString> = gate
-        .read_dir(path.parent().expect("has a parent"))
+    let siblings: Vec<OsString> = Cleanup::read_dir(path.parent().expect("has a parent"))
+        .perform(&ctx)
         .expect("parent lists");
     let candidate = Candidate {
         path,
@@ -73,10 +72,7 @@ fn matching(fake: &FakeBackend, rules: &RuleSet, path: &str) -> Vec<(String, Tie
     rules
         .targeting(name)
         .iter()
-        .filter(|rule| {
-            rule.matches(&gate, &lua, candidate)
-                .expect("detection runs")
-        })
+        .filter(|rule| rule.matches(&ctx, &lua, candidate).expect("detection runs"))
         .map(|rule| (rule.id().to_string(), rule.tier()))
         .collect()
 }
@@ -530,7 +526,7 @@ fn reports_a_lua_error_against_the_rule_without_matching() {
     );
     fake.add_dir("/Users/me/code/app/out");
     let rules = loaded(&fake);
-    let gate = gate(&fake);
+    let ctx = ctx(&fake);
     let lua = LuaSandbox::new().expect("lua starts");
     let siblings = [OsString::from("out")];
     let candidate = Candidate {
@@ -539,7 +535,7 @@ fn reports_a_lua_error_against_the_rule_without_matching() {
     };
 
     let entry = &rules.targeting(OsStr::new("out"))[0];
-    let result = entry.matches(&gate, &lua, candidate);
+    let result = entry.matches(&ctx, &lua, candidate);
 
     assert!(
         matches!(&result, Err(Error::Lua { rule, path, .. })
@@ -558,7 +554,7 @@ fn reports_a_failed_listing_against_the_rule_without_matching() {
         ErrorKind::PermissionDenied,
     );
     let rules = loaded(&fake);
-    let gate = gate(&fake);
+    let ctx = ctx(&fake);
     let lua = LuaSandbox::new().expect("lua starts");
     let siblings = [OsString::from("Pods")];
     let candidate = Candidate {
@@ -567,7 +563,7 @@ fn reports_a_failed_listing_against_the_rule_without_matching() {
     };
 
     let entry = &rules.targeting(OsStr::new("Pods"))[0];
-    let result = entry.matches(&gate, &lua, candidate);
+    let result = entry.matches(&ctx, &lua, candidate);
 
     assert!(
         matches!(&result, Err(Error::Listing { rule, path, .. })

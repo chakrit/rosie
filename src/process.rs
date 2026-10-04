@@ -1,13 +1,7 @@
-//! Facts about running processes and the current user, read from system CLIs through
-//! the gate's command method (`docs/spec/safety.md#running-processes`,
-//! `docs/decisions/2026-09-29-elevation-without-ffi.md`).
-//!
-//! Shared by the scanner, app mode, and the runner: all of them refuse items a process
-//! executes from, and the elevated entry walks the parent chain to find `sudo`. A scanned
-//! plan's path entry is built only from an [`IdlePath`], which only
-//! [`ProcessTable::admit`] issues, so no scan mode can plan an item without passing it
-//! through the table. A plan read from a file carries no such proof; the runner checks
-//! its deletes against the table before running them.
+//! Facts about processes and the current user, read from system CLIs through the
+//! context's command method (`docs/decisions/2026-09-29-elevation-without-ffi.md`): the
+//! elevated entry walks the parent chain to find `sudo`. Whether a process runs from a
+//! cleanup target is the FS layer's own check (`docs/spec/safety.md#running-processes`).
 //!
 //! [`run_tool`] and [`run_tool_text`] are the one way rosie reads a read-only system
 //! tool's output, here and in app mode (`plutil`, `pkgutil`).
@@ -15,12 +9,12 @@
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt as _;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use std::str::FromStr;
 
 use thiserror::Error;
 
-use crate::fs::{self, Argv, Backend, Exit, Gate, SystemArgv, SystemTool};
+use crate::fs::{self, Argv, Backend, Exit, FsContext, SystemArgv, SystemTool};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -51,14 +45,6 @@ pub struct Process {
     pub comm: PathBuf,
 }
 
-impl Process {
-    /// Whether this process executes from `path` or from inside it, compared component
-    /// by component as written. A bare name never matches.
-    pub fn executes_from(&self, path: &Path) -> bool {
-        self.comm.is_absolute() && self.comm.starts_with(path)
-    }
-}
-
 /// Every process running when the table was read.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ProcessTable {
@@ -74,8 +60,8 @@ impl ProcessTable {
     }
 
     /// Reads the table with `ps`.
-    pub fn query<B: Backend>(gate: &Gate<B>) -> Result<Self, Error> {
-        let stdout = run_tool(gate, &Self::argv())?;
+    pub fn query<B: Backend>(ctx: &FsContext<B>) -> Result<Self, Error> {
+        let stdout = run_tool(ctx, &Self::argv())?;
         Self::parse(&stdout)
     }
 
@@ -96,31 +82,6 @@ impl ProcessTable {
         Ok(ProcessTable { processes })
     }
 
-    /// A table with no process, which admits every path: only tests build one, so every
-    /// production table comes from `ps`.
-    #[cfg(test)]
-    pub(crate) fn empty() -> Self {
-        ProcessTable {
-            processes: Vec::new(),
-        }
-    }
-
-    /// A process whose executable is `path` or lies inside it.
-    pub fn executing_from(&self, path: &Path) -> Option<&Process> {
-        self.processes
-            .iter()
-            .find(|process| process.executes_from(path))
-    }
-
-    /// Admits `path` as an item a plan may hold when no process executes from it, or
-    /// names the process that does.
-    pub fn admit(&self, path: PathBuf) -> Admission<'_> {
-        match self.executing_from(&path) {
-            Some(process) => Admission::Running { path, process },
-            None => Admission::Idle(IdlePath(path)),
-        }
-    }
-
     /// The parent of `pid`, its parent, and so on up the chain, nearest first. A chain
     /// that loops ends where it would repeat.
     pub fn ancestors(&self, pid: u32) -> Vec<&Process> {
@@ -137,27 +98,6 @@ impl ProcessTable {
             current = Some(parent.ppid);
         }
         chain
-    }
-}
-
-/// Whether a path may become a plan item (`docs/spec/safety.md#running-processes`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Admission<'t> {
-    Idle(IdlePath),
-    Running { path: PathBuf, process: &'t Process },
-}
-
-/// A path no process executed from when the process table was read.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct IdlePath(PathBuf);
-
-impl IdlePath {
-    pub fn as_path(&self) -> &Path {
-        &self.0
-    }
-
-    pub fn into_path(self) -> PathBuf {
-        self.0
     }
 }
 
@@ -193,20 +133,20 @@ fn number<T: FromStr>(field: &[u8]) -> Option<T> {
 }
 
 /// The effective user id rosie runs as, from `id -u`.
-pub fn effective_uid<B: Backend>(gate: &Gate<B>) -> Result<u32, Error> {
+pub fn effective_uid<B: Backend>(ctx: &FsContext<B>) -> Result<u32, Error> {
     let argv = SystemTool::ID.argv().arg("-u");
-    let text = run_tool_text(gate, &argv)?;
+    let text = run_tool_text(ctx, &argv)?;
     text.trim().parse().map_err(|_| Error::Unreadable {
         argv: argv.into(),
         line: text,
     })
 }
 
-/// Runs a read-only system tool through the gate and returns its standard output. A
+/// Runs a read-only system tool through the context and returns its standard output. A
 /// non-zero exit fails with the tool's standard error.
-pub fn run_tool<B: Backend>(gate: &Gate<B>, argv: &SystemArgv) -> Result<Vec<u8>, Error> {
+pub fn run_tool<B: Backend>(ctx: &FsContext<B>, argv: &SystemArgv) -> Result<Vec<u8>, Error> {
     let argv = argv.as_argv();
-    let output = gate.run(argv)?;
+    let output = ctx.run(argv)?;
     match output.exit.success() {
         true => Ok(output.stdout),
         false => Err(Error::Failed {
@@ -218,8 +158,8 @@ pub fn run_tool<B: Backend>(gate: &Gate<B>, argv: &SystemArgv) -> Result<Vec<u8>
 }
 
 /// [`run_tool`] for a tool that prints text; output that is not UTF-8 fails.
-pub fn run_tool_text<B: Backend>(gate: &Gate<B>, argv: &SystemArgv) -> Result<String, Error> {
-    let stdout = run_tool(gate, argv)?;
+pub fn run_tool_text<B: Backend>(ctx: &FsContext<B>, argv: &SystemArgv) -> Result<String, Error> {
+    let stdout = run_tool(ctx, argv)?;
     String::from_utf8(stdout).map_err(|_| Error::NotUtf8 {
         argv: argv.as_argv().clone(),
     })

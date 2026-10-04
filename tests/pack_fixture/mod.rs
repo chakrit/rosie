@@ -7,11 +7,11 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsString;
 use std::io;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Backend, Bounds, Gate, Paths};
+use rosie::fs::{Backend, Bounds, FsContext, Paths};
 use rosie::packs::{Installed, Network, Source};
 
 pub const HOME: &str = "/Users/me";
@@ -72,14 +72,13 @@ pub fn paths() -> Paths {
     Paths::new(Path::new(HOME)).expect("absolute paths")
 }
 
-pub fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
+pub fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
     let bounds = Bounds {
         roots: vec![],
-        config_dir: PathBuf::from(CONFIG),
-        data_dir: PathBuf::from(DATA),
+        paths: paths(),
         user_uid: USER_UID,
     };
-    Gate::new(fake, bounds).expect("absolute bounds")
+    FsContext::new(fake, bounds).expect("absolute bounds")
 }
 
 pub fn at(seconds: u64) -> SystemTime {

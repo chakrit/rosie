@@ -119,7 +119,7 @@ impl fmt::Display for PlanStats {
 
 /// How one item of a run ended. A skipped item never ran. A command that is done ran;
 /// one that failed ran and failed, or could not be started. A failed delete may also be
-/// one the gate refused before it began.
+/// one the context refused before it began.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Outcome {
     Done,
@@ -140,11 +140,11 @@ pub enum SkipReason {
     /// root, so the elevated child left it for the user to delete by hand (see
     /// [`crate::fs::Error::NotRootControlled`]).
     UnsafeToElevate,
-    /// The running-process table could not be read, so a process executing from the
+    /// The running programs could not be read, so a process running a program from the
     /// item, or from the delete a bootout belongs to, could not be ruled out. Unlike
     /// the other skips, it fails the run.
     ProcessCheckFailed,
-    /// The gate refused the delete, which fails, so its bootouts never ran and are
+    /// The context refused the delete, which fails, so its bootouts never ran and are
     /// skipped.
     DeleteRefused,
 }
@@ -172,7 +172,7 @@ pub enum WalkSkip {
     /// leftover location that lies inside a mount the walk may not enter.
     Closed(Needs),
     /// A mount root that is never entered and never a target, whatever the settings:
-    /// one a rule matches, since the gate never deletes a mount point, or one inside an
+    /// one a rule matches, since the context never deletes a mount point, or one inside an
     /// item being sized, since sizing never leaves the item's volume.
     SealedMount,
     /// A placeholder that is never opened and never a target, whatever the settings:
@@ -468,6 +468,8 @@ impl fmt::Display for RunStats {
 
 #[cfg(test)]
 mod tests {
+    use std::path::PathBuf;
+
     use super::*;
     use crate::plan::{
         AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
@@ -476,7 +478,7 @@ mod tests {
 
     fn found(path: &str, bytes: u64, reach: Reach, twin: Twin) -> PathMatch {
         PathMatch {
-            path: crate::plan::idle(path),
+            path: PathBuf::from(path),
             kind: ItemKind::Folder,
             size: Size::bytes(bytes),
             run_as: RunAs::User,

@@ -9,7 +9,7 @@ use super::layers::{self, RuleLayers};
 use super::lua::LuaSandbox;
 use super::name::{Name, RuleId};
 use super::rule::{Detection, Rule, Shape, Tier};
-use crate::fs::{Backend, Gate};
+use crate::fs::{Backend, Cleanup, FsContext, FsOp};
 
 /// Every rule from every layer, in identity order, with the folder rules indexed once
 /// by target name.
@@ -20,8 +20,8 @@ pub struct RuleSet {
 
 impl RuleSet {
     /// Loads the pulled packs, then the user's rules over them.
-    pub fn load<B: Backend>(gate: &Gate<B>, to_load: &RuleLayers) -> Result<RuleSet, Error> {
-        let rules = layers::load(gate, to_load)?;
+    pub fn load<B: Backend>(ctx: &FsContext<B>, to_load: &RuleLayers) -> Result<RuleSet, Error> {
+        let rules = layers::load(ctx, to_load)?;
         Ok(RuleSet::index(rules))
     }
 
@@ -120,13 +120,13 @@ impl TargetRule {
     /// does not match.
     pub fn matches<B: Backend>(
         &self,
-        gate: &Gate<B>,
+        ctx: &FsContext<B>,
         lua: &LuaSandbox,
         candidate: Candidate,
     ) -> Result<bool, Error> {
         match &self.detection {
             Detection::Name => Ok(true),
-            Detection::Lua(code) => lua.accepts(gate, &self.id, code, candidate.path),
+            Detection::Lua(code) => lua.accepts(ctx, &self.id, code, candidate.path),
             Detection::Marker(markers) => {
                 let own_name = candidate.path.file_name();
                 let siblings = candidate
@@ -144,8 +144,8 @@ impl TargetRule {
                 let Some(inside) = markers.inside() else {
                     return Ok(true);
                 };
-                let listing = gate
-                    .read_dir(candidate.path)
+                let listing = Cleanup::read_dir(candidate.path)
+                    .perform(ctx)
                     .map_err(|source| Error::Listing {
                         rule: self.id.clone(),
                         path: candidate.path.to_path_buf(),

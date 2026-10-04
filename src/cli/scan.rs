@@ -10,7 +10,7 @@ use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps;
 use crate::config::{ConfigFile, Walk};
-use crate::fs::{Backend, Gate};
+use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::packs::Network;
 use crate::plan::{AggressiveItems, ItemSize, Outcome, Plan, SkipReason, WalkSkips};
 use crate::rules::RuleSet;
@@ -118,7 +118,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn run_plan(&mut self, source: &PlanSource) -> Result<ExitStatus, Error> {
         let bytes = match source {
             PlanSource::Stdin => self.console.read_stdin()?,
-            PlanSource::File(path) => self.own.read_file(&self.absolute(path))?,
+            PlanSource::File(path) => UserInput::read(&self.absolute(path)).perform(&self.own)?,
         };
         let text = str::from_utf8(&bytes).map_err(Error::PlanNotText)?;
         let plan = Plan::parse(text)?;
@@ -142,7 +142,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             true => AggressiveItems::Ticked,
             false => AggressiveItems::Unticked,
         };
-        let gate = self.roots_gate(config.config())?;
+        let ctx = self.roots_ctx(config.config())?;
         let paths = &self.env.paths;
 
         match mode {
@@ -150,7 +150,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 let walk = walk_with_rule_flags(walk, rules);
                 let rules = self.rules(&rules.only)?;
                 let dir = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
-                let scanner = self.scanner(gate, rules, walk, aggressive);
+                let scanner = self.scanner(ctx, rules, walk, aggressive);
                 let progress = self.console.progress();
                 let scan = scanner.tree(&dir, &progress);
                 progress.finish()?;
@@ -159,7 +159,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Mode::Caches { rules } => {
                 let walk = walk_with_rule_flags(walk, rules);
                 let rules = self.rules(&rules.only)?;
-                let scanner = self.scanner(gate, rules, walk, aggressive);
+                let scanner = self.scanner(ctx, rules, walk, aggressive);
                 let progress = self.console.progress();
                 let scan = scanner.caches(&progress);
                 progress.finish()?;
@@ -168,18 +168,18 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Mode::App { app } => {
                 let app = match app {
                     Some(app) => self.absolute(app),
-                    None => self.pick_app(&gate, app_usage)?,
+                    None => self.pick_app(&ctx, app_usage)?,
                 };
                 let paths = &self.env.paths;
-                Ok(apps::scan_app(&gate, &app, paths, aggressive, walk.into())?)
+                Ok(apps::scan_app(&ctx, &app, paths, aggressive, walk.into())?)
             }
-            Mode::Orphans => Ok(apps::scan_orphans(&gate, paths, aggressive, walk.into())?),
+            Mode::Orphans => Ok(apps::scan_orphans(&ctx, paths, aggressive, walk.into())?),
         }
     }
 
     fn scanner(
         &self,
-        gate: Gate<&'a B>,
+        ctx: FsContext<&'a B>,
         rules: RuleSet,
         walk: Walk,
         aggressive: AggressiveItems,
@@ -189,12 +189,12 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             walk,
             aggressive,
         };
-        Scanner::new(gate, rules, settings)
+        Scanner::new(ctx, rules, settings)
     }
 
-    fn pick_app(&mut self, gate: &Gate<&'a B>, usage: &str) -> Result<PathBuf, Error> {
+    fn pick_app(&mut self, ctx: &FsContext<&'a B>, usage: &str) -> Result<PathBuf, Error> {
         let picker = self.picker(usage)?;
-        let apps = apps::picker_apps(gate, &self.env.paths)?;
+        let apps = apps::picker_apps(ctx, &self.env.paths)?;
         let options = apps
             .into_iter()
             .map(|app| (app.display().to_string(), app))
@@ -253,14 +253,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         plan: &Plan,
         skips: ScanSkips<'_>,
     ) -> Result<bool, Error> {
-        let gate = self.roots_gate(config.config())?;
+        let ctx = self.roots_ctx(config.config())?;
         let elevation = Elevation {
             exe: self.env.exe.clone(),
             paths: self.env.paths.clone(),
         };
 
         let mut reporter = self.console.reporter();
-        let mut stats = Runner::new(gate).run(plan, &elevation, &mut reporter);
+        let mut stats = Runner::new(ctx).run(plan, &elevation, &mut reporter);
         reporter.finish()?;
 
         for refused in skips.refused {

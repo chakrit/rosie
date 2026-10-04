@@ -9,7 +9,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime};
 
 use pack_fixture::{
-    Canned, DATA, NODE_RULE, ROSIE_PACK, ROSIE_URL, at, contents, fake_home, gate, installed,
+    Canned, DATA, NODE_RULE, ROSIE_PACK, ROSIE_URL, at, contents, ctx, fake_home, installed,
     listing, paths, source, url_of,
 };
 use rosie::packs::{self, Error, FirstRun, Installed, MONTH, RemovePack, Source, Store};
@@ -21,8 +21,8 @@ use tarball::{TOP, Tarball};
 #[test]
 fn pull_installs_only_the_rules_folder_into_the_pack_folder() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE), ("rust.toml", "")])
         .file(&format!("{TOP}/README.md"), b"# rosie")
         .gzip();
@@ -52,8 +52,8 @@ fn pull_installs_only_the_rules_folder_into_the_pack_folder() {
 #[test]
 fn pull_replaces_a_pack_wholesale() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let first = Tarball::pack(&[("a.toml", "# old a"), ("b.toml", "# old b")]).gzip();
     let second = Tarball::pack(&[("b.toml", "# new b"), ("c.toml", "# new c")]).gzip();
 
@@ -85,8 +85,8 @@ fn pull_replaces_a_pack_wholesale() {
 #[test]
 fn a_refused_tarball_leaves_the_installed_pack_and_the_home_untouched() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let good = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     packs::pull(
         &store,
@@ -122,8 +122,8 @@ fn a_refused_tarball_leaves_the_installed_pack_and_the_home_untouched() {
 #[test]
 fn pull_refuses_rule_files_the_volume_folds_into_one_name() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let good = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     packs::pull(
         &store,
@@ -152,8 +152,8 @@ fn pull_refuses_rule_files_the_volume_folds_into_one_name() {
 #[test]
 fn pull_refuses_a_rule_file_that_is_not_toml() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("broken.toml", "[rules.x\n")]).gzip();
 
     let result = packs::pull(
@@ -173,8 +173,8 @@ fn pull_refuses_a_rule_file_that_is_not_toml() {
 #[test]
 fn pull_refuses_a_pack_whose_rule_fails_to_load_and_keeps_the_installed_one() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let good = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     packs::pull(
         &store,
@@ -212,8 +212,8 @@ fn pull_refuses_a_pack_whose_rule_fails_to_load_and_keeps_the_installed_one() {
 #[test]
 fn pull_refuses_a_pack_name_already_installed_from_another_owner() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let network =
         Canned::serving(ROSIE_URL, tarball.clone()).and(&url_of("someone/rosie"), tarball);
@@ -231,8 +231,8 @@ fn pull_refuses_a_pack_name_already_installed_from_another_owner() {
 #[test]
 fn pull_warns_about_rules_that_duplicate_another_packs_rules() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let rosie = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let duplicate = NODE_RULE.replace("node-modules", "npm-deps");
     let different = NODE_RULE
@@ -268,8 +268,8 @@ fn pull_warns_about_rules_that_duplicate_another_packs_rules() {
 #[test]
 fn pull_warns_when_a_duplicate_rules_markers_are_written_in_a_different_order() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let rosie = Tarball::pack(&[(
         "node.toml",
         "[rules.node-modules]\nstrategy = \"marker\"\ntarget = \"node_modules\"\n\
@@ -302,8 +302,8 @@ fn pull_warns_when_a_duplicate_rules_markers_are_written_in_a_different_order() 
 #[test]
 fn pull_warns_when_the_installed_rules_markers_are_written_in_a_different_order() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let rosie = Tarball::pack(&[(
         "node.toml",
         "[rules.node-modules]\nstrategy = \"marker\"\ntarget = \"node_modules\"\n\
@@ -336,8 +336,8 @@ fn pull_warns_when_the_installed_rules_markers_are_written_in_a_different_order(
 #[test]
 fn pull_does_not_warn_when_only_one_of_sibling_and_inside_markers_matches() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let rosie = Tarball::pack(&[(
         "py.toml",
         "[rules.venv]\nstrategy = \"marker\"\ntarget = \".venv\"\n\
@@ -366,8 +366,8 @@ fn pull_does_not_warn_when_only_one_of_sibling_and_inside_markers_matches() {
 #[test]
 fn pull_warns_only_when_duplicate_lua_rules_run_the_same_code() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let rosie = Tarball::pack(&[(
         "lua.toml",
         "[rules.odd]\nstrategy = \"lua\"\ntarget = \"x\"\nexpr = \"true\"",
@@ -400,8 +400,8 @@ fn pull_warns_only_when_duplicate_lua_rules_run_the_same_code() {
 #[test]
 fn pull_does_not_warn_when_only_one_side_of_a_marker_rule_names_inside() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let rosie = Tarball::pack(&[(
         "venv.toml",
         "[rules.venv]\nstrategy = \"marker\"\ntarget = \"t\"\nmarker = [\"p\"]",
@@ -431,8 +431,8 @@ fn pull_does_not_warn_when_only_one_side_of_a_marker_rule_names_inside() {
 /// inner rule error.
 fn refused_pull_keeps_the_installed_pack(files: &[(&str, &str)]) -> rules::Error {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let good = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     packs::pull(
         &store,
@@ -509,8 +509,8 @@ fn pull_refuses_a_rule_defined_in_two_files_of_the_pack() {
 /// returns the second pull's warnings.
 fn warnings_pulling_beside(rosie_rules: &str, extra_rules: &str) -> Vec<String> {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let rosie = Tarball::pack(&[("rosie.toml", rosie_rules)]).gzip();
     let extra = Tarball::pack(&[("extra.toml", extra_rules)]).gzip();
     let network = Canned::serving(ROSIE_URL, rosie).and(&url_of("someone/extra"), extra);
@@ -612,8 +612,8 @@ fn pull_does_not_warn_about_folder_rules_with_different_targets_and_the_same_det
 #[test]
 fn pull_refuses_while_another_installed_pack_fails_to_load() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let network =
         Canned::serving(ROSIE_URL, tarball.clone()).and(&url_of("someone/extra"), tarball);
@@ -638,8 +638,8 @@ fn pull_refuses_while_another_installed_pack_fails_to_load() {
 #[test]
 fn seeding_without_packs_installs_the_default_pack_from_the_one_download() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let network = Canned::serving(ROSIE_URL, tarball);
 
@@ -661,8 +661,8 @@ fn seeding_without_packs_installs_the_default_pack_from_the_one_download() {
 #[test]
 fn seeding_with_a_pack_installed_leaves_the_packs_alone() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let old = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     packs::pull(
         &store,
@@ -697,8 +697,8 @@ fn seeding_with_a_pack_installed_leaves_the_packs_alone() {
 #[test]
 fn removes_any_pack_including_rosie() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     packs::pull(
         &store,
@@ -722,8 +722,8 @@ fn removes_any_pack_including_rosie() {
 #[test]
 fn removing_a_pack_that_is_not_installed_fails() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
 
     let result = RemovePack {
         pack: "rosie".to_owned(),
@@ -741,8 +741,8 @@ fn removing_a_pack_that_is_not_installed_fails() {
 #[test]
 fn first_run_without_packs_pulls_the_default_source() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let network = Canned::serving(ROSIE_URL, tarball);
 
@@ -761,8 +761,8 @@ fn first_run_without_packs_pulls_the_default_source() {
 #[test]
 fn first_run_with_a_pack_does_not_touch_the_network() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("js.toml", NODE_RULE)]).gzip();
     packs::pull(
         &store,
@@ -782,8 +782,8 @@ fn first_run_with_a_pack_does_not_touch_the_network() {
 #[test]
 fn first_run_offline_stops_with_the_reason() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
 
     let result = packs::first_run(&store, &Canned::offline(), at(5));
 
@@ -801,8 +801,8 @@ fn first_run_offline_stops_with_the_reason() {
 #[test]
 fn removing_the_last_pack_makes_the_next_run_pull_rosie_again() {
     let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &paths(), Path::new(DATA));
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
     let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
     let network = Canned::serving(ROSIE_URL, tarball);
     packs::pull(&store, &network, &Source::default(), at(1)).expect("pull");

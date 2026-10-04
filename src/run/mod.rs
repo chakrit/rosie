@@ -3,21 +3,21 @@
 //! A run does the user's ticked entries first, then pipes the remaining `sudo` entries
 //! to one elevated child, which runs them through the same code. Within each part:
 //!
-//! 1. every delete is admitted or refused before anything runs, and a refused delete
-//!    takes its bootouts with it: one a process executes from (the process table is
-//!    read before a bootout could stop that process), a stale one, and one the gate
-//!    refuses, such as a path outside the roots. A bootout withheld this way is
-//!    skipped, never failed, whatever its delete ends as;
-//! 2. the bootouts of the admitted deletes, one at a time, so no plist is deleted with
+//! 1. every delete is verified or refused before anything runs, and a refused delete
+//!    takes its bootouts with it: a stale one, and one the context refuses, such as one
+//!    a process runs from (the context's snapshot of running programs is taken before
+//!    a bootout could stop that process) or a path outside the roots. A bootout
+//!    withheld this way is skipped, never failed, whatever its delete ends as;
+//! 2. the bootouts of the verified deletes, one at a time, so no plist is deleted with
 //!    its job loaded;
-//! 3. the admitted deletes, in parallel, each checked on disk again by the gate and
-//!    reported as it finishes; alongside them, the tool commands and receipts, one at a
-//!    time.
+//! 3. the verified deletes, in parallel, each checked again by the context as it is
+//!    performed and reported as it finishes; alongside them, the tool commands and
+//!    receipts, one at a time.
 //!
 //! A run has up to three steps: the user's part; the elevated part; then, in the
 //! user's process again, the user's deletes the elevated part only booted `system`
-//! jobs out for. The elevated child deletes only through folders no one but root can
-//! change (`Gate::admit_delete_as_root`), and never deletes a user's item.
+//! jobs out for. The elevated child's context acts as root, which deletes only through
+//! folders no one but root can change, and never deletes a user's item.
 //!
 //! A failed item is reported and the run goes on.
 
@@ -36,9 +36,8 @@ use std::thread::{self, ScopedJoinHandle};
 
 use rayon::prelude::*;
 
-use crate::fs::{self, Admitted, Argv, Backend, Exit, Gate};
+use crate::fs::{self, Acting, Argv, Backend, Cleanup, Exit, FsContext, FsOp};
 use crate::plan::{Delete, ItemSize, Outcome, Plan, RunAs, RunStats, Runnable, SkipReason};
-use crate::process::{self, ProcessTable};
 use report::Forwarding;
 
 pub use elevate::Elevation;
@@ -47,27 +46,22 @@ pub use report::{OutputWindow, PlainReporter, Reporter, TerminalReporter};
 pub use root::{RootError, RootRefusal, refuse_root};
 
 pub struct Runner<B: Backend> {
-    gate: Gate<B>,
-    /// Whom this process acts as: the user for the run itself, `Sudo` for the elevated
-    /// child.
-    acting: RunAs,
+    ctx: FsContext<B>,
 }
 
 impl<B: Backend + Sync> Runner<B> {
-    /// `gate` holds the roots loaded from the user's `config.toml`; a plan never
-    /// carries roots.
-    pub fn new(gate: Gate<B>) -> Self {
-        Runner {
-            gate,
-            acting: RunAs::User,
-        }
+    /// `ctx` holds the roots loaded from the user's `config.toml`, since a plan never
+    /// carries roots, and acts as the user for the run itself or as root for the
+    /// elevated child.
+    pub fn new(ctx: FsContext<B>) -> Self {
+        Runner { ctx }
     }
 
-    /// A runner for the elevated child, which acts as root on the user's behalf.
-    fn as_root(gate: Gate<B>) -> Self {
-        Runner {
-            gate,
-            acting: RunAs::Sudo,
+    /// Whom this process acts as.
+    fn acting(&self) -> RunAs {
+        match self.ctx.acting() {
+            Acting::User => RunAs::User,
+            Acting::Root => RunAs::Sudo,
         }
     }
 
@@ -99,9 +93,9 @@ impl<B: Backend + Sync> Runner<B> {
 
     /// Runs the part of `plan` that this process executes, as whoever it acts as. Only
     /// [`Runner::run`] and the elevated child call it, each with one part of a run, and
-    /// tests of the elevated child through `Runner::as_root`.
+    /// tests of the elevated child.
     fn execute<R: Reporter>(&self, plan: &Plan, reporter: &mut R) -> Vec<ItemResult> {
-        self.execute_runnable(&plan.runnable_as(self.acting), reporter)
+        self.execute_runnable(&plan.runnable_as(self.acting()), reporter)
     }
 
     fn execute_runnable<R: Reporter>(
@@ -109,17 +103,17 @@ impl<B: Backend + Sync> Runner<B> {
         runnable: &Runnable,
         reporter: &mut R,
     ) -> Vec<ItemResult> {
-        let processes = ProcessTable::query(&self.gate);
-        let mut admissions = self.admit_all(runnable, &processes);
-        let mut results = refused(runnable, &admissions);
+        let verdicts = self.verify_all(runnable);
+        let mut results = refused(runnable, &verdicts);
         for result in &results {
             reporter.item_finished(result);
         }
 
+        let may_run = |delete: &Delete| matches!(verdicts.get(delete.path.as_path()), Some(Ok(())));
         let bootouts = runnable
             .holders()
             .iter()
-            .filter(|delete| matches!(admissions.get(delete.path.as_path()), Some(Ok(_))))
+            .filter(|delete| may_run(delete))
             .flat_map(|delete| delete.bootouts.iter());
         results.extend(
             bootouts.map(|bootout| self.run_command(bootout.absolute_argv().into(), reporter)),
@@ -136,13 +130,11 @@ impl<B: Backend + Sync> Runner<B> {
                     .map(|receipt| receipt.absolute_argv().into()),
             )
             .collect();
-        let admitted: Vec<(&Delete, Admitted)> = runnable
+        let verified: Vec<&Delete> = runnable
             .deletes()
             .iter()
-            .filter_map(|delete| match admissions.remove(delete.path.as_path())? {
-                Ok(admitted) => Some((*delete, admitted)),
-                Err(_) => None,
-            })
+            .copied()
+            .filter(|delete| may_run(delete))
             .collect();
 
         let (sender, events) = mpsc::channel();
@@ -156,10 +148,10 @@ impl<B: Backend + Sync> Runner<B> {
                     .collect::<Vec<_>>()
             });
             let deletes = scope.spawn(move || {
-                admitted
+                verified
                     .into_par_iter()
-                    .map_with(deleting, |reporter, (delete, admitted)| {
-                        let result = self.delete(delete, admitted);
+                    .map_with(deleting, |reporter, delete| {
+                        let result = self.delete(delete);
                         reporter.item_finished(&result);
                         result
                     })
@@ -177,17 +169,13 @@ impl<B: Backend + Sync> Runner<B> {
         results
     }
 
-    // admission
+    // verification
 
     /// Decides, before any bootout runs, whether each delete of `runnable` may run:
     /// those this process deletes and those whose jobs it only boots out. A delete that
     /// may not run takes its bootouts with it, so no job is unloaded for a plist that
     /// stays.
-    fn admit_all<'a>(
-        &self,
-        runnable: &Runnable<'a>,
-        processes: &Result<ProcessTable, process::Error>,
-    ) -> Admissions<'a> {
+    fn verify_all<'a>(&self, runnable: &Runnable<'a>) -> Verdicts<'a> {
         let entries: BTreeMap<&'a Path, &'a Delete> = runnable
             .holders()
             .iter()
@@ -196,38 +184,34 @@ impl<B: Backend + Sync> Runner<B> {
             .collect();
         entries
             .into_iter()
-            .map(|(path, delete)| (path, self.admit(processes, delete)))
+            .map(|(path, delete)| (path, self.verify(delete)))
             .collect()
     }
 
-    /// Admits one delete, or says why it must not run: a process executes from it or the
-    /// process table could not be read, it is stale, or the gate refuses it as whoever
-    /// deletes it.
-    fn admit(
-        &self,
-        processes: &Result<ProcessTable, process::Error>,
-        delete: &Delete,
-    ) -> Result<Admitted, Refusal> {
-        if let Some(refusal) = running_process(processes, delete) {
-            return Err(refusal);
-        }
+    /// Says why one delete must not run: it is stale, or the context refuses it, such as
+    /// for a process running from it, for the running processes being unknown, or for a
+    /// path outside the roots. `Ok` when it may run. A delete this process only boots a
+    /// job out for, the user's in the elevated child, is checked as the user's process
+    /// will check it.
+    fn verify(&self, delete: &Delete) -> Result<(), Refusal> {
         if let Some(reason) = self.staleness(delete) {
             return Err(Refusal::Skipped(SkipReason::Stale, reason));
         }
 
-        let admitted = match delete.run_as {
-            RunAs::User => self.gate.admit_delete(&delete.path),
-            RunAs::Sudo => self.gate.admit_delete_as_root(&delete.path),
+        let op = Cleanup::delete(&delete.path);
+        let verified = match delete.run_as == self.acting() {
+            true => op.verify(&self.ctx),
+            false => op.verify_as_user(&self.ctx),
         };
-        admitted.map_err(gate_refusal)
+        verified.map_err(refusal_of)
     }
 
     /// Why the entry no longer describes what is on disk: its path is missing, a folder
     /// above it is missing or no longer a folder, or its `lstat` type changed since the
-    /// scan. `None` when it still does, or when `lstat` fails otherwise and the gate's
-    /// admission reports it.
+    /// scan. `None` when it still does, or when `lstat` fails otherwise and the
+    /// context's own checks report it.
     fn staleness(&self, delete: &Delete) -> Option<String> {
-        match self.gate.lstat(&delete.path) {
+        match Cleanup::lstat(&delete.path).perform(&self.ctx) {
             Ok(meta) if delete.kind.matches(meta.kind) => None,
             Ok(meta) => Some(format!(
                 "was a {} and is now a {}",
@@ -241,10 +225,11 @@ impl<B: Backend + Sync> Runner<B> {
 
     // deletes
 
-    fn delete(&self, delete: &Delete, admitted: Admitted) -> ItemResult {
-        let (outcome, reason) = match self.gate.delete(admitted) {
+    /// Deletes a verified entry; performing the delete checks it again.
+    fn delete(&self, delete: &Delete) -> ItemResult {
+        let (outcome, reason) = match Cleanup::delete(&delete.path).perform(&self.ctx) {
             Ok(()) => (Outcome::Done, String::new()),
-            Err(error) => gate_refusal(error).of_delete(),
+            Err(error) => refusal_of(error).of_delete(),
         };
         path_result(delete, outcome, reason)
     }
@@ -257,7 +242,7 @@ impl<B: Backend + Sync> Runner<B> {
         reporter.command_started(&argv);
 
         let mut window = OutputWindow::default();
-        let exit = self.gate.run_streaming(&argv, |line| {
+        let exit = self.ctx.run_streaming(&argv, |line| {
             window.push(line);
             reporter.command_output(&argv, &window);
         });
@@ -295,7 +280,7 @@ fn joined<T>(worker: ScopedJoinHandle<'_, T>) -> T {
 enum Refusal {
     /// The delete is skipped for this reason, and its bootouts with it.
     Skipped(SkipReason, String),
-    /// The gate refused the delete, which fails.
+    /// The context refused the delete, which fails.
     Refused(String),
 }
 
@@ -319,33 +304,22 @@ impl Refusal {
     }
 }
 
-/// Each delete of a part, by path, admitted or refused.
-type Admissions<'a> = BTreeMap<&'a Path, Result<Admitted, Refusal>>;
+/// Each delete of a part, by path, verified or refused.
+type Verdicts<'a> = BTreeMap<&'a Path, Result<(), Refusal>>;
 
-/// Why a delete, and its bootouts with it, must not run: a process executes from it
-/// (`docs/spec/safety.md#running-processes`), or the process table could not be read,
-/// so that cannot be ruled out. `None` when no process stops it.
-fn running_process(
-    processes: &Result<ProcessTable, process::Error>,
-    delete: &Delete,
-) -> Option<Refusal> {
-    match processes {
-        Err(error) => Some(Refusal::Skipped(
-            SkipReason::ProcessCheckFailed,
-            format!("cannot check for running processes: {error}"),
-        )),
-        Ok(table) => table.executing_from(&delete.path).map(|process| {
-            let reason = format!("process {} runs {}", process.pid, process.comm.display());
-            Refusal::Skipped(SkipReason::RunningProcess, reason)
-        }),
-    }
-}
-
-/// Why the gate refused a delete. An item root may not delete, because someone other
-/// than root could change a folder on its way, is skipped for the user to delete by
-/// hand; any other refusal fails the delete.
-fn gate_refusal(error: fs::Error) -> Refusal {
+/// Why the context refused a delete. One a process runs from, or one the running
+/// processes could not be checked for (`docs/spec/safety.md#running-processes`), is
+/// skipped with its bootouts; so is one root may not delete, because someone other
+/// than root could change a folder on its way, for the user to delete by hand. Any
+/// other refusal fails the delete.
+fn refusal_of(error: fs::Error) -> Refusal {
     match error {
+        error @ fs::Error::Running { .. } => {
+            Refusal::Skipped(SkipReason::RunningProcess, error.to_string())
+        }
+        error @ fs::Error::RunningUnknown { .. } => {
+            Refusal::Skipped(SkipReason::ProcessCheckFailed, error.to_string())
+        }
         error @ fs::Error::NotRootControlled { .. } => {
             let reason = format!("{error}; delete it manually");
             Refusal::Skipped(SkipReason::UnsafeToElevate, reason)
@@ -356,8 +330,8 @@ fn gate_refusal(error: fs::Error) -> Refusal {
 
 /// The results of the refused items: each refused delete, and each bootout of a
 /// refused delete whose jobs this process boots out.
-fn refused(runnable: &Runnable, admissions: &Admissions) -> Vec<ItemResult> {
-    let refusal = |delete: &Delete| match admissions.get(delete.path.as_path()) {
+fn refused(runnable: &Runnable, verdicts: &Verdicts) -> Vec<ItemResult> {
+    let refusal = |delete: &Delete| match verdicts.get(delete.path.as_path()) {
         Some(Err(refusal)) => Some(refusal.clone()),
         Some(Ok(_)) | None => None,
     };

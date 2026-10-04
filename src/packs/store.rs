@@ -14,7 +14,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::archive::{RULE_EXTENSION, RuleFile};
 use super::error::{Error, Stray};
 use super::source::Source;
-use crate::fs::{self, Backend, FileKind, Gate, Paths};
+use crate::fs::{self, Backend, FileKind, FsContext, FsOp, Paths, Rosie};
 use crate::rules::Name;
 
 const PACKS_FOLDER: &str = "packs";
@@ -40,7 +40,7 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
     seconds.to_string()
 }
 
-/// The context every pack action runs in: the gate, the home folder, and the packs
+/// What every pack action runs in: the FS context, the home folder, and the packs
 /// folder.
 ///
 /// # Copies beside a pack
@@ -114,7 +114,7 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
 /// `seed_config` settles the same way and, when no pack is installed, installs the
 /// default source from the one download it also reads the config from.
 pub struct Store<'g, B: Backend> {
-    gate: &'g Gate<B>,
+    ctx: &'g FsContext<B>,
     paths: Paths,
     dir: PathBuf,
 }
@@ -129,9 +129,9 @@ pub struct Installed {
 impl<'g, B: Backend> Store<'g, B> {
     /// `paths` holds the injected home folder, which a rule's `~` stands for;
     /// `data_dir` is rosie's injected data folder, `~/.local/share/rosie`.
-    pub fn new(gate: &'g Gate<B>, paths: &Paths, data_dir: &Path) -> Self {
+    pub fn new(ctx: &'g FsContext<B>, paths: &Paths, data_dir: &Path) -> Self {
         Store {
-            gate,
+            ctx,
             paths: paths.clone(),
             dir: data_dir.join(PACKS_FOLDER),
         }
@@ -142,12 +142,12 @@ impl<'g, B: Backend> Store<'g, B> {
     /// order.
     pub fn rule_files(&self, source: &Source) -> Result<Vec<RuleFile>, Error> {
         let pack = self.pack_dir(source);
-        let names = sorted(self.gate.read_dir(&pack)?);
+        let names = sorted(Rosie::read_dir(&pack).perform(self.ctx)?);
         names
             .into_iter()
             .filter(|name| Path::new(name).extension() == Some(OsStr::new(RULE_EXTENSION)))
             .map(|name| {
-                let contents = self.gate.read_own_file(&pack.join(&name))?;
+                let contents = Rosie::read(&pack.join(&name)).perform(self.ctx)?;
                 Ok(RuleFile::new(name, contents))
             })
             .collect()
@@ -155,8 +155,8 @@ impl<'g, B: Backend> Store<'g, B> {
 
     // layout, for the pack actions
 
-    pub(super) fn gate(&self) -> &Gate<B> {
-        self.gate
+    pub(super) fn ctx(&self) -> &FsContext<B> {
+        self.ctx
     }
 
     pub(super) fn paths(&self) -> &Paths {
@@ -214,7 +214,7 @@ impl<'g, B: Backend> Store<'g, B> {
 
     /// Whether anything is at `path`, without following a symlink there.
     pub(super) fn exists(&self, path: &Path) -> Result<bool, Error> {
-        match self.gate.lstat(path) {
+        match Rosie::lstat(path).perform(self.ctx) {
             Ok(_) => Ok(true),
             Err(fs::Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound => Ok(false),
             Err(error) => Err(error.into()),
@@ -252,7 +252,7 @@ impl<'g, B: Backend> Store<'g, B> {
     /// when the folder is missing. The folder is `lstat`ed, with no symlink anywhere on
     /// its path, before it is listed.
     fn entries(&self, dir: &Path) -> Result<Vec<(PathBuf, FileKind)>, Error> {
-        match self.gate.lstat_link_free(dir) {
+        match Rosie::lstat_link_free(dir).perform(self.ctx) {
             Ok(meta) if meta.kind == FileKind::Dir => {}
             Ok(meta) => {
                 return Err(Error::NotAFolder {
@@ -266,12 +266,12 @@ impl<'g, B: Backend> Store<'g, B> {
             Err(error) => return Err(error.into()),
         }
 
-        let names = sorted(self.gate.read_dir(dir)?);
+        let names = sorted(Rosie::read_dir(dir).perform(self.ctx)?);
         names
             .into_iter()
             .map(|name| {
                 let path = dir.join(name);
-                let meta = self.gate.lstat(&path)?;
+                let meta = Rosie::lstat(&path).perform(self.ctx)?;
                 Ok((path, meta.kind))
             })
             .collect()
@@ -279,7 +279,7 @@ impl<'g, B: Backend> Store<'g, B> {
 
     pub(super) fn installed_from(&self, source: Source) -> Result<Installed, Error> {
         let path = pulled_file(&self.pack_dir(&source));
-        let text = self.gate.read_own_file(&path)?;
+        let text = Rosie::read(&path).perform(self.ctx)?;
         let bad_pull_time = || Error::BadPullTime { path: path.clone() };
 
         let seconds = std::str::from_utf8(&text)
@@ -382,13 +382,12 @@ mod tests {
     fn listed(fake: &FakeBackend) -> Result<Vec<Source>, Error> {
         let bounds = Bounds {
             roots: Vec::new(),
-            config_dir: PathBuf::from("/Users/me/.config/rosie"),
-            data_dir: PathBuf::from(DATA),
+            paths: Paths::new(Path::new("/Users/me")).expect("absolute home"),
             user_uid: USER_UID,
         };
-        let gate = Gate::new(fake, bounds).expect("absolute bounds");
+        let ctx = FsContext::new(fake, bounds).expect("absolute bounds");
         let paths = Paths::new(Path::new("/Users/me")).expect("absolute paths");
-        Store::new(&gate, &paths, Path::new(DATA)).unsettled_sources()
+        Store::new(&ctx, &paths, Path::new(DATA)).unsettled_sources()
     }
 
     #[test]

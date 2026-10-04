@@ -15,7 +15,7 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
     quiet(&fake);
 
     let plain = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
@@ -23,7 +23,7 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
     )
     .expect("plain paths");
     let dotted = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &dotted_home(),
         AggressiveItems::Unticked,
@@ -42,14 +42,14 @@ fn a_dotted_home_plans_the_same_orphan_scan_as_the_plain_home() {
     fake.add_file(lib("Caches/com.gone.App/data"), "x");
 
     let plain = scan_orphans(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
     .expect("plain paths");
     let dotted = scan_orphans(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         &dotted_home(),
         AggressiveItems::Unticked,
         Mounts::Skip,
@@ -64,8 +64,8 @@ fn a_dotted_home_lists_the_same_picker_apps_as_the_plain_home() {
     let fake = FakeBackend::new();
     installed_suite(&fake);
 
-    let plain = picker_apps(&gate(&fake, &ALL_ROOTS), &paths()).expect("plain paths");
-    let dotted = picker_apps(&gate(&fake, &ALL_ROOTS), &dotted_home()).expect("dotted paths");
+    let plain = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths()).expect("plain paths");
+    let dotted = picker_apps(&ctx(&fake, &ALL_ROOTS), &dotted_home()).expect("dotted paths");
 
     assert_eq!(dotted, plain);
 }

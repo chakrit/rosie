@@ -235,7 +235,7 @@ fn a_failing_receipt_listing_fails_the_scan() {
     fake.respond(pkgs_argv(), failed("pkgutil: broken\n"));
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
@@ -299,13 +299,13 @@ fn login_items_and_system_extensions_are_report_only() {
 fn refuses_the_plan_while_the_app_is_running() {
     let fake = FakeBackend::new();
     bar_app(&fake);
-    running(
-        &fake,
-        "    1     0     0 /sbin/launchd\n  812     1   501 /Applications/Bar.app/Contents/MacOS/Bar\n",
-    );
+    fake.respond_running(&[
+        (1, "/sbin/launchd"),
+        (812, "/Applications/Bar.app/Contents/MacOS/Bar"),
+    ]);
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
@@ -313,7 +313,31 @@ fn refuses_the_plan_while_the_app_is_running() {
     );
 
     assert!(
-        matches!(result, Err(Error::Running { ref app, pid: 812 }) if app == Path::new(BAR)),
+        matches!(&result, Err(Error::Refused { app, source: fs::Error::Running { pid: 812, .. } })
+            if app == Path::new(BAR)),
+        "{result:?}"
+    );
+}
+
+/// `docs/spec/app.md`: an app that cannot be deleted keeps every file it left behind,
+/// such as `/System/Applications/Notes.app`, outside the roots.
+#[test]
+fn refuses_the_whole_plan_when_the_bundle_is_outside_the_roots() {
+    let fake = FakeBackend::new();
+    bar_app(&fake);
+    fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
+
+    let result = scan_app(
+        &ctx(&fake, &["/Users/me/Library"]),
+        Path::new(BAR),
+        &paths(),
+        AggressiveItems::Unticked,
+        Mounts::Skip,
+    );
+
+    assert!(
+        matches!(&result, Err(Error::Refused { app, source: fs::Error::OutsideRoots { .. } })
+            if app == Path::new(BAR)),
         "{result:?}"
     );
 }
@@ -322,13 +346,10 @@ fn refuses_the_plan_while_the_app_is_running() {
 fn a_process_from_a_sibling_app_does_not_block_the_plan() {
     let fake = FakeBackend::new();
     bar_app(&fake);
-    running(
-        &fake,
-        "  812     1   501 /Applications/Bar.app.old/Contents/MacOS/Bar\n",
-    );
+    fake.respond_running(&[(812, "/Applications/Bar.app.old/Contents/MacOS/Bar")]);
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
@@ -347,10 +368,7 @@ fn refuses_a_leftover_a_process_executes_from_and_plans_the_rest() {
     let support = lib("Application Support/com.foo.Bar");
     fake.add_sized_file(format!("{support}/Updater"), 4096);
     fake.add_file(lib("Caches/com.foo.Bar/cache.db"), "x");
-    running(
-        &fake,
-        &format!("    1     0     0 /sbin/launchd\n  900     1   501 {support}/Updater\n"),
-    );
+    fake.respond_running(&[(1, "/sbin/launchd"), (900, &format!("{support}/Updater"))]);
 
     let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Ticked);
 
@@ -368,7 +386,7 @@ fn refuses_a_leftover_a_process_executes_from_and_plans_the_rest() {
         panic!("one refused item expected: {:?}", scanned.refused);
     };
     assert_eq!(refused.path, Path::new(&support));
-    assert_eq!(refused.process.pid, 900);
+    assert_eq!(refused.pid, 900);
     assert_eq!(refused.rules, ["app/com.foo.Bar"]);
 }
 
@@ -379,7 +397,7 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
     quiet(&fake);
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new("/Users/me/code"),
         &paths(),
         AggressiveItems::Unticked,
@@ -390,18 +408,22 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
 }
 
 #[test]
-fn items_outside_the_roots_are_blocked() {
+fn leftovers_outside_the_roots_are_blocked() {
     let fake = FakeBackend::new();
     bar_app(&fake);
     fake.add_file("/Library/LaunchDaemons/com.foo.Bar.helper.plist", "x");
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let scanned = scanned_app(&fake, &["/Users/me/Library"], AggressiveItems::Unticked);
+    let scanned = scanned_app(
+        &fake,
+        &["/Users/me/Library", "/Applications"],
+        AggressiveItems::Unticked,
+    );
 
     assert_eq!(
         deletes(&scanned),
         [
-            (BAR.to_owned(), Status::Blocked),
+            (BAR.to_owned(), Status::Ticked),
             (
                 "/Library/LaunchDaemons/com.foo.Bar.helper.plist".to_owned(),
                 Status::Blocked
@@ -445,7 +467,7 @@ fn another_installed_copy_with_the_same_id_keeps_shared_leftovers_unticked() {
     receipts(&fake, "com.foo.Bar.pkg\n");
 
     let scanned = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(beta),
         &paths(),
         AggressiveItems::Unticked,
@@ -498,7 +520,7 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
         fake.fail_on(&denied, Op::ReadDir, ErrorKind::PermissionDenied);
 
         let result = scan_app(
-            &gate(&fake, &ALL_ROOTS),
+            &ctx(&fake, &ALL_ROOTS),
             Path::new(BAR),
             &paths(),
             AggressiveItems::Unticked,
@@ -620,7 +642,7 @@ fn a_package_id_a_plan_cannot_hold_fails_the_scan() {
     receipts(&fake, "com.foo.Bar.\0pkg\n");
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,

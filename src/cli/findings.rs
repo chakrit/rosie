@@ -49,8 +49,8 @@ fn refused_line(refused: &Refused) -> String {
         "skipped {} ({}): in use by process {} ({})",
         refused.path.display(),
         refused.size,
-        refused.process.pid,
-        refused.process.comm.display()
+        refused.pid,
+        refused.program.display()
     )
 }
 

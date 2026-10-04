@@ -1,9 +1,6 @@
 //! Builds a plan from what a scan found (`docs/spec/plan.md#plan-file`).
 //!
-//! - Path entries are keyed by path and list every rule that matched that path. Each
-//!   path is an [`IdlePath`], one the process table admitted: no plan this builder
-//!   makes holds an item a process executes from
-//!   (`docs/spec/safety.md#running-processes`).
+//! - Path entries are keyed by path and list every rule that matched that path.
 //! - Nested matches collapse into the outer one, which takes over their launch-job
 //!   bootouts and runs elevated when any of them would.
 //! - Tool rules with an identical argv dedupe into one entry.
@@ -18,7 +15,6 @@ use super::{
     Report, RunAs, Selection, Size, Status, Tool, check_path,
 };
 use crate::fs::Argv;
-use crate::process::IdlePath;
 
 /// Whether `--aggressive` was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -56,7 +52,7 @@ pub enum Reach {
 /// One rule matching one path during a scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathMatch {
-    pub path: IdlePath,
+    pub path: PathBuf,
     pub kind: ItemKind,
     pub size: Size,
     pub run_as: RunAs,
@@ -171,10 +167,10 @@ impl PlanBuilder {
     // entries
 
     fn add_delete(&mut self, found: PathMatch) -> Result<&mut Delete, Error> {
-        check_path(found.path.as_path())?;
+        check_path(&found.path)?;
 
         let status = self.path_status(found.reach, found.twin);
-        let path = found.path.into_path();
+        let path = found.path;
         let entry = self.deletes.entry(path.clone()).or_insert(Delete {
             path,
             kind: found.kind,
@@ -253,7 +249,7 @@ mod tests {
 
     fn found(path: &str, rule: &str, twin: Twin) -> PathMatch {
         PathMatch {
-            path: crate::plan::idle(path),
+            path: PathBuf::from(path),
             kind: ItemKind::Folder,
             size: Size::bytes(1000),
             run_as: RunAs::User,

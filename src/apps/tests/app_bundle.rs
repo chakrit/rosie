@@ -3,7 +3,7 @@
 use super::*;
 use crate::fs::fake::Call;
 use crate::fs::{CommandOutput, Exit};
-use crate::process::{self, ProcessTable};
+use crate::process;
 
 /// Bar.app whose `Info.plist` answers `plutil` with `id` and `name` for the two keys.
 fn bar_app_answering(fake: &FakeBackend, id: CommandOutput, name: CommandOutput) {
@@ -17,7 +17,7 @@ fn bar_app_answering(fake: &FakeBackend, id: CommandOutput, name: CommandOutput)
 
 fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
-        &gate(fake, &ALL_ROOTS),
+        &ctx(fake, &ALL_ROOTS),
         Path::new(app),
         &paths(),
         AggressiveItems::Unticked,
@@ -139,7 +139,7 @@ fn refuses_a_bundle_that_is_a_mounted_volume_before_reading_or_sizing_it() {
 fn a_system_command_that_cannot_be_run_fails_the_scan() {
     let fake = FakeBackend::new();
     install_app(&fake, BAR, "com.foo.Bar", Some("Bar"));
-    running(&fake, "    1     0     0 /sbin/launchd\n");
+    fake.respond_running(&[(1, "/sbin/launchd")]);
 
     let result = app_scan(&fake, BAR);
 
@@ -178,16 +178,17 @@ fn system_command_output_that_is_not_utf8_fails_the_scan() {
 }
 
 #[test]
-fn a_failing_process_listing_fails_the_scan() {
+fn unreadable_running_programs_refuse_the_app() {
     let fake = FakeBackend::new();
     install_app(&fake, BAR, "com.foo.Bar", Some("Bar"));
     receipts(&fake, "com.apple.pkg.Core\n");
-    fake.respond(ProcessTable::argv(), failed("ps: broken\n"));
+    fake.respond(fs::running_argv(), failed("lsof: broken\n"));
 
     let result = app_scan(&fake, BAR);
 
     assert!(
-        matches!(result, Err(Error::Process(process::Error::Failed { .. }))),
+        matches!(&result, Err(Error::Refused { source: fs::Error::RunningUnknown { reason }, .. })
+            if reason.contains("lsof: broken")),
         "{result:?}"
     );
 }

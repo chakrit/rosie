@@ -14,14 +14,21 @@ const EXE: &str = "/Users/me/.cargo/bin/rosie";
 
 // fixtures
 
-fn gate<'a>(fake: &'a FakeBackend, roots: &[&str]) -> Gate<&'a FakeBackend> {
-    let bounds = Bounds {
+fn bounds(roots: &[&str]) -> Bounds {
+    Bounds {
         roots: roots.iter().map(PathBuf::from).collect(),
-        config_dir: PathBuf::from("/Users/me/.config/rosie"),
-        data_dir: PathBuf::from("/Users/me/.local/share/rosie"),
+        paths: Paths::new(Path::new(HOME)).expect("absolute home"),
         user_uid: USER_UID,
-    };
-    Gate::new(fake, bounds).expect("absolute bounds")
+    }
+}
+
+fn ctx<'a>(fake: &'a FakeBackend, roots: &[&str]) -> FsContext<&'a FakeBackend> {
+    FsContext::new(fake, bounds(roots)).expect("absolute bounds")
+}
+
+/// A context acting as root, as the elevated child's.
+fn root_ctx<'a>(fake: &'a FakeBackend, roots: &[&str]) -> FsContext<&'a FakeBackend> {
+    FsContext::new_as_root(fake, bounds(roots)).expect("absolute bounds")
 }
 
 fn elevation() -> Elevation {
@@ -37,11 +44,6 @@ fn output(code: i32, stdout: &str, stderr: &str) -> CommandOutput {
         stdout: stdout.as_bytes().to_vec(),
         stderr: stderr.as_bytes().to_vec(),
     }
-}
-
-/// `ps` output with the given `pid ppid uid comm` rows.
-fn respond_ps(fake: &FakeBackend, rows: &str) {
-    fake.respond(ProcessTable::argv(), output(0, rows, ""));
 }
 
 fn plan(entries: &str) -> Plan {
@@ -81,7 +83,7 @@ impl Reporter for Recorder {
 
 fn run(fake: &FakeBackend, roots: &[&str], plan: &Plan) -> (RunStats, Recorder) {
     let mut recorder = Recorder::default();
-    let stats = Runner::new(gate(fake, roots)).run(plan, &elevation(), &mut recorder);
+    let stats = Runner::new(ctx(fake, roots)).run(plan, &elevation(), &mut recorder);
     (stats, recorder)
 }
 
@@ -125,7 +127,6 @@ fn deletes_only_ticked_entries() {
     let fake = FakeBackend::new();
     fake.add_file("/w/a/node_modules/x.js", "x");
     fake.add_file("/w/b/node_modules/x.js", "x");
-    respond_ps(&fake, "");
     let plan = plan(
         &(folder("/w/a/node_modules", 10, "ticked") + &folder("/w/b/node_modules", 20, "unticked")),
     );
@@ -142,7 +143,6 @@ fn deletes_only_ticked_entries() {
 fn skips_a_missing_entry_as_stale() {
     let fake = FakeBackend::new();
     fake.add_dir("/w");
-    respond_ps(&fake, "");
     let plan = plan(&folder("/w/gone", 30, "ticked"));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
@@ -158,7 +158,6 @@ fn skips_a_missing_entry_as_stale() {
 fn skips_an_entry_below_a_folder_that_became_a_file_as_stale() {
     let fake = FakeBackend::new();
     fake.add_file("/w/a", "was a folder");
-    respond_ps(&fake, "");
     let plan = plan(&folder("/w/a/target", 30, "ticked"));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
@@ -175,7 +174,6 @@ fn skips_an_entry_below_a_folder_that_became_a_file_as_stale() {
 fn skips_an_entry_whose_type_changed_as_stale() {
     let fake = FakeBackend::new();
     fake.add_file("/w/target", "now a file");
-    respond_ps(&fake, "");
     let plan = plan(&folder("/w/target", 40, "ticked"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
@@ -188,7 +186,7 @@ fn skips_an_entry_whose_type_changed_as_stale() {
 fn refuses_an_item_a_process_executes_from() {
     let fake = FakeBackend::new();
     fake.add_file("/w/app/target/debug/server", "bin");
-    respond_ps(&fake, "  77  1  501 /w/app/target/debug/server\n");
+    fake.respond_running(&[(77, "/w/app/target/debug/server")]);
     let plan = plan(&folder("/w/app/target", 50, "ticked"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
@@ -197,9 +195,9 @@ fn refuses_an_item_a_process_executes_from() {
     assert!(fake.exists("/w/app/target/debug/server"));
 }
 
-/// A bootout can stop the very process that runs from the item, so a `ps` read after it
-/// would no longer see that process: the table is read before any bootout, and a
-/// refused delete keeps its job loaded.
+/// A bootout can stop the very process that runs from the item, so running programs
+/// read after it would no longer show that process: they are read before any bootout,
+/// and a refused delete keeps its job loaded.
 #[test]
 fn refuses_a_delete_and_skips_its_bootout_when_a_process_runs_from_it() {
     let fake = FakeBackend::new();
@@ -207,7 +205,7 @@ fn refuses_a_delete_and_skips_its_bootout_when_a_process_runs_from_it() {
     let plist = format!("{support}/com.x.agent.plist");
     fake.add_file(&plist, "<plist/>");
     fake.add_file(format!("{support}/agent"), "bin");
-    respond_ps(&fake, &format!("  77  1  501 {support}/agent\n"));
+    fake.respond_running(&[(77, &format!("{support}/agent"))]);
     let bootout = Argv::new("/bin/launchctl")
         .arg("bootout")
         .arg("gui/501")
@@ -232,11 +230,12 @@ fn refuses_a_delete_and_skips_its_bootout_when_a_process_runs_from_it() {
     assert_eq!(stats.running_process, tally(2, 1, 1));
 }
 
-/// Without a readable process table no delete can be checked, so each one is withheld
+/// Without the running programs no delete can be checked, so each one is withheld
 /// together with its bootouts, and the run fails.
 #[test]
-fn withholds_every_delete_and_its_bootout_when_the_process_table_cannot_be_read() {
+fn withholds_every_delete_and_its_bootout_when_the_running_programs_cannot_be_read() {
     let fake = FakeBackend::new();
+    fake.respond(crate::fs::running_argv(), output(1, "", "lsof: broken"));
     let support = "/Users/me/Library/Application Support/X";
     let plist = format!("{support}/com.x.agent.plist");
     fake.add_file(&plist, "<plist/>");
@@ -267,7 +266,6 @@ fn reports_a_failed_item_and_goes_on_with_the_rest() {
     fake.add_file("/w/a/target/busy", "x");
     fake.add_file("/w/b/target/free", "x");
     fake.fail_on("/w/a/target/busy", Op::RemoveFile, ErrorKind::ResourceBusy);
-    respond_ps(&fake, "");
     let plan = plan(&(folder("/w/a/target", 1, "ticked") + &folder("/w/b/target", 2, "ticked")));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
@@ -287,7 +285,6 @@ fn reports_a_failed_item_and_goes_on_with_the_rest() {
 fn checks_roots_against_the_config_never_the_plan() {
     let fake = FakeBackend::new();
     fake.add_file("/Users/me/Documents/thesis.tex", "x");
-    respond_ps(&fake, "");
     let plan = plan(&folder("/Users/me/Documents", 5, "ticked"));
 
     let (stats, _) = run(&fake, &["/Users/me/code"], &plan);
@@ -301,7 +298,6 @@ fn removes_a_symlink_inside_a_target_as_a_link() {
     let fake = FakeBackend::new();
     fake.add_file("/src/lib/keep.js", "x");
     fake.add_symlink("/w/app/node_modules/lib", "/src/lib");
-    respond_ps(&fake, "");
     let plan = plan(&folder("/w/app/node_modules", 1, "ticked"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
@@ -317,7 +313,6 @@ fn makes_user_owned_read_only_folders_writable_as_it_goes() {
     fake.add_file("/Users/me/go/pkg/mod/x@v1/sub/go.mod", "module x");
     fake.chmod("/Users/me/go/pkg/mod/x@v1/sub", 0o555);
     fake.chmod("/Users/me/go/pkg/mod/x@v1", 0o555);
-    respond_ps(&fake, "");
     let plan = plan(&folder("/Users/me/go/pkg/mod/x@v1", 1, "ticked"));
 
     let (stats, _) = run(&fake, &["/Users/me/go/pkg/mod"], &plan);
@@ -331,7 +326,6 @@ fn refuses_a_dataless_placeholder_without_opening_it() {
     let fake = FakeBackend::new();
     fake.add_file("/w/docs/cloud/paper.pdf", "x");
     fake.make_dataless("/w/docs/cloud");
-    respond_ps(&fake, "");
     let plan = plan(&folder("/w/docs", 1, "ticked"));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
@@ -358,7 +352,6 @@ fn deletes_a_large_tree_completely() {
             fake.add_file(format!("/w/big/d{dir}/f{file}"), "x");
         }
     }
-    respond_ps(&fake, "");
     let plan = plan(&folder("/w/big", 1, "ticked"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
@@ -373,7 +366,6 @@ fn deletes_a_large_tree_completely() {
 #[test]
 fn runs_tool_argv_directly_keeping_the_last_three_lines() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     let docker = Argv::new("docker")
         .arg("system")
         .arg("prune")
@@ -400,7 +392,6 @@ fn runs_tool_argv_directly_keeping_the_last_three_lines() {
 #[test]
 fn a_tool_absent_from_the_machine_fails_normally() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     let gradle = Argv::new("gradle").arg("--stop");
     let plan =
         plan("[[tool]]\nrules = [\"r\"]\ncmd = [\"gradle\", \"--stop\"]\nstatus = \"ticked\"\n");
@@ -419,7 +410,6 @@ fn a_tool_absent_from_the_machine_fails_normally() {
 #[test]
 fn a_tool_exiting_non_zero_fails() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     fake.respond(Argv::new("brew").arg("cleanup"), output(1, "", "locked\n"));
     let plan =
         plan("[[tool]]\nrules = [\"r\"]\ncmd = [\"brew\", \"cleanup\"]\nstatus = \"ticked\"\n");
@@ -435,7 +425,6 @@ fn boots_a_job_out_before_deleting_its_plist() {
     let fake = FakeBackend::new();
     let plist = "/Users/me/Library/LaunchAgents/com.x.plist";
     fake.add_file(plist, "<plist/>");
-    respond_ps(&fake, "");
     let bootout = Argv::new("/bin/launchctl")
         .arg("bootout")
         .arg("gui/501")
@@ -464,7 +453,6 @@ fn does_the_users_items_before_elevating_once_for_the_rest() {
     fake.add_file("/Library/Caches/root/x", "x");
     fake.chown("/Library/Caches/root", ROOT_UID);
     fake.respond_to_sudo(output(1, "", ""));
-    respond_ps(&fake, "");
     let plan = plan(
         &(folder("/w/mine", 1, "ticked")
             + &sudo_folder("/Library/Caches/root", 2)
@@ -497,7 +485,6 @@ fn does_the_users_items_before_elevating_once_for_the_rest() {
 fn does_not_elevate_for_sudo_items_that_are_not_ticked() {
     let fake = FakeBackend::new();
     fake.respond_to_sudo(output(1, "", ""));
-    respond_ps(&fake, "");
     let blocked = format!("{}sudo = true\n", folder("/Library/Caches/b", 2, "blocked"));
     let plan = plan(
         &(format!(
@@ -517,7 +504,6 @@ fn pipes_the_sudo_items_behind_a_header_matching_the_argument() {
     let fake = FakeBackend::new();
     fake.add_file("/w/mine/x", "x");
     fake.respond_to_sudo(output(1, "", ""));
-    respond_ps(&fake, "");
     let plan = plan(&(folder("/w/mine", 1, "ticked") + &sudo_folder("/Library/Caches/root", 2)));
 
     run(&fake, &["/w"], &plan);
@@ -539,7 +525,6 @@ fn pipes_the_sudo_items_behind_a_header_matching_the_argument() {
 #[test]
 fn skips_the_sudo_items_as_sudo_refused_when_sudo_fails() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     fake.respond_to_sudo(output(1, "", "Sorry, try again.\n"));
     let plan = plan(
         &(sudo_folder("/Library/Caches/a", 5)
@@ -561,7 +546,6 @@ fn skips_the_sudo_items_as_sudo_refused_when_sudo_fails() {
 #[test]
 fn skips_the_sudo_items_when_sudo_cannot_start() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     let plan = plan(&sudo_folder("/Library/Caches/a", 5));
 
     let (stats, _) = run(&fake, &["/Library/Caches"], &plan);
@@ -572,7 +556,6 @@ fn skips_the_sudo_items_when_sudo_cannot_start() {
 #[test]
 fn counts_the_elevated_childs_outcomes_by_item() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     let report = "rosie-outcomes 1\0\
                   outcome = \"failed\"\npath = \"/Library/Caches/b\"\n\0\
                   outcome = \"done\"\npath = \"/Library/Caches/a\"\n\0";
@@ -593,7 +576,6 @@ fn counts_the_elevated_childs_outcomes_by_item() {
 #[test]
 fn keeps_what_a_crashed_child_reported_and_refuses_only_the_rest() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     let cut_short = "rosie-outcomes 1\0\
                      outcome = \"done\"\npath = \"/Library/Caches/a\"\n\0\
                      outcome = \"done\"\npa";
@@ -623,7 +605,6 @@ const HELPER_PLIST: &str = "/Users/me/Library/Application Support/X/com.x.helper
 fn user_folder_with_system_plist() -> (FakeBackend, Plan) {
     let fake = FakeBackend::new();
     fake.add_file(HELPER_PLIST, "<plist/>");
-    respond_ps(&fake, "");
     let plan = plan(&format!(
         "{}[[delete.bootout]]\nplist = \"{HELPER_PLIST}\"\ndomain = \"system\"\n",
         folder(HELPER, 1, "ticked")
@@ -703,7 +684,6 @@ fn keeps_a_user_folder_whose_system_bootout_never_ran() {
 #[test]
 fn refuses_a_report_naming_items_it_was_not_sent() {
     let fake = FakeBackend::new();
-    respond_ps(&fake, "");
     let report = "rosie-outcomes 1\0\
                   outcome = \"done\"\npath = \"/Library/Caches/a\"\n\0\
                   outcome = \"done\"\npath = \"/etc\"\n\0";
@@ -727,7 +707,7 @@ fn keeps_a_user_folder_when_the_elevated_child_never_launches() {
 
     let mut recorder = Recorder::default();
     let stats =
-        Runner::new(gate(&fake, &["/Users/me/Library"])).run(&plan, &never_launches, &mut recorder);
+        Runner::new(ctx(&fake, &["/Users/me/Library"])).run(&plan, &never_launches, &mut recorder);
 
     assert!(!fake.calls().iter().any(|c| matches!(c, Call::Sudo(..))));
     assert!(fake.exists(HELPER_PLIST));
@@ -739,7 +719,7 @@ fn keeps_a_user_folder_when_the_elevated_child_never_launches() {
     assert_eq!(stats.sudo_refused, tally(2, 1, 1));
 }
 
-/// A child that could not read its process table withholds the bootout, and says so:
+/// A child that could not read the running programs withholds the bootout, and says so:
 /// the user's folder keeps its plist while the job may still be loaded, and the run
 /// fails.
 #[test]

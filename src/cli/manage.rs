@@ -189,7 +189,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         let dir = self.env.paths.config_dir();
 
-        keys::set(&self.own, &dir, &self.env.paths, file, flag, &value)?;
+        keys::set(&self.own, &dir, file, flag, &value)?;
         self.say(&format!("{} = {value}", flag.name()))?;
         Ok(ExitStatus::Success)
     }
@@ -198,7 +198,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let flag = self.walk_flag(key, "rosie config unset <key>")?;
         let dir = self.env.paths.config_dir();
 
-        let unset = keys::unset(&self.own, &dir, &self.env.paths, file, flag)?;
+        let unset = keys::unset(&self.own, &dir, file, flag)?;
         let default = keys::get(Key::Walk(flag), unset.config());
         self.say(&format!("{} = {default} (default)", flag.name()))?;
         Ok(ExitStatus::Success)

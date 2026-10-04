@@ -12,9 +12,11 @@ use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
 use super::matching::{claimed_by_other, claims_by_id, claims_by_name};
 use super::search::{Candidate, Search};
-use crate::fs::{Backend, FileKind, Gate, Paths, SystemArgv, SystemTool};
+use crate::fs::{
+    Backend, Cleanup, FileKind, FsContext, FsOp, Paths, SystemArgv, SystemTool, UserInput,
+};
 use crate::plan::{AggressiveItems, Report, Twin};
-use crate::process::{self, ProcessTable};
+use crate::process;
 use crate::scan::{Entry, Mounts, Scan};
 
 /// Scans for `app` and its leftovers in the user's home and the system folders.
@@ -22,16 +24,19 @@ use crate::scan::{Entry, Mounts, Scan};
 /// The app argument is a user-typed path: a symlink or misspelling in it is refused, and
 /// so is a bundle that is a dataless placeholder, which rosie does not open, or the root
 /// of a mounted volume, since rosie never plans a mount point, which would plan the
-/// whole volume. The plan is refused while any process executes from the bundle, and a
-/// leftover a process executes from is refused. An installed app rosie cannot identify
-/// is reported, since leftovers the two apps share may be ticked.
+/// whole volume. Before any leftover is listed, the bundle passes its own delete checks:
+/// any refusal, such as a process running from it, a bundle outside the roots, or a
+/// mount point, refuses the whole operation, naming the reason, so nothing of an app
+/// that cannot be deleted is cleaned (`docs/spec/app.md`). A leftover a process runs
+/// from is refused alone. An installed app rosie cannot identify is reported, since
+/// leftovers the two apps share may be ticked.
 ///
 /// The app itself may have no bundle-ID key: it is the app the user asked to remove, not
 /// one rosie must first identify among others, so this is not refused. Its own bundle is
 /// still ticked and its `CFBundleName` still matches leftovers by name (aggressively,
 /// like any name-only match); it simply has no bundle ID to match leftovers by.
 pub fn scan_app<B>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     app: &Path,
     paths: &Paths,
     aggressive: AggressiveItems,
@@ -40,8 +45,8 @@ pub fn scan_app<B>(
 where
     B: Backend + Sync,
 {
-    let path = paths.resolve(gate, app)?;
-    let entry = Entry::lstat(gate, &path)?;
+    let path = UserInput::path(app).perform(ctx)?;
+    let entry = Entry::lstat(ctx, &path)?;
     let name = path
         .file_name()
         .unwrap_or_default()
@@ -54,10 +59,14 @@ where
     let Some(itself) = itself else {
         return Err(Error::NotAnApp { path });
     };
-    let bundle = read_bundle(gate, &path)?;
-    let processes = ProcessTable::query(gate)?;
-    refuse_running(&processes, &bundle)?;
-    let installed = installed_apps(gate, paths)?;
+    let bundle = read_bundle(ctx, &path)?;
+    Cleanup::delete(&bundle.path)
+        .verify(ctx)
+        .map_err(|source| Error::Refused {
+            app: bundle.path.clone(),
+            source,
+        })?;
+    let installed = installed_apps(ctx, paths)?;
     let others: Vec<BundleId> = installed
         .apps
         .into_iter()
@@ -69,7 +78,7 @@ where
         None => "app".to_owned(),
     };
 
-    let mut search = Search::new(gate, paths, mounts, &processes, aggressive);
+    let mut search = Search::new(ctx, paths, mounts, aggressive);
     search.add(itself, Holds::Plain, &rule, Twin::Normal)?;
 
     for location in leftover_locations(paths) {
@@ -91,10 +100,10 @@ where
         }
     }
 
-    for (package, twin) in receipts(gate, &bundle, &others)? {
+    for (package, twin) in receipts(ctx, &bundle, &others)? {
         search.add_receipt(&package, twin)?;
     }
-    for report in reports(gate, &bundle)? {
+    for report in reports(ctx, &bundle)? {
         search.add_report(report);
     }
     for unidentified in &installed.unidentified {
@@ -117,18 +126,6 @@ fn id_match_twin(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -
     }
 }
 
-/// The whole plan is refused while the app itself runs (`docs/spec/app.md`); a leftover
-/// a process runs from is refused alone, as in every mode.
-fn refuse_running(processes: &ProcessTable, bundle: &Bundle) -> Result<(), Error> {
-    match processes.executing_from(&bundle.path) {
-        Some(process) => Err(Error::Running {
-            app: bundle.path.clone(),
-            pid: process.pid,
-        }),
-        None => Ok(()),
-    }
-}
-
 // receipts
 
 pub(super) fn pkgs_argv() -> SystemArgv {
@@ -138,14 +135,14 @@ pub(super) fn pkgs_argv() -> SystemArgv {
 /// The installed package receipts whose IDs are bundle-ID matches of the app, each with
 /// the twin [`id_match_twin`] gives it. An app with no bundle ID matches none.
 fn receipts<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     bundle: &Bundle,
     others: &[BundleId],
 ) -> Result<Vec<(String, Twin)>, Error> {
     let Some(id) = &bundle.id else {
         return Ok(Vec::new());
     };
-    let listed = process::run_tool_text(gate, &pkgs_argv())?;
+    let listed = process::run_tool_text(ctx, &pkgs_argv())?;
     let matching = listed
         .lines()
         .filter(|package| claims_by_id(id, package, Holds::Plain))
@@ -202,10 +199,10 @@ impl Manual {
 }
 
 /// Login items and system extensions the bundle ships, as report-only entries.
-fn reports<B: Backend>(gate: &Gate<B>, bundle: &Bundle) -> Result<Vec<Report>, Error> {
+fn reports<B: Backend>(ctx: &FsContext<B>, bundle: &Bundle) -> Result<Vec<Report>, Error> {
     let mut found = Vec::new();
     for manual in Manual::ALL {
-        let names = match list_folder(gate, &bundle.path.join(manual.folder()))? {
+        let names = match list_folder(ctx, &bundle.path.join(manual.folder()))? {
             Listing::Entries(names) => names,
             Listing::NoFolder => continue,
             Listing::Denied(error) => return Err(error.into()),

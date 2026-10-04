@@ -6,7 +6,7 @@
 //! check can alter another's, the candidate folder as `path`, and the read-only API
 //! below. Nothing in it can reach `os`, `io`, `require`, `load`, `debug`, metatables,
 //! or the random generator's seed, and no global one check sets is seen by the next.
-//! The API borrows the gate through `Lua::scope`, so every read goes through it and
+//! The API borrows the context through `Lua::scope`, so every read goes through it and
 //! refuses symlinks.
 
 use std::cell::RefCell;
@@ -22,7 +22,7 @@ use super::error::Error;
 use super::glob::Glob;
 use super::name::RuleId;
 use super::rule::LuaCode;
-use crate::fs::{self, Backend, FileKind, Gate, resolve_dots};
+use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, resolve_dots};
 
 /// Standard functions a check may call: pure, with no access to code loading,
 /// metatables, the garbage collector, or output.
@@ -133,14 +133,14 @@ impl LuaSandbox {
     /// error is returned against the rule, and the candidate does not match.
     pub fn accepts<B: Backend>(
         &self,
-        gate: &Gate<B>,
+        ctx: &FsContext<B>,
         rule: &RuleId,
         code: &LuaCode,
         candidate: &Path,
     ) -> Result<bool, Error> {
         let result = self.function(rule, code).and_then(|function| {
             self.lua.scope(|scope| {
-                let env = self.environment(scope, gate, candidate)?;
+                let env = self.environment(scope, ctx, candidate)?;
                 if !function.set_environment(env)? {
                     return Err(mlua::Error::runtime("the chunk takes no environment"));
                 }
@@ -183,7 +183,7 @@ impl LuaSandbox {
     fn environment<'scope, B: Backend>(
         &self,
         scope: &'scope Scope<'scope, '_>,
-        gate: &'scope Gate<B>,
+        ctx: &'scope FsContext<B>,
         candidate: &Path,
     ) -> mlua::Result<Table> {
         let lua = &self.lua;
@@ -199,9 +199,9 @@ impl LuaSandbox {
         }
         env.raw_set("path", path_string(lua, candidate)?)?;
 
-        let exists = scope.create_function(|_, path: LuaString| exists(gate, &lua_path(&path)))?;
+        let exists = scope.create_function(|_, path: LuaString| exists(ctx, &lua_path(&path)))?;
         let glob = scope.create_function(|lua, pattern: LuaString| {
-            let found = glob(gate, &lua_path(&pattern))?;
+            let found = glob(ctx, &lua_path(&pattern))?;
             let strings = found
                 .iter()
                 .map(|path| path_string(lua, path))
@@ -209,13 +209,13 @@ impl LuaSandbox {
             lua.create_sequence_from(strings)
         })?;
         let read_json = scope.create_function(|lua, path: LuaString| {
-            let bytes = read(gate, &lua_path(&path))?;
+            let bytes = read(ctx, &lua_path(&path))?;
             let value: serde_json::Value =
                 serde_json::from_slice(&bytes).map_err(mlua::Error::runtime)?;
             json_value(lua, value)
         })?;
         let read_toml = scope.create_function(|lua, path: LuaString| {
-            let bytes = read(gate, &lua_path(&path))?;
+            let bytes = read(ctx, &lua_path(&path))?;
             let table: toml::Table = toml::from_slice(&bytes).map_err(mlua::Error::runtime)?;
             toml_value(lua, toml::Value::Table(table))
         })?;
@@ -251,8 +251,8 @@ fn error_line(error: &mlua::Error) -> String {
 // the API
 
 /// Whether a path exists; a path through or at a symlink is an error.
-fn exists<B: Backend>(gate: &Gate<B>, path: &Path) -> mlua::Result<bool> {
-    match gate.lstat_link_free(path) {
+fn exists<B: Backend>(ctx: &FsContext<B>, path: &Path) -> mlua::Result<bool> {
+    match Cleanup::lstat_link_free(path).perform(ctx) {
         Ok(_) => Ok(true),
         Err(error) if error.has_vanished() => Ok(false),
         Err(error) => Err(mlua::Error::runtime(error)),
@@ -261,7 +261,7 @@ fn exists<B: Backend>(gate: &Gate<B>, path: &Path) -> mlua::Result<bool> {
 
 /// Expands an absolute pattern whose components may hold `*` and `?`, sorted. Symlinks
 /// are never matched or descended.
-fn glob<B: Backend>(gate: &Gate<B>, pattern: &Path) -> mlua::Result<Vec<PathBuf>> {
+fn glob<B: Backend>(ctx: &FsContext<B>, pattern: &Path) -> mlua::Result<Vec<PathBuf>> {
     let pattern = resolve_dots(pattern).map_err(mlua::Error::runtime)?;
     let parts = pattern
         .components()
@@ -278,7 +278,7 @@ fn glob<B: Backend>(gate: &Gate<B>, pattern: &Path) -> mlua::Result<Vec<PathBuf>
     let base: PathBuf = std::iter::once(OsStr::new("/"))
         .chain(parts[..literal_len].iter().filter_map(Part::literal))
         .collect();
-    let base_kind = match gate.lstat_link_free(&base) {
+    let base_kind = match Cleanup::lstat_link_free(&base).perform(ctx) {
         Ok(meta) => meta.kind,
         Err(error) if error.has_vanished() => return Ok(Vec::new()),
         Err(error) => return Err(mlua::Error::runtime(error)),
@@ -291,7 +291,7 @@ fn glob<B: Backend>(gate: &Gate<B>, pattern: &Path) -> mlua::Result<Vec<PathBuf>
             .filter(|&(_, kind)| kind == FileKind::Dir)
             .map(|(folder, _)| folder);
         found = folders
-            .map(|folder| children_matching(gate, &folder, part))
+            .map(|folder| children_matching(ctx, &folder, part))
             .collect::<mlua::Result<Vec<_>>>()?
             .concat();
     }
@@ -335,14 +335,16 @@ impl<'a> Part<'a> {
 /// The entries of a link-free folder that one pattern component names, without
 /// symlinks.
 fn children_matching<B: Backend>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     folder: &Path,
     part: &Part,
 ) -> mlua::Result<Vec<(PathBuf, FileKind)>> {
     let candidates = match part {
         Part::Literal(name) => vec![folder.join(name)],
         Part::Wildcard(glob) => {
-            let listing = gate.read_dir(folder).map_err(mlua::Error::runtime)?;
+            let listing = Cleanup::read_dir(folder)
+                .perform(ctx)
+                .map_err(mlua::Error::runtime)?;
             listing
                 .into_iter()
                 .filter(|entry| entry.to_str().is_some_and(|entry| glob.matches(entry)))
@@ -353,7 +355,7 @@ fn children_matching<B: Backend>(
 
     let mut children = Vec::new();
     for child in candidates {
-        match gate.lstat(&child) {
+        match Cleanup::lstat(&child).perform(ctx) {
             Ok(meta) if meta.kind == FileKind::Symlink => {}
             Ok(meta) => children.push((child, meta.kind)),
             Err(error) if error.has_vanished() => {}
@@ -363,8 +365,10 @@ fn children_matching<B: Backend>(
     Ok(children)
 }
 
-fn read<B: Backend>(gate: &Gate<B>, path: &Path) -> mlua::Result<Vec<u8>> {
-    gate.read_file(path).map_err(mlua::Error::runtime)
+fn read<B: Backend>(ctx: &FsContext<B>, path: &Path) -> mlua::Result<Vec<u8>> {
+    Cleanup::read_file(path)
+        .perform(ctx)
+        .map_err(mlua::Error::runtime)
 }
 
 // values
@@ -449,22 +453,21 @@ fn toml_value(lua: &Lua, value: toml::Value) -> mlua::Result<Value> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::Bounds;
     use crate::fs::Op;
     use crate::fs::fake::{FakeBackend, USER_UID};
+    use crate::fs::{Bounds, Paths};
     use crate::rules::name::Name;
     use std::io::ErrorKind;
 
     const APP: &str = "/Users/me/code/app/build";
 
-    fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
+    fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
             roots: vec![PathBuf::from("/Users/me/code")],
-            config_dir: PathBuf::from("/Users/me/.config/rosie"),
-            data_dir: PathBuf::from("/Users/me/.local/share/rosie"),
+            paths: Paths::new(Path::new("/Users/me")).expect("absolute home"),
             user_uid: USER_UID,
         };
-        Gate::new(fake, bounds).expect("absolute bounds")
+        FsContext::new(fake, bounds).expect("absolute bounds")
     }
 
     fn rule() -> RuleId {
@@ -476,7 +479,7 @@ mod tests {
 
     fn run(fake: &FakeBackend, code: LuaCode) -> Result<bool, Error> {
         let sandbox = LuaSandbox::new().expect("lua starts");
-        sandbox.accepts(&gate(fake), &rule(), &code, Path::new(APP))
+        sandbox.accepts(&ctx(fake), &rule(), &code, Path::new(APP))
     }
 
     fn expr(fake: &FakeBackend, expr: &str) -> Result<bool, Error> {
@@ -842,14 +845,9 @@ mod tests {
     fn keeps_no_state_between_checks() {
         let fake = fixture();
         let sandbox = LuaSandbox::new().expect("lua starts");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
         let check = |code: &str| {
-            sandbox.accepts(
-                &gate,
-                &rule(),
-                &LuaCode::Script(code.into()),
-                Path::new(APP),
-            )
+            sandbox.accepts(&ctx, &rule(), &LuaCode::Script(code.into()), Path::new(APP))
         };
 
         check("leaked = true; string.upper = nil; return true").expect("runs");
@@ -861,9 +859,9 @@ mod tests {
     fn recompiles_when_a_rules_code_changes_under_the_same_id() {
         let fake = fixture();
         let sandbox = LuaSandbox::new().expect("lua starts");
-        let gate = gate(&fake);
+        let ctx = ctx(&fake);
         let check = |code: &str| {
-            sandbox.accepts(&gate, &rule(), &LuaCode::Expr(code.into()), Path::new(APP))
+            sandbox.accepts(&ctx, &rule(), &LuaCode::Expr(code.into()), Path::new(APP))
         };
 
         assert!(!check("false").expect("runs"));

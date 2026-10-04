@@ -1,7 +1,7 @@
 //! The `Backend` trait: the raw primitives the FS interaction layer is built on.
 //!
 //! A backend performs each primitive exactly as asked. It knows nothing of roots, symlink
-//! bans, or rosie's own folders; those live in [`Gate`](super::Gate), the only thing the
+//! bans, or rosie's own folders; those live in [`FsContext`](super::FsContext), the only thing the
 //! rest of rosie receives. See `docs/spec/safety.md#fs-interaction-layer`.
 
 use std::ffi::{OsStr, OsString};
@@ -220,6 +220,7 @@ pub struct SystemTool(&'static str);
 impl SystemTool {
     pub const ID: SystemTool = SystemTool::at("/usr/bin/id");
     pub const LAUNCHCTL: SystemTool = SystemTool::at("/bin/launchctl");
+    pub const LSOF: SystemTool = SystemTool::at("/usr/sbin/lsof");
     pub const PKGUTIL: SystemTool = SystemTool::at("/usr/sbin/pkgutil");
     pub const PLUTIL: SystemTool = SystemTool::at("/usr/bin/plutil");
     pub const PS: SystemTool = SystemTool::at("/bin/ps");

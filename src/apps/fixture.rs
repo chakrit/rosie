@@ -7,8 +7,7 @@ use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
 use super::claims::launch_jobs_argv;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{Bounds, CommandOutput, Exit, Gate, Paths};
-use crate::process::ProcessTable;
+use crate::fs::{Bounds, CommandOutput, Exit, FsContext, Paths};
 
 pub(super) const HOME: &str = "/Users/me";
 
@@ -21,14 +20,13 @@ pub(super) const ALL_ROOTS: [&str; 5] = [
     "/Applications",
 ];
 
-pub(super) fn gate<'a>(fake: &'a FakeBackend, roots: &[&str]) -> Gate<&'a FakeBackend> {
+pub(super) fn ctx<'a>(fake: &'a FakeBackend, roots: &[&str]) -> FsContext<&'a FakeBackend> {
     let bounds = Bounds {
         roots: roots.iter().map(PathBuf::from).collect(),
-        config_dir: PathBuf::from("/Users/me/.config/rosie"),
-        data_dir: PathBuf::from("/Users/me/.local/share/rosie"),
+        paths: paths(),
         user_uid: USER_UID,
     };
-    Gate::new(fake, bounds).expect("absolute bounds")
+    FsContext::new(fake, bounds).expect("absolute bounds")
 }
 
 pub(super) fn paths() -> Paths {
@@ -76,10 +74,6 @@ pub(super) fn install_app(fake: &FakeBackend, bundle: &str, id: &str, name: Opti
     fake.respond(extract_argv(&plist, "CFBundleName"), name_output);
 }
 
-pub(super) fn running(fake: &FakeBackend, ps: &str) {
-    fake.respond(ProcessTable::argv(), succeeded(ps));
-}
-
 /// What `launchctl list` prints: its header, then `rows` of `<pid>\t<status>\t<label>`.
 pub(super) fn loaded(fake: &FakeBackend, rows: &str) {
     let listing = format!("PID\tStatus\tLabel\n{rows}");
@@ -90,10 +84,10 @@ pub(super) fn receipts(fake: &FakeBackend, pkgs: &str) {
     fake.respond(pkgs_argv(), succeeded(pkgs));
 }
 
-/// Canned answers for a scan that finds no process, no receipt, and no loaded launch job
-/// but launchd's own.
+/// Canned answers for a scan that finds no running program but launchd, no receipt,
+/// and no loaded launch job but launchd's own.
 pub(super) fn quiet(fake: &FakeBackend) {
-    running(fake, "    1     0     0 /sbin/launchd\n");
+    fake.respond_running(&[(1, "/sbin/launchd")]);
     receipts(fake, "com.apple.pkg.CLTools_SDK_macOS13\n");
     loaded(fake, "1\t0\tcom.apple.launchd\n");
 }

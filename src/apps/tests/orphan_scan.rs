@@ -66,10 +66,7 @@ fn refuses_an_orphan_a_process_executes_from() {
     let plist = "/Library/LaunchDaemons/com.old.helper.plist";
     fake.add_sized_file(helper, 4096);
     fake.add_file(plist, "<plist/>");
-    running(
-        &fake,
-        &format!("    1     0     0 /sbin/launchd\n  321     1     0 {helper}\n"),
-    );
+    fake.respond_running(&[(1, "/sbin/launchd"), (321, helper)]);
 
     let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
 
@@ -78,7 +75,7 @@ fn refuses_an_orphan_a_process_executes_from() {
         panic!("one refused item expected: {:?}", scanned.refused);
     };
     assert_eq!(refused.path, Path::new(helper));
-    assert_eq!(refused.process.pid, 321);
+    assert_eq!(refused.pid, 321);
     assert_eq!(refused.rules, ["orphans"]);
 }
 
@@ -178,7 +175,7 @@ fn a_launch_job_listing_rosie_cannot_read_fails_the_scan() {
     loaded(&fake, "-\t0\n");
 
     let result = scan_orphans(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         &paths(),
         AggressiveItems::Ticked,
         Mounts::Skip,

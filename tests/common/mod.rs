@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Backend, Bounds, RealBackend};
+use rosie::fs::{Backend, Bounds, Paths, RealBackend};
 use tempfile::TempDir;
 
 /// Declares each case as a test against both backends.
@@ -153,8 +153,7 @@ pub fn error_kind<T: std::fmt::Debug>(result: std::io::Result<T>) -> ErrorKind {
 pub fn empty_bounds(h: &impl Harness) -> Bounds {
     Bounds {
         roots: Vec::new(),
-        config_dir: h.root().join("config/rosie"),
-        data_dir: h.root().join("data/rosie"),
+        paths: Paths::new(h.root()).expect("absolute root"),
         user_uid: h.user_uid(),
     }
 }

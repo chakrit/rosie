@@ -15,7 +15,7 @@ use super::entry::{Entry, Mounts, NotAnEntry};
 use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
-use crate::fs::{self, Backend, Gate, Paths};
+use crate::fs::{self, Backend, Cleanup, FsContext, FsOp, Paths};
 use crate::plan::{Needs, WalkSkip};
 use crate::rules::{FixedPath, RuleId, RuleSet, Shape, Tier};
 
@@ -68,9 +68,11 @@ impl FixedTargets {
 
     /// Reports each path that passes through a symlink. The walk never enters a link,
     /// so it would pass such a path by without a word.
-    pub fn report_symlinked<B: Backend>(&self, gate: &Gate<B>, log: &Log) {
+    pub fn report_symlinked<B: Backend>(&self, ctx: &FsContext<B>, log: &Log) {
         for path in self.0.keys() {
-            if let Err(error @ fs::Error::Symlink { .. }) = gate.lstat_link_free(path) {
+            if let Err(error @ fs::Error::Symlink { .. }) =
+                Cleanup::lstat_link_free(path).perform(ctx)
+            {
                 log.problem(Problem::Path(error));
             }
         }
@@ -90,12 +92,12 @@ impl FixedTargets {
 /// volumes of the folders on its way down; no folder above it is checked for being a
 /// placeholder. A denied path is a walk skip and an absent one is not planned. A dataless
 /// placeholder is never planned. A path on another volume than its folder is a mount
-/// root and is never planned, even with `enter_mounts`: the gate refuses to delete a
+/// root and is never planned, even with `enter_mounts`: the context refuses to delete a
 /// mount point at all. Without `enter_mounts`, a path inside a mount is not planned
 /// either: one reached through a folder on another volume than the folder above it,
 /// counting from home for a path under home and from `/` otherwise.
 pub(super) struct FixedClaim<'a, B: Backend, P: Progress> {
-    pub gate: &'a Gate<B>,
+    pub ctx: &'a FsContext<B>,
     pub paths: &'a Paths,
     pub mounts: Mounts,
     pub targets: &'a Targets<'a, B, P>,
@@ -104,7 +106,7 @@ pub(super) struct FixedClaim<'a, B: Backend, P: Progress> {
 
 impl<B: Backend + Sync, P: Progress> FixedClaim<'_, B, P> {
     pub fn claim<'s>(&'s self, scope: &Scope<'s>, path: PathBuf, rules: Vec<RuleMatch>) {
-        let entry = match Entry::lstat(self.gate, &path) {
+        let entry = match Entry::lstat(self.ctx, &path) {
             Ok(entry) => entry,
             Err(NotAnEntry::Placeholder { path }) => {
                 return self.log.skip(path, WalkSkip::SealedPlaceholder);
@@ -113,7 +115,7 @@ impl<B: Backend + Sync, P: Progress> FixedClaim<'_, B, P> {
             Err(NotAnEntry::Fs(error)) => return self.log.entry_failed(path, error),
         };
 
-        let closed = entry.is_behind_a_closed_mount(self.gate, self.paths, self.mounts);
+        let closed = entry.is_behind_a_closed_mount(self.ctx, self.paths, self.mounts);
         match closed {
             Ok(false) => self.targets.claim(scope, entry, rules),
             Ok(true) => self.log.skip(path, WalkSkip::Closed(Needs::MOUNTS)),

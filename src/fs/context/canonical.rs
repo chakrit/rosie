@@ -6,7 +6,7 @@ use std::ffi::OsString;
 use std::io;
 use std::path::{Component, Path, PathBuf};
 
-use super::{Gate, resolve_dots};
+use super::{FsContext, resolve_dots};
 use crate::fs::backend::{Backend, FileKind, Metadata};
 use crate::fs::error::{Error, Op, RealPath};
 
@@ -19,13 +19,13 @@ enum Canonical {
     Dangling { link: PathBuf, source: io::Error },
 }
 
-impl<B: Backend> Gate<B> {
+impl<B: Backend> FsContext<B> {
     /// Resolves `.` and `..` by text and returns the path when it is its own canonical
     /// form. A path through a symlink is refused naming the link and the real path; one
     /// whose case or Unicode form differs from the disk is refused naming the spelling
     /// on disk. A path, or the tail of one, that does not exist is accepted: nothing
     /// missing can be a link.
-    pub fn check_real(&self, path: &Path) -> Result<PathBuf, Error> {
+    pub(in crate::fs) fn check_real(&self, path: &Path) -> Result<PathBuf, Error> {
         let path = resolve_dots(path)?;
 
         match self.canonical(&path)? {
@@ -46,7 +46,7 @@ impl<B: Backend> Gate<B> {
         }
     }
 
-    /// `lstat`s a resolved path after [`Gate::check_real`] accepts it; a missing path is
+    /// `lstat`s a resolved path after [`FsContext::check_real`] accepts it; a missing path is
     /// an `Io` error naming it.
     pub(super) fn lstat_real(&self, path: &Path) -> Result<Metadata, Error> {
         self.check_real(path)?;

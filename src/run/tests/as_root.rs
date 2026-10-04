@@ -5,7 +5,7 @@ use super::*;
 /// Runs `plan` as root, as the elevated child does.
 fn run_as_root(fake: &FakeBackend, roots: &[&str], plan: &Plan) -> Recorder {
     let mut recorder = Recorder::default();
-    Runner::as_root(gate(fake, roots)).execute(plan, &mut recorder);
+    Runner::new(root_ctx(fake, roots)).execute(plan, &mut recorder);
     recorder
 }
 
@@ -22,7 +22,6 @@ fn root_tree(item: &str, inside: &str) -> FakeBackend {
     let fake = FakeBackend::running_as(ROOT_UID);
     fake.add_file(format!("{item}/{inside}"), "x");
     fake.chown_with_ancestors(item, ROOT_UID);
-    respond_ps(&fake, "");
     fake
 }
 
@@ -142,7 +141,6 @@ fn the_users_own_run_deletes_below_folders_others_can_write() {
     let fake = FakeBackend::new();
     fake.add_file(format!("{item}/x"), "x");
     fake.chmod("/Users/me/Library", 0o777);
-    respond_ps(&fake, "");
 
     let (stats, _) = run(
         &fake,
@@ -300,7 +298,6 @@ fn elevated_boots_a_user_items_job_out_and_leaves_the_delete_to_the_user() {
     let plist = "/Users/me/Library/Application Support/X/com.x.helper.plist";
     let fake = FakeBackend::running_as(ROOT_UID);
     fake.add_file(plist, "<plist/>");
-    respond_ps(&fake, "");
     let bootout = Argv::new("/bin/launchctl")
         .arg("bootout")
         .arg("system")
@@ -329,7 +326,6 @@ fn elevated_keeps_the_job_loaded_when_its_plist_is_outside_the_roots() {
     let fake = FakeBackend::running_as(ROOT_UID);
     fake.add_file(plist, "<plist/>");
     fake.chown_with_ancestors(plist, ROOT_UID);
-    respond_ps(&fake, "");
     let bootout = Argv::new("/bin/launchctl")
         .arg("bootout")
         .arg("system")
@@ -361,7 +357,6 @@ fn a_user_folder_the_child_refuses_keeps_its_plist_and_fails() {
     let (fake, plan) = user_folder_with_system_plist();
     let child = FakeBackend::running_as(ROOT_UID);
     child.add_file(HELPER_PLIST, "<plist/>");
-    respond_ps(&child, "");
     let bootout = Argv::new("/bin/launchctl")
         .arg("bootout")
         .arg("system")

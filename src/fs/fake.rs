@@ -27,6 +27,7 @@ use std::sync::{Mutex, MutexGuard};
 use super::backend::{
     Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS,
 };
+use super::context::running_argv;
 use super::error::Op;
 use walk::{Creatable, FinalLink, Location, Tail};
 
@@ -118,9 +119,11 @@ impl FakeBackend {
         };
         let root = Node::new(Body::Dir, ROOT_DEV, ROOT_UID, DIR_MODE);
         state.link_new(PathBuf::from("/"), root);
-        FakeBackend {
+        let fake = FakeBackend {
             state: Mutex::new(state),
-        }
+        };
+        fake.respond_running(&[]);
+        fake
     }
 
     // injected behavior
@@ -144,6 +147,21 @@ impl FakeBackend {
         let mut state = self.lock();
         state.responses.retain(|(known, _)| *known != argv);
         state.responses.push((argv, output));
+    }
+
+    /// Sets the programs `lsof` reports running, each as the pid of a process and a file
+    /// it maps as program text. A new fake runs none.
+    pub fn respond_running(&self, programs: &[(u32, &str)]) {
+        let stdout: String = programs
+            .iter()
+            .map(|(pid, path)| format!("p{pid}\nftxt\nn{path}\n"))
+            .collect();
+        let output = CommandOutput {
+            exit: Exit::Code(0),
+            stdout: stdout.into_bytes(),
+            stderr: Vec::new(),
+        };
+        self.respond(running_argv(), output);
     }
 
     /// Sets what `sudo` returns, whatever it is asked to run; without it, sudo is not

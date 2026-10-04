@@ -4,8 +4,8 @@ use std::path::{Path, PathBuf};
 use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
 use super::fixture::{
-    ALL_ROOTS, HOME, failed, gate, install_app, install_wrapped_app, loaded, no_value, paths,
-    quiet, receipts, running, succeeded,
+    ALL_ROOTS, HOME, ctx, failed, install_app, install_wrapped_app, loaded, no_value, paths, quiet,
+    receipts, succeeded,
 };
 use super::*;
 use crate::fs::ROOT_UID;
@@ -27,7 +27,7 @@ const NPLAYER: &str = "/Applications/nPlayer.app";
 
 fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scan {
     scan_app(
-        &gate(fake, roots),
+        &ctx(fake, roots),
         Path::new(BAR),
         &paths(),
         aggressive,
@@ -37,7 +37,7 @@ fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) 
 }
 
 fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {
-    scan_orphans(&gate(fake, &ALL_ROOTS), &paths(), aggressive, Mounts::Skip).expect("orphan scan")
+    scan_orphans(&ctx(fake, &ALL_ROOTS), &paths(), aggressive, Mounts::Skip).expect("orphan scan")
 }
 
 /// `(path, status)` of every delete entry, in plan order.

@@ -1,12 +1,12 @@
 //! Rosie's paths: the user's home folder, injected by `main` and never read from `$HOME`
-//! below it, rosie's own folders under it, and the one call that makes any written path
-//! absolute (`docs/spec/safety.md#symlinks`).
+//! below it, rosie's own folders under it, and how a written path is made absolute by
+//! text (`docs/spec/safety.md#symlinks`). Checking it against the disk is
+//! [`crate::fs::UserInput::path`].
 
 use std::path::{Path, PathBuf};
 
 use super::Error;
-use super::backend::Backend;
-use super::gate::{Bounds, Gate, resolve_dots};
+use super::context::{Bounds, resolve_dots};
 
 /// The home folder rosie acts for: absolute, with `.` and `..` resolved by text. Every
 /// path the scans compare with home, or build under it, is spelled the same way, so a
@@ -37,22 +37,14 @@ impl Paths {
         self.home.join(".local/share/rosie")
     }
 
-    /// What a gate acting for this home's user is bounded by: rosie's own folders
+    /// What a context acting for this home's user is bounded by: rosie's own folders
     /// under the home, the cleanup `roots`, and the user's uid.
     pub fn bounds(&self, roots: Vec<PathBuf>, user_uid: u32) -> Bounds {
         Bounds {
             roots,
-            config_dir: self.config_dir(),
-            data_dir: self.data_dir(),
+            paths: self.clone(),
             user_uid,
         }
-    }
-
-    /// Makes a written path absolute and accepts it only as its own canonical form on
-    /// disk: [`Paths::expand`], then [`Gate::check_real`].
-    pub fn resolve<B: Backend>(&self, gate: &Gate<B>, path: &Path) -> Result<PathBuf, Error> {
-        let expanded = self.expand(path)?;
-        gate.check_real(&expanded)
     }
 
     /// Makes a written path absolute by text alone: a leading `~` component is the home
@@ -70,16 +62,11 @@ impl Paths {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::fs::fake::FakeBackend;
 
     const HOME: &str = "/Users/me";
 
     fn paths() -> Paths {
         Paths::new(Path::new(HOME)).expect("absolute home")
-    }
-
-    fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
-        Gate::new(fake, paths().bounds(Vec::new(), 501)).expect("absolute bounds")
     }
 
     #[test]
@@ -113,48 +100,5 @@ mod tests {
                 "{written}: {expanded:?}"
             );
         }
-    }
-
-    #[test]
-    fn resolves_a_home_path_that_is_its_own_canonical_form() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/Library/Caches");
-
-        let resolved = paths().resolve(&gate(&fake), Path::new("~//Library/Caches/gone"));
-
-        assert_eq!(
-            resolved.expect("real path"),
-            PathBuf::from("/Users/me/Library/Caches/gone")
-        );
-    }
-
-    #[test]
-    fn refuses_a_missing_path_below_a_symlinked_ancestor() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/dotfiles/cargo");
-        fake.add_symlink("/Users/me/.cargo", "dotfiles/cargo");
-
-        let resolved = paths().resolve(&gate(&fake), Path::new("~/.cargo/registry"));
-
-        let Err(Error::Symlink { link, real, .. }) = resolved else {
-            panic!("expected a symlink refusal, got {resolved:?}");
-        };
-        assert_eq!(link, PathBuf::from("/Users/me/.cargo"));
-        assert!(
-            matches!(real, crate::fs::RealPath::Resolved(real) if real == Path::new("/Users/me/dotfiles/cargo/registry"))
-        );
-    }
-
-    #[test]
-    fn refuses_a_misspelling_naming_the_spelling_on_disk() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/Library/Caches");
-
-        let resolved = paths().resolve(&gate(&fake), Path::new("~/library/caches/x"));
-
-        let Err(Error::Misspelled { real, .. }) = resolved else {
-            panic!("expected a spelling refusal, got {resolved:?}");
-        };
-        assert_eq!(real, PathBuf::from("/Users/me/Library/Caches/x"));
     }
 }

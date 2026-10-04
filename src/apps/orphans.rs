@@ -7,9 +7,8 @@ use super::claims::Claims;
 use super::locations::leftover_locations;
 use super::matching::reads_as_bundle_id;
 use super::search::Search;
-use crate::fs::{Backend, Gate, Paths};
+use crate::fs::{Backend, FsContext, Paths};
 use crate::plan::{AggressiveItems, Twin};
-use crate::process::ProcessTable;
 use crate::scan::{Mounts, Scan};
 
 const RULE: &str = "orphans";
@@ -22,7 +21,7 @@ const RULE: &str = "orphans";
 /// leftovers by ID either, so any it has may appear among the orphans; it is reported
 /// only as a note, not a reason to fail the scan.
 pub fn scan_orphans<B>(
-    gate: &Gate<B>,
+    ctx: &FsContext<B>,
     paths: &Paths,
     aggressive: AggressiveItems,
     mounts: Mounts,
@@ -30,15 +29,15 @@ pub fn scan_orphans<B>(
 where
     B: Backend + Sync,
 {
-    let installed = installed_apps(gate, paths)?;
+    let installed = installed_apps(ctx, paths)?;
     if let Some(unidentified) = installed.unidentified.into_iter().next() {
         return Err(unidentified.into_error());
     }
 
-    let claims = Claims::read(gate, &installed.apps)?;
+    let claims = Claims::read(ctx, &installed.apps)?;
 
-    let processes = ProcessTable::query(gate)?;
-    let mut search = Search::new(gate, paths, mounts, &processes, aggressive);
+    ctx.snapshot_running()?;
+    let mut search = Search::new(ctx, paths, mounts, aggressive);
     for path in &installed.no_id {
         search.add_report(no_id_report(path)?);
     }

@@ -75,7 +75,7 @@ fn an_installed_app_whose_id_cannot_be_read_fails_the_orphan_scan_naming_it() {
         fake.add_file(lib("Preferences/com.gone.App.plist"), "x");
 
         let result = scan_orphans(
-            &gate(&fake, &ALL_ROOTS),
+            &ctx(&fake, &ALL_ROOTS),
             &paths(),
             AggressiveItems::Unticked,
             Mounts::Skip,
@@ -103,7 +103,7 @@ fn an_installed_app_with_no_bundle_id_is_a_note_not_a_failure() {
     fake.add_file(lib("Caches/com.gone.App"), "x");
 
     let scanned = scan_orphans(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
@@ -201,7 +201,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
     fake.add_dir(lib("Containers/com.newin.nplayer"));
 
     let scanned = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
         &paths(),
         AggressiveItems::Unticked,
@@ -227,7 +227,7 @@ fn a_wrapper_holding_several_apps_has_no_info_plist() {
     quiet(&fake);
 
     let result = scan_app(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
         &paths(),
         AggressiveItems::Unticked,
@@ -249,7 +249,7 @@ fn the_picker_lists_apps_in_both_application_folders() {
     fake.add_symlink("/Applications/Linked.app", "/Users/me/Applications/Qux.app");
     fake.add_file("/Applications/.DS_Store", "x");
 
-    let apps = picker_apps(&gate(&fake, &ALL_ROOTS), &paths()).expect("listing");
+    let apps = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths()).expect("listing");
 
     assert_eq!(
         apps,
@@ -269,12 +269,12 @@ fn an_install_folder_rosie_may_not_list_fails_the_orphan_scan_and_the_picker() {
     fake.fail_on("/Applications", Op::ReadDir, ErrorKind::PermissionDenied);
 
     let orphans = scan_orphans(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
-    let picker = picker_apps(&gate(&fake, &ALL_ROOTS), &paths());
+    let picker = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths());
 
     assert!(
         matches!(orphans, Err(Error::UnlistableAppFolder { ref folder, .. }) if folder == Path::new("/Applications")),
@@ -308,12 +308,12 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
     fake.add_dir(lib("Caches/com.gone.App"));
 
     let orphans = scan_orphans(
-        &gate(&fake, &ALL_ROOTS),
+        &ctx(&fake, &ALL_ROOTS),
         &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
-    let picker = picker_apps(&gate(&fake, &ALL_ROOTS), &paths()).expect("listing");
+    let picker = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths()).expect("listing");
 
     let orphans = orphans.expect("orphan scan");
     assert_eq!(
@@ -333,7 +333,7 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
 
 fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scan, Error> {
     scan_app(
-        &gate(fake, &ALL_ROOTS),
+        &ctx(fake, &ALL_ROOTS),
         Path::new(NPLAYER),
         &paths(),
         AggressiveItems::Unticked,
@@ -408,10 +408,10 @@ fn the_picker_lists_apps_sorted_by_path_across_folders() {
         "com.qux.Qux",
         Some("Qux"),
     );
-    let gate = gate(&fake, &["/Applications", "/Accounts/me/Applications"]);
+    let ctx = ctx(&fake, &["/Applications", "/Accounts/me/Applications"]);
 
     let apps = picker_apps(
-        &gate,
+        &ctx,
         &Paths::new(Path::new("/Accounts/me")).expect("absolute paths"),
     )
     .expect("listing");
@@ -434,7 +434,7 @@ fn an_app_folder_entry_rosie_cannot_lstat_fails_the_orphan_scan() {
         fake.fail_on(hidden, Op::Lstat, ErrorKind::PermissionDenied);
 
         let result = scan_orphans(
-            &gate(&fake, &ALL_ROOTS),
+            &ctx(&fake, &ALL_ROOTS),
             &paths(),
             AggressiveItems::Unticked,
             Mounts::Skip,

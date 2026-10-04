@@ -2,7 +2,7 @@
 //! names its path or subject and briefly why (`docs/spec/plan.md`).
 
 use super::args::Mode;
-use crate::plan::{Plan, PlanStats, Report, WalkSkips};
+use crate::plan::{Plan, PlanStats, Report, WalkSkip, WalkSkips};
 use crate::scan::{Refused, Scan, Skipped};
 
 /// Every skip and problem of `scan`, one per line. `mode` decides whether a walk-skip
@@ -38,7 +38,11 @@ pub(super) fn stats_lines(plan: &Plan, skips: WalkSkips) -> String {
 fn walk_skip_line(skipped: &Skipped, mode: &Mode) -> String {
     let path = skipped.path.display();
     let reason = skipped.reason.reason();
-    match mode.walk_skip_hint(skipped.reason) {
+    let hint = match skipped.reason {
+        WalkSkip::LinkOutsideRoots => Some(format!("to clean it: rosie roots add {path}")),
+        skip => mode.walk_skip_hint(skip),
+    };
+    match hint {
         Some(hint) => format!("skipped {path}: {reason} ({hint})"),
         None => format!("skipped {path}: {reason}"),
     }

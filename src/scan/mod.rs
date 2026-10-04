@@ -38,7 +38,7 @@ pub use sizing::{Measure, Sizer};
 
 use fixed::{FixedClaim, FixedTargets};
 use targets::Targets;
-use walk::TreeWalk;
+use walk::{TreeWalk, Walked};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -125,6 +125,7 @@ impl<B: Backend + Sync> Scanner<B> {
             flags: self.settings.walk,
             targets: &targets,
             log: &log,
+            walked: Walked::starting_at(&root, links),
         };
         match root_meta.is_dataless() && !self.settings.walk.enter_placeholders {
             true => log.skip(root, WalkSkip::Closed(Needs::PLACEHOLDERS)),

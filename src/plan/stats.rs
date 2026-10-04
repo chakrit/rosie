@@ -175,6 +175,17 @@ pub enum WalkSkip {
     SealedPlaceholder,
     /// `EPERM` or another denial.
     Denied,
+    /// With `enter_links = "all"`, a folder a symlink leads to that lies outside the
+    /// roots; the skip names the folder, which `rosie roots add` would let in
+    /// (`docs/spec/safety.md#enter_links`).
+    LinkOutsideRoots,
+    /// With `enter_links = "all"`, a symlink to a folder the walk has already walked or
+    /// claimed, such as one of its own parents or a second link to one target.
+    LinkWalked,
+    /// With `enter_links = "all"`, a symlink whose chain of links never ends.
+    LinkLoop,
+    /// With `enter_links = "all"`, a symlink to nothing.
+    LinkDangling,
 }
 
 impl WalkSkip {
@@ -189,6 +200,10 @@ impl WalkSkip {
             WalkSkip::SealedMount => "mount point, never entered or a target".to_owned(),
             WalkSkip::SealedPlaceholder => "cloud placeholder, never opened or a target".to_owned(),
             WalkSkip::Denied => "permission denied".to_owned(),
+            WalkSkip::LinkOutsideRoots => "linked to from the roots, but outside them".to_owned(),
+            WalkSkip::LinkWalked => "symlink to a folder already walked".to_owned(),
+            WalkSkip::LinkLoop => "symlink loop".to_owned(),
+            WalkSkip::LinkDangling => "symlink to nothing".to_owned(),
         }
     }
 
@@ -203,6 +218,10 @@ impl WalkSkip {
             WalkSkip::SealedMount => Bucket::Mounts,
             WalkSkip::SealedPlaceholder => Bucket::Placeholders,
             WalkSkip::Denied => Bucket::Denied,
+            WalkSkip::LinkOutsideRoots
+            | WalkSkip::LinkWalked
+            | WalkSkip::LinkLoop
+            | WalkSkip::LinkDangling => Bucket::Links,
         }
     }
 }
@@ -296,6 +315,7 @@ enum Bucket {
     Mounts,
     Placeholders,
     Denied,
+    Links,
 }
 
 impl Bucket {
@@ -306,6 +326,7 @@ impl Bucket {
             Bucket::Mounts => ("mount", "mounts"),
             Bucket::Placeholders => ("placeholder", "placeholders"),
             Bucket::Denied => ("denied", "denied"),
+            Bucket::Links => ("link", "links"),
         };
         match count {
             1 => format!("{count} {one}"),
@@ -321,6 +342,7 @@ pub struct WalkSkips {
     pub mounts: usize,
     pub placeholders: usize,
     pub denied: usize,
+    pub links: usize,
 }
 
 impl WalkSkips {
@@ -330,20 +352,22 @@ impl WalkSkips {
             Bucket::Mounts => &mut self.mounts,
             Bucket::Placeholders => &mut self.placeholders,
             Bucket::Denied => &mut self.denied,
+            Bucket::Links => &mut self.links,
         };
         *count += 1;
     }
 
     pub fn total(&self) -> usize {
-        self.bundles + self.mounts + self.placeholders + self.denied
+        self.bundles + self.mounts + self.placeholders + self.denied + self.links
     }
 
-    fn counts(&self) -> [(Bucket, usize); 4] {
+    fn counts(&self) -> [(Bucket, usize); 5] {
         [
             (Bucket::Bundles, self.bundles),
             (Bucket::Mounts, self.mounts),
             (Bucket::Placeholders, self.placeholders),
             (Bucket::Denied, self.denied),
+            (Bucket::Links, self.links),
         ]
     }
 }
@@ -576,6 +600,8 @@ mod tests {
             WalkSkip::Denied,
             WalkSkip::Closed(Needs::BUNDLES),
             WalkSkip::Closed(Needs::PLACEHOLDERS),
+            WalkSkip::LinkLoop,
+            WalkSkip::LinkOutsideRoots,
         ];
         for skip in seen {
             skips.record(skip);
@@ -588,11 +614,12 @@ mod tests {
                 mounts: 0,
                 placeholders: 1,
                 denied: 1,
+                links: 2,
             }
         );
         assert_eq!(
             skips.to_string(),
-            "walk skipped 2 bundles, 1 placeholder, 1 denied"
+            "walk skipped 2 bundles, 1 placeholder, 1 denied, 2 links"
         );
     }
 

@@ -37,6 +37,13 @@ impl Cleanup {
         ReadFile { path }
     }
 
+    /// Where a symlink the walk meets leads, with `enter_links = "all"`
+    /// (`docs/spec/safety.md#enter_links`). Only finding the target follows the link;
+    /// the walk goes on from the target's own path.
+    pub fn follow(path: &Path) -> Follow<'_> {
+        Follow { path }
+    }
+
     /// Where an absolute rule fixed path is on disk, as [`crate::fs::UserInput::path`]
     /// locates a typed one: a symlink in it is refused unless `links` allows one.
     pub fn locate(path: &Path, links: EnterLinks) -> Locate<'_> {
@@ -62,6 +69,17 @@ pub struct Lstat<'p> {
 pub struct Locate<'p> {
     path: &'p Path,
     links: EnterLinks,
+}
+
+pub struct Follow<'p> {
+    path: &'p Path,
+}
+
+/// What a symlink leads to: the real path at the end of its chain, and its `lstat`.
+#[derive(Debug, Clone)]
+pub struct LinkTarget {
+    pub path: PathBuf,
+    pub meta: Metadata,
 }
 
 pub struct LstatLinkFree<'p> {
@@ -90,6 +108,7 @@ impl sealed::Sealed for Lstat<'_> {}
 impl sealed::Sealed for LstatLinkFree<'_> {}
 impl sealed::Sealed for ReadFile<'_> {}
 impl sealed::Sealed for Locate<'_> {}
+impl sealed::Sealed for Follow<'_> {}
 impl sealed::Sealed for Delete<'_> {}
 
 impl<B: Backend> FsOp<B> for ReadDir<'_> {
@@ -129,6 +148,15 @@ impl<B: Backend> FsOp<B> for Locate<'_> {
 
     fn perform(self, ctx: &FsContext<B>) -> Result<PathBuf, Error> {
         ctx.locate(self.path, self.links)
+    }
+}
+
+impl<B: Backend> FsOp<B> for Follow<'_> {
+    type Output = LinkTarget;
+
+    fn perform(self, ctx: &FsContext<B>) -> Result<LinkTarget, Error> {
+        let (path, meta) = ctx.follow_link(self.path)?;
+        Ok(LinkTarget { path, meta })
     }
 }
 

@@ -78,8 +78,9 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 - A plan is a TOML file with one entry per item: target, path, size, action.
 - Path entries are keyed by path and list every rule that matched that path. Tool
   entries are keyed by rule.
-- Nested matches collapse into the outer one.
-- Tool rules with an identical trimmed `cmd` dedupe into one entry.
+- Nested matches collapse into the outer one. The outer entry is `sudo` if any inner one
+  was.
+- Tool rules with an identical parsed argv dedupe into one entry.
 - Aggressive items appear unticked unless `--aggressive` is given
   ([rules.md](rules.md#aggressive-twins)).
 - Items outside `roots` appear as blocked, with a `rosie roots add <path>` hint
@@ -108,6 +109,9 @@ stderr, never written into the plan TOML.
 ## Editing a plan
 
 Users may delete entries from a plan before `rosie run`. Run never adds anything.
+
+- A plan with nested, repeated, or duplicate-bootout deletes is refused.
+- Deletes are sorted by path on parse.
 
 ## Interactive confirmation
 

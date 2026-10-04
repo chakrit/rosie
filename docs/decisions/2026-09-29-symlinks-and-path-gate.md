@@ -50,6 +50,21 @@ chakrit: "i'd consider rosie deleting node_modules deleting it in pnpm cache a f
 the safety boundary tho, perhaps no." (pnpm's store itself is shared through hardlinks,
 which a delete leaves intact; the danger is linked source checkouts.)
 
+**Revised 2026-10-04: position 3 reversed in a bounded form.** Seeded roots such as
+`~/.cargo/registry` can pass through a Stow symlink, which the full ban turns into a
+config load error. `[walk] enter_links` now takes a level: `"none"` (default),
+`"roots"` (links allowed in `roots` entries, rule fixed paths, and typed paths; the walk
+never follows), or `"all"` (the walk also follows a link, but only when its target is
+inside the roots, and onto another volume only with `enter_mounts`). A link whose target
+is outside the roots is never followed; rosie suggests adding the target to `roots`.
+chakrit: "For symlinks I think we need a special flag added whereby you can set
+enter_links or something for cases like mine where I use a lot of symlinks."; "how about
+a number enter_links = 1 and "everythin" would be enter_links = 2 (actually not
+everything but mostly everything) so stow users could enter 1 and be safe, and others
+could enter 99 to enable or 0 to disable etc."; "it's kind of weird if we're building an
+escape hatch there. perhaps in that case rosie should recommend or suggest ot user that
+if they really want the thing cleaned, it should added to the roots list?"
+
 **Losing position 4: validate symlinked rule paths at pack load, or skip them with their
 own report.** A fixed rule path such as `/var/...` passes through macOS's `/var` →
 `/private/var` link. Whether a path crosses a link is a fact about each machine, not the

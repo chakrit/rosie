@@ -22,18 +22,20 @@ is a plan like any other ([plan.md](plan.md)).
   `<id>.` (dot-bounded), plus the team-prefixed Group Containers form
   (`<team>.<id>`).
 - A name-only match uses `CFBundleName`.
+- A match claimed by an equal-or-longer installed bundle ID is unticked (for example
+  Chrome vs Chrome Canary).
+- `group.<id>` containers are not matched.
+- An app whose bundle ID cannot be read is a report entry.
 - `launchctl bootout` uses the domain `gui/<uid>` for a user LaunchAgent and `system`
   for `/Library/LaunchDaemons`, with the plist path. Bootout runs before that plist is
   deleted. A bootout of a job that is not loaded fails normally.
 - `pkgutil --forget` is a tool command, outside the roots gate
   ([safety.md](safety.md#cleanup-targets)).
-- An app argument with a symlink component is refused
-  ([safety.md](safety.md#symlinks)).
+- An app argument with a symlink component is refused unless `enter_links` is `roots` or
+  `all` ([safety.md](safety.md#symlinks)).
 - Before listing leftovers, app mode runs the bundle's own delete checks. Any refusal
   (outside roots, mount point, running process, …) refuses the whole operation, naming
   the reason ([safety.md](safety.md#running-processes)).
-- Rule packs may add per-bundle-ID leftover paths, for example from Homebrew zap data
-  ([rules.md](rules.md#packs)).
 - Every filesystem item is gated by `roots` ([safety.md](safety.md#roots)).
 
 ## `rosie clean orphans`
@@ -43,5 +45,14 @@ gated by `roots`, and every orphan item is aggressive.
 
 - It searches the same locations as `clean app`.
 - An app is installed when its bundle ID is found under `/Applications`,
-  `~/Applications`, or `/System/Applications`.
+  `~/Applications`, or `/System/Applications`. iOS and iPad apps are read from
+  `Wrapper/<name>.app`. Installed checks fold case.
+- An ID is an orphan only when nothing claims it. An ID is claimed by:
+  - an installed app with that bundle ID;
+  - an installed app sharing its vendor prefix (the first two dot-parts);
+  - a currently loaded launchd job;
+  - an installed Homebrew formula (`homebrew.mxcl.<formula>`).
+- Claimed IDs never appear in orphans, ticked or not.
+- An app whose bundle ID cannot be read fails the orphans scan.
+- An app without a bundle ID is a note in orphans.
 - `com.apple.*` is excluded.

@@ -19,7 +19,7 @@ strategy has its own fields:
 | `tool`     | `cmd`, `cmd_aggressive`                  | runs the tool's own cleanup command   |
 
 - `target` is one exact folder name.
-- `paths` lists fixed paths, used by caches rules and app leftovers.
+- `paths` lists fixed paths, used by caches rules.
 
 ### Folder strategies
 
@@ -31,9 +31,10 @@ strategy has its own fields:
 
 ### Paths
 
-- Fixed paths may be absolute or start with `~`.
+- A fixed path is `/…` or `~/…`. It is made absolute by `fs::Paths::resolve`
+  ([safety.md](safety.md#symlinks)); `roots` decides the rest.
 - A fixed path that passes through a symlink (for example `/var` → `/private/var`) hits
-  the symlink ban and fails like any refused path
+  the symlink ban and fails like any refused path, unless `enter_links` allows it
   ([safety.md](safety.md#symlinks)). Pack authors write the non-symlink path, e.g.
   `/private/var/...`.
 
@@ -66,7 +67,6 @@ Which modes use a rule is inferred from its shape:
 |------------------------|-----------------------------------------------------------|
 | `target`               | `tree`                                                    |
 | `paths`, `tool`        | `caches`; `tree` for fixed paths under the tree root      |
-| per-bundle-ID paths    | `app` ([app.md](app.md))                                  |
 
 ## Lua
 
@@ -88,10 +88,8 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
 ## Names
 
 - Rule identity is `pack/rule`. The default pack is `rosie`.
-- Pack and rule names: the first character is a letter or digit (UAX #31 `XID_Start` or
-  a digit), followed by `XID_Continue`, `_`, or `-`; at most 64 characters. No
-  whitespace, `/`, `.`, punctuation, symbols, or emoji. Checked with the `unicode-ident`
-  crate.
+- Pack and rule names are ASCII: the first character is a letter, followed by letters,
+  digits, `_`, or `-`; at most 64 characters.
 
 ## Packs
 
@@ -101,12 +99,17 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
   CLI's default source.
 - The `rosie` pack is `rules/*.toml` at the root of github.com/chakrit/rosie; the
   built-in rules live there.
-- A default config file at the root of github.com/chakrit/rosie is downloaded and used to
-  seed a fresh user config.
+- In the `rosie` pack, JetBrains caches are aggressive-only.
+- A default config file, `config.toml`, at the root of github.com/chakrit/rosie is
+  downloaded and used to seed a fresh user config.
 - `rosie rules pull [<source>]` takes a GitHub `owner/repo` and downloads the pack as a
   tarball over HTTPS; git is not needed. Unpacking follows
   [safety.md](safety.md#rosies-own-data).
+- Pull is HTTPS only, with a 30 s total timeout and caps on download and unpacked size.
+  Files are written create-new, and the install is crash-safe.
+- Pull refuses a pack whose rules fail the loader the rule layers use.
 - A pulled pack is replaced wholesale in `~/.local/share/rosie/packs/<owner>/<repo>/`.
+- A stray folder under the packs folder stops loading.
 - On first run with no pulled pack, rosie auto-runs `rules pull` from the default
   source, then proceeds normally. If that first pull fails offline, rosie stops with the
   reason.
@@ -115,7 +118,6 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
 - Pull warns about rules from different packs that share the same target and detection.
 - `rosie rules remove <pack>` removes any pack, including `rosie`. Removing the last
   pack means the next run auto-pulls `rosie` again.
-- Rule packs may add per-bundle-ID leftover paths for app cleanup ([app.md](app.md)).
 
 ## Layers and overrides
 

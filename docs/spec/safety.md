@@ -7,14 +7,28 @@ Status: accepted. Target behavior; not implemented.
 All filesystem, command, and sudo interaction goes through one layer. Everything is
 forced through it; there are no exceptions.
 
+- The security layer is absolute: every protection must pass on its own for an item to
+  go through. The only exceptions are sanctioned escape hatches, such as rosie's own
+  metadata methods.
 - The layer is a `Backend` trait: read_dir, metadata via `lstat` (allocated size, dev and
   inode, file type, owner, `st_flags`), file reads for Lua, remove, commands, sudo, and
   the metadata methods below.
 - `RealBackend` implements it for the machine; tests inject an in-memory fake
   ([testing.md](testing.md)).
-- The roots gate is one concrete wrapper, `Gate<B: Backend>`. Code only ever receives
-  the gate, never a bare backend.
-- Static generics, no `dyn`: `Gate<B>`, `Scanner<B>`, `Runner<B>`, `App<B>`.
+- The layer's one concrete wrapper is `FsContext<B: Backend>`, mostly for security
+  gates. Code only ever receives the context, never a bare backend. The context knows
+  whether it runs as root.
+- Every FS access is a typed, self-performing op, checked by its owner's policy. A sealed
+  `FsOp` trait has `perform(self, &ctx)`, and each op returns its own type. Ops live in
+  the owner namespaces `Cleanup`, `Rosie`, and `UserInput`, whose constructors are the
+  only way to build one (e.g. `UserInput::read(path).perform(&ctx)`). Raw backend helpers
+  are private to `fs`.
+- Deletes are `Cleanup::delete(&path).perform(&ctx)`, with admission inside `perform`. An
+  optional `.verify(&ctx)?` runs the same checks before side work such as a launchd
+  bootout; `perform` re-checks.
+- A plan file is read with `UserInput::read`, which follows links.
+- System tools are a type holding only absolute paths (`/bin/ps`, `/usr/bin/sudo`, …).
+- Static generics, no `dyn`: `FsContext<B>`, `Scanner<B>`, `Runner<B>`, `App<B>`.
 - The trait carries no `Send` or `Sync` bound. Only parallel functions add
   `where B: Sync`, using scoped threads; no `Send`, no `'static`.
 - Roots (home, `/Library`, scan root, rosie's own folders) are injected, never read from
@@ -24,18 +38,19 @@ forced through it; there are no exceptions.
 
 - Every filesystem mutation of a cleanup target is refused unless its path lies within
   the `roots` in `config.toml`.
-- The gate resolves `.` and `..` lexically before every check, then compares paths
+- The context resolves `.` and `..` lexically before every check, then compares paths
   component by component (`Path::starts_with`), never by string prefix.
-- The gate covers filesystem mutations only. Tool commands are outside it; the plan lists
-  each for confirmation. Tools are safe by construction: rosie does not work their
-  internals.
+- The context refuses to delete a mount point in every mode.
+- The roots check covers filesystem mutations only. Tool commands are outside it; the
+  plan lists each for confirmation. Tools are safe by construction: rosie does not work
+  their internals.
 
 ### Rosie's own data
 
 - Separate metadata methods act on rosie's own data only: config read and write, and
   pack install, replace, and remove.
 - They are confined to the injected `~/.config/rosie` and `~/.local/share/rosie`, not
-  checked against `roots`.
+  checked against `roots`. These folders get the same symlink ban as every other path.
 - Pack tarballs are unpacked with the `tar` and `flate2` crates. Only regular files and
   folders are accepted; absolute paths, `..`, symlinks, and hardlinks are rejected.
   Entries are written through the metadata methods.
@@ -51,6 +66,7 @@ carries or widens roots.
 - Every mode (`tree`, `caches`, `app`, `orphans`) is gated by `roots`, with no
   exceptions.
 - Rules and packs cannot add roots.
+- A `roots` entry absent on disk is valid.
 - Out-of-roots plan items show as blocked with a `rosie roots add <path>` hint.
 - A fresh `config.toml` is seeded with ordinary, editable `roots` entries: `/Applications`,
   `~/Applications`, the app-leftover folders under `~/Library` and `/Library` listed in
@@ -64,7 +80,7 @@ Rosie never accepts a path that passes through a symlink, and never substitutes 
 resolved path for the one it was given. The ban is on what rosie accepts, not on how it
 detects links: `canonicalize` and other link-resolving calls are the detector.
 
-- Every written path (`roots` entries, rule fixed paths, typed paths, gate checks) is
+- Every written path (`roots` entries, rule fixed paths, typed paths, context checks) is
   made absolute by one call, `fs::Paths::resolve`: expand `~` against the injected home,
   normalize by text (`.`, `..`, `//`), then `canonicalize` through the `Backend`.
 - A canonical form that differs from the normalized form means a symlink or a case or
@@ -81,10 +97,33 @@ detects links: `canonicalize` and other link-resolving calls are the detector.
   path ([rules.md](rules.md#paths)).
 - Deleting a matched folder removes the symlinks inside it as links; their targets are
   untouched.
-- A hand-written plan fed to `rosie run` is the user's own doing; the gate compares its
-  paths as written.
+- A hand-written plan fed to `rosie run` is the user's own doing; the context compares
+  its paths as written.
 - Decision record:
   [symlinks and the path gate](../decisions/2026-09-29-symlinks-and-path-gate.md).
+
+### `enter_links`
+
+`[walk] enter_links` relaxes the ban in named levels; CLI `--enter-links=<level>`.
+
+| Level              | Effect                                                            |
+|--------------------|-------------------------------------------------------------------|
+| `"none"` (default) | the ban above applies in full                                     |
+| `"roots"`          | symlink components are allowed in `roots` entries, rule fixed     |
+|                    | paths, and typed paths (scan folder, app argument, `roots add`);  |
+|                    | the walk never follows a link                                     |
+| `"all"`            | as `"roots"`, and the walk also follows links                     |
+
+At `"all"`:
+
+- The walk follows a link only when its target is inside the roots. A link whose target
+  is outside the roots is not followed, and rosie suggests `rosie roots add <target>`.
+- A link onto another volume is followed only when its target is inside the roots and
+  `enter_mounts` is set.
+- Loops are detected and skipped. Dangling links are skipped.
+- Two links reaching one target plan it once.
+- Links inside a folder being deleted are still removed as links; their targets are
+  untouched.
 
 ## Walk skips
 
@@ -92,12 +131,18 @@ By default the walk does not enter bundles, does not cross volumes, and does not
 dataless cloud placeholders. Configurable flags enable each riskier behavior; all default
 off:
 
-| `config.toml` `[walk]` | CLI                    |
-|------------------------|------------------------|
-| `enter_bundles`        | `--enter-bundles`      |
-| `enter_mounts`         | `--enter-mounts`       |
-| `enter_placeholders`   | `--enter-placeholders` |
+| `config.toml` `[walk]` | CLI                       |
+|------------------------|---------------------------|
+| `enter_bundles`        | `--enter-bundles`         |
+| `enter_mounts`         | `--enter-mounts`          |
+| `enter_placeholders`   | `--enter-placeholders`    |
+| `enter_links`          | `--enter-links=<level>`   |
 
+`enter_links` takes a level, not a boolean ([Symlinks](#enter_links)).
+
+- The walk checks each entry in this order: symlink, placeholder, bundle, volume, then
+  rules. A matched placeholder is never entered.
+- A mount point is never planned, even with `--enter-mounts`.
 - Bundles are folders with these extensions: `.app`, `.framework`, `.bundle`, `.plugin`,
   `.xcarchive`, `.photoslibrary`, `.sparsebundle`, `.dSYM`.
 - The walk `lstat`s an entry before any `readdir`. A dataless placeholder is detected by
@@ -134,6 +179,11 @@ Rosie elevates only root items, once per run.
 - The elevated process gets the invoking user's home from the stdin header, loads that
   user's config and roots, never `$HOME`, and runs through the same safety layer.
 - If sudo is refused or fails, those items are reported as skipped.
+- The elevated child deletes root-owned items anywhere inside the roots. On the root side
+  it never follows symlinks, never crosses mounts, and never chmods.
+- A bootout that never ran is a skip, never a failure.
+- A user folder whose elevated delete the child refused fails the run.
+- The child reports each delete as it finishes.
 
 ### Internal elevated entry
 

@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use crate::fs::Home;
+use crate::fs::Paths;
 use crate::plan::LaunchDomain;
 
 /// What a leftover folder holds, which decides how its entries match and what a plan
@@ -54,9 +54,9 @@ const SYSTEM_FOLDERS: [(&str, Holds); 2] = [
     ("/Library/PrivilegedHelperTools", Holds::Plain),
 ];
 
-pub(super) fn leftover_locations(home: &Home) -> Vec<Location> {
+pub(super) fn leftover_locations(paths: &Paths) -> Vec<Location> {
     let user = USER_FOLDERS.iter().map(|(folder, holds)| Location {
-        path: home.join(folder),
+        path: paths.home().join(folder),
         holds: *holds,
     });
     let system = SYSTEM_FOLDERS.iter().map(|(folder, holds)| Location {

@@ -21,7 +21,7 @@ use std::time::SystemTime;
 use clap::Parser;
 use clap::error::ErrorKind;
 
-use crate::fs::{Backend, Home};
+use crate::fs::{Backend, Paths};
 use crate::packs::Network;
 use crate::plan::RunStats;
 use crate::run::RootError;
@@ -36,7 +36,7 @@ pub use error::Error;
 /// Everything rosie takes from its environment, gathered by `main`.
 #[derive(Debug, Clone)]
 pub struct Env {
-    pub home: Home,
+    pub paths: Paths,
     /// The current folder: absolute, and the physical path the kernel reports.
     pub cwd: PathBuf,
     /// This rosie executable, which elevation launches through sudo.

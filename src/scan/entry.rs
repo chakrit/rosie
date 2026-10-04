@@ -11,7 +11,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::config::Walk;
-use crate::fs::{self, Backend, FileKind, Gate, Home, Metadata};
+use crate::fs::{self, Backend, FileKind, Gate, Metadata, Paths};
 use crate::plan::{ItemKind, WalkSkip};
 
 /// A path with the metadata its own `lstat` gave, free of symlinks along the whole
@@ -79,10 +79,10 @@ impl Entry {
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
         gate: &Gate<B>,
-        home: &Home,
+        paths: &Paths,
         mounts: Mounts,
     ) -> Result<bool, fs::Error> {
-        behind_a_closed_mount(gate, &self.path, self.meta, home, mounts)
+        behind_a_closed_mount(gate, &self.path, self.meta, paths, mounts)
     }
 
     pub(super) fn into_path(self) -> PathBuf {
@@ -187,10 +187,10 @@ impl Folder {
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
         gate: &Gate<B>,
-        home: &Home,
+        paths: &Paths,
         mounts: Mounts,
     ) -> Result<bool, fs::Error> {
-        behind_a_closed_mount(gate, &self.path, self.meta, home, mounts)
+        behind_a_closed_mount(gate, &self.path, self.meta, paths, mounts)
     }
 
     /// `lstat`s the entry `name` of this folder's listing and tells what it is as the
@@ -270,14 +270,14 @@ fn behind_a_closed_mount<B: Backend>(
     gate: &Gate<B>,
     path: &Path,
     meta: Metadata,
-    home: &Home,
+    paths: &Paths,
     mounts: Mounts,
 ) -> Result<bool, fs::Error> {
     if mounts == Mounts::Enter {
         return Ok(false);
     }
 
-    let anchor = anchor(path, home);
+    let anchor = anchor(path, paths);
     let folders = path
         .ancestors()
         .skip(1)
@@ -295,9 +295,9 @@ fn behind_a_closed_mount<B: Backend>(
 /// Where the volume check for a fixed path starts: home for a path under it, however
 /// the rule spelled it, and `/` otherwise. Both `path` and home have their dots
 /// resolved, so each has one spelling.
-fn anchor<'p>(path: &Path, home: &'p Home) -> &'p Path {
-    match path.starts_with(home) {
-        true => home,
+fn anchor<'p>(path: &Path, paths: &'p Paths) -> &'p Path {
+    match path.starts_with(paths.home()) {
+        true => paths.home(),
         false => Path::new("/"),
     }
 }

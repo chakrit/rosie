@@ -10,7 +10,7 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use crate::fs::{Argv, Home};
+use crate::fs::{Argv, Paths};
 use crate::rules::{
     self, Detection, FixedPaths, FolderRule, Glob, Globs, Markers, Rule, RuleId, Shape, Twin,
 };
@@ -62,15 +62,15 @@ impl PackRules {
         Ok(PackRules { rules })
     }
 
-    /// The rules of `self` that duplicate a rule of `other`, with `~` taken as `home`.
-    pub(super) fn conflicts_with(&self, other: &PackRules, home: &Home) -> Vec<Conflict> {
+    /// The rules of `self` that duplicate a rule of `other`, with `~` taken as the home in `paths`.
+    pub(super) fn conflicts_with(&self, other: &PackRules, paths: &Paths) -> Vec<Conflict> {
         self.rules
             .iter()
             .flat_map(|pulled| {
                 other
                     .rules
                     .iter()
-                    .filter(move |installed| clash(pulled.shape(), installed.shape(), home))
+                    .filter(move |installed| clash(pulled.shape(), installed.shape(), paths))
                     .map(move |installed| Conflict {
                         pulled: pulled.id().clone(),
                         installed: installed.id().clone(),
@@ -80,12 +80,12 @@ impl PackRules {
     }
 }
 
-fn clash(pulled: &Shape, installed: &Shape, home: &Home) -> bool {
+fn clash(pulled: &Shape, installed: &Shape, paths: &Paths) -> bool {
     match (pulled, installed) {
         (Shape::Folder(pulled), Shape::Folder(installed)) => folder_clash(pulled, installed),
         (Shape::Paths(pulled), Shape::Paths(installed)) => {
-            let installed = resolved(installed, home);
-            resolved(pulled, home)
+            let installed = resolved(installed, paths);
+            resolved(pulled, paths)
                 .iter()
                 .any(|path| installed.contains(path))
         }
@@ -136,12 +136,12 @@ fn same_globs(pulled: Option<&Globs>, installed: Option<&Globs>) -> bool {
     }
 }
 
-/// Every path of both tiers, with `~` taken as `home`.
-fn resolved(paths: &Twin<FixedPaths>, home: &Home) -> Vec<PathBuf> {
-    paths
+/// Every path of both tiers, with `~` taken as the home in `paths`.
+fn resolved(fixed: &Twin<FixedPaths>, paths: &Paths) -> Vec<PathBuf> {
+    fixed
         .tiers()
         .flat_map(|(_, paths)| paths.iter())
-        .map(|path| path.resolve(home))
+        .map(|path| path.resolve(paths))
         .collect()
 }
 

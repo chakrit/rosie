@@ -6,7 +6,7 @@ use std::process::{self, ExitCode};
 use std::time::SystemTime;
 
 use rosie::cli::{App, Env, SystemConsole};
-use rosie::fs::{Home, RealBackend};
+use rosie::fs::{Paths, RealBackend};
 use rosie::packs::Https;
 
 fn main() -> ExitCode {
@@ -18,14 +18,14 @@ fn main() -> ExitCode {
 /// The one place rosie reads `$HOME` and the process environment.
 fn gather_env() -> Result<Env, String> {
     let home = env::var_os("HOME").ok_or("HOME is not set")?;
-    let home = Home::new(Path::new(&home)).map_err(|error| format!("HOME: {error}"))?;
+    let paths = Paths::new(Path::new(&home)).map_err(|error| format!("HOME: {error}"))?;
     let cwd =
         env::current_dir().map_err(|error| format!("cannot read the current folder: {error}"))?;
     let exe =
         env::current_exe().map_err(|error| format!("cannot find the rosie executable: {error}"))?;
 
     Ok(Env {
-        home,
+        paths,
         cwd,
         exe,
         pid: process::id(),

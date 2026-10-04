@@ -159,7 +159,7 @@ fn conflicts_with_others<B: Backend>(
     let per_pack = others
         .map(|other| {
             let rules = PackRules::load(other, &store.rule_files(other)?)?;
-            Ok(pulled.conflicts_with(&rules, store.home()))
+            Ok(pulled.conflicts_with(&rules, store.paths()))
         })
         .collect::<Result<Vec<_>, Error>>()?;
 

@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use rosie::config::Walk;
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, CommandOutput, Exit, Gate, Home};
+use rosie::fs::{Bounds, CommandOutput, Exit, Gate, Paths};
 use rosie::packs::{SettlePacks, Store};
 use rosie::plan::{AggressiveItems, Status};
 use rosie::process::ProcessTable;
@@ -106,7 +106,7 @@ pub fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
 pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     let bounds = bounds_with_roots(options.roots);
     let gate = Gate::new(fake, bounds.clone()).expect("absolute bounds");
-    let home = Home::new(Path::new(HOME)).expect("absolute home");
+    let home = Paths::new(Path::new(HOME)).expect("absolute home");
     let packs = SettlePacks
         .run(&Store::new(&gate, &home, Path::new(DATA)))
         .and_then(|settled| settled.pack_folders())
@@ -118,7 +118,7 @@ pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
         false => rules.only(&names(&options.only)).expect("known rule names"),
     };
     let settings = Settings {
-        home: Home::new(&options.home).expect("absolute home"),
+        paths: Paths::new(&options.home).expect("absolute home"),
         walk: options.walk,
         aggressive: options.aggressive,
     };

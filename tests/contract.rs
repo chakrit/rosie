@@ -6,7 +6,7 @@ mod common;
 
 use std::ffi::OsString;
 use std::io::ErrorKind;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 
 use common::{Harness, RealHarness, contract, empty_bounds, error_kind, sorted};
 use rosie::fs::{Backend, Bounds, Error, FileKind, Gate, RealBackend};
@@ -19,7 +19,7 @@ contract!(
     lstat_reports_the_entry_itself,
     hardlinks_share_an_inode_and_count_their_names,
     folders_count_two_names_plus_their_entries,
-    read_link_returns_the_stored_target,
+    canonicalize_follows_links_and_spells_names_as_stored,
     removing_a_symlink_leaves_its_target,
     removes_only_empty_folders,
     read_only_folders_refuse_removal_until_made_writable,
@@ -155,13 +155,20 @@ fn folders_count_two_names_plus_their_entries(h: &impl Harness) {
     assert_eq!(full.nlink, 4);
 }
 
-fn read_link_returns_the_stored_target(h: &impl Harness) {
-    let link = h.root().join("link");
-    h.symlink(&link, Path::new("../elsewhere/target"));
+fn canonicalize_follows_links_and_spells_names_as_stored(h: &impl Harness) {
+    let backend = h.backend();
+    let source = h.root().join("Source");
+    backend.create_dir_all(&source).expect("create");
+    backend
+        .write_file(&source.join("File.txt"), b"x")
+        .expect("write");
+    h.symlink(&h.root().join("link"), Path::new("Source"));
 
-    let target = h.backend().read_link(&link).expect("read link");
+    let through = backend.canonicalize(&h.root().join("link/./file.TXT"));
+    let missing = backend.canonicalize(&h.root().join("Source/missing"));
 
-    assert_eq!(target, PathBuf::from("../elsewhere/target"));
+    assert_eq!(through.expect("canonicalize"), source.join("File.txt"));
+    assert_eq!(error_kind(missing), ErrorKind::NotFound);
 }
 
 fn removing_a_symlink_leaves_its_target(h: &impl Harness) {
@@ -444,7 +451,7 @@ fn a_trailing_slash_or_dot_follows_the_final_link_and_demands_a_folder(h: &impl 
     ];
     let link_kind = backend.lstat(&h.root().join("link/")).map(|meta| meta.kind);
     let link_dot_kind = backend.lstat(&link.join(".")).map(|meta| meta.kind);
-    let read_link = backend.read_link(&h.root().join("link/"));
+    let canonical = backend.canonicalize(&h.root().join("link/"));
     let new_file = backend.write_file(&h.root().join("new/"), b"y");
     let unlinked_folder = backend.remove_file(&h.root().join("link/"));
     backend
@@ -456,7 +463,7 @@ fn a_trailing_slash_or_dot_follows_the_final_link_and_demands_a_folder(h: &impl 
     }
     assert_eq!(link_kind.expect("lstat through link"), FileKind::Dir);
     assert_eq!(link_dot_kind.expect("lstat through link"), FileKind::Dir);
-    assert_eq!(error_kind(read_link), ErrorKind::InvalidInput);
+    assert_eq!(canonical.expect("canonicalize through link"), target);
     assert_eq!(error_kind(new_file), ErrorKind::NotFound);
     assert_eq!(error_kind(unlinked_folder), ErrorKind::PermissionDenied);
     assert_eq!(
@@ -476,7 +483,7 @@ fn real_gate_refuses_a_unicode_form_mismatch_naming_the_disk_spelling() {
         .expect("create NFD folder");
     let gate = Gate::new(RealBackend, empty_bounds(&h)).expect("gate");
 
-    let result = gate.check_typed_path(&h.root().join("Caf\u{e9}"));
+    let result = gate.check_real(&h.root().join("Caf\u{e9}"));
 
     assert!(matches!(result, Err(Error::Misspelled { real, .. }) if real == decomposed));
 }
@@ -488,7 +495,7 @@ fn real_gate_refuses_a_case_mismatch_naming_the_disk_spelling() {
     RealBackend.create_dir_all(&spelled).expect("create folder");
     let gate = Gate::new(RealBackend, empty_bounds(&h)).expect("gate");
 
-    let result = gate.check_typed_path(&h.root().join("code"));
+    let result = gate.check_real(&h.root().join("code"));
 
     assert!(matches!(result, Err(Error::Misspelled { real, .. }) if real == spelled));
 }

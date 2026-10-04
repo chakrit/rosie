@@ -72,11 +72,11 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         env: &'a Env,
         typed: Vec<String>,
     ) -> Result<Self, Error> {
-        let probe = Gate::new(backend, env.home.bounds(Vec::new(), ROOT_UID))?;
+        let probe = Gate::new(backend, env.paths.bounds(Vec::new(), ROOT_UID))?;
         refuse_root(&probe, env.pid, typed)?;
-        let user_uid = probe.lstat(&env.home)?.uid;
+        let user_uid = probe.lstat(env.paths.home())?.uid;
 
-        let own = Gate::new(backend, env.home.bounds(Vec::new(), user_uid))?;
+        let own = Gate::new(backend, env.paths.bounds(Vec::new(), user_uid))?;
         Ok(Session {
             backend,
             network,
@@ -103,15 +103,15 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// default source's `config.toml`, whose download also installs the default pack
     /// when none is installed yet.
     pub fn config(&mut self) -> Result<ConfigFile, Error> {
-        let dir = self.env.home.config_dir();
-        match config::load(&self.own, &dir, &self.env.home) {
+        let dir = self.env.paths.config_dir();
+        match config::load(&self.own, &dir, &self.env.paths) {
             Err(config::Error::NotFound) => {}
             loaded => return Ok(loaded?),
         }
 
         let seed = packs::seed_config(&self.store(), self.network, self.env.now)?;
         self.show_first_run(&seed.first_run)?;
-        let seeded = config::load_or_seed(&self.own, &dir, &self.env.home, &seed.config)?;
+        let seeded = config::load_or_seed(&self.own, &dir, &self.env.paths, &seed.config)?;
         let path = config::config_path(&dir);
         self.note(&format!(
             "created {} from the default config",
@@ -136,7 +136,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             self.note(&warning.to_string())?;
         }
 
-        let layers = RuleLayers::new(packs, &self.env.home.config_dir());
+        let layers = RuleLayers::new(packs, &self.env.paths.config_dir());
         let rules = RuleSet::load(&self.own, &layers)?;
         match only {
             [] => Ok(rules),
@@ -148,13 +148,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn roots_gate(&self, config: &Config) -> Result<Gate<&'a B>, Error> {
         let bounds = self
             .env
-            .home
+            .paths
             .bounds(config.roots.clone(), self.own.user_uid());
         Ok(Gate::new(self.backend, bounds)?)
     }
 
     pub fn store(&self) -> Store<'_, &'a B> {
-        Store::new(&self.own, &self.env.home, &self.env.home.data_dir())
+        Store::new(&self.own, &self.env.paths, &self.env.paths.data_dir())
     }
 
     // paths

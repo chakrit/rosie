@@ -7,7 +7,7 @@ use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
 use super::claims::launch_jobs_argv;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{Bounds, CommandOutput, Exit, Gate, Home};
+use crate::fs::{Bounds, CommandOutput, Exit, Gate, Paths};
 use crate::process::ProcessTable;
 
 pub(super) const HOME: &str = "/Users/me";
@@ -31,8 +31,8 @@ pub(super) fn gate<'a>(fake: &'a FakeBackend, roots: &[&str]) -> Gate<&'a FakeBa
     Gate::new(fake, bounds).expect("absolute bounds")
 }
 
-pub(super) fn home() -> Home {
-    Home::new(Path::new(HOME)).expect("absolute home")
+pub(super) fn paths() -> Paths {
+    Paths::new(Path::new(HOME)).expect("absolute paths")
 }
 
 pub(super) fn succeeded(stdout: &str) -> CommandOutput {

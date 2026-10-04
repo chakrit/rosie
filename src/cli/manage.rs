@@ -98,9 +98,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     fn add_root(&mut self, file: &ConfigFile, path: &Path) -> Result<ExitStatus, Error> {
         let path = self.typed_root(path);
-        let dir = self.env.home.config_dir();
+        let dir = self.env.paths.config_dir();
 
-        roots::add(&self.own, &dir, &self.env.home, file, &path)?;
+        roots::add(&self.own, &dir, &self.env.paths, file, &path)?;
         self.say(&format!("added {}", path.display()))?;
         Ok(ExitStatus::Success)
     }
@@ -121,9 +121,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 self.pick(picker, PickKind::Root, options)?
             }
         };
-        let dir = self.env.home.config_dir();
+        let dir = self.env.paths.config_dir();
 
-        roots::remove(&self.own, &dir, &self.env.home, file, &path)?;
+        roots::remove(&self.own, &dir, &self.env.paths, file, &path)?;
         self.say(&format!("removed {}", path.display()))?;
         Ok(ExitStatus::Success)
     }
@@ -187,18 +187,18 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 self.pick(picker, PickKind::Value, options)?
             }
         };
-        let dir = self.env.home.config_dir();
+        let dir = self.env.paths.config_dir();
 
-        keys::set(&self.own, &dir, &self.env.home, file, flag, &value)?;
+        keys::set(&self.own, &dir, &self.env.paths, file, flag, &value)?;
         self.say(&format!("{} = {value}", flag.name()))?;
         Ok(ExitStatus::Success)
     }
 
     fn unset_key(&mut self, file: &ConfigFile, key: Option<String>) -> Result<ExitStatus, Error> {
         let flag = self.walk_flag(key, "rosie config unset <key>")?;
-        let dir = self.env.home.config_dir();
+        let dir = self.env.paths.config_dir();
 
-        let unset = keys::unset(&self.own, &dir, &self.env.home, file, flag)?;
+        let unset = keys::unset(&self.own, &dir, &self.env.paths, file, flag)?;
         let default = keys::get(Key::Walk(flag), unset.config());
         self.say(&format!("{} = {default} (default)", flag.name()))?;
         Ok(ExitStatus::Success)

@@ -12,12 +12,12 @@ use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
 use super::matching::{claimed_by_other, claims_by_id, claims_by_name};
 use super::search::{Candidate, Search};
-use crate::fs::{Backend, FileKind, Gate, Home, SystemArgv, SystemTool};
+use crate::fs::{Backend, FileKind, Gate, Paths, SystemArgv, SystemTool};
 use crate::plan::{AggressiveItems, Report, Twin};
 use crate::process::{self, ProcessTable};
 use crate::scan::{Entry, Mounts, Scan};
 
-/// Scans for `app` and its leftovers in the user's `home` and the system folders.
+/// Scans for `app` and its leftovers in the user's home and the system folders.
 ///
 /// The app argument is a user-typed path: a symlink or misspelling in it is refused, and
 /// so is a bundle that is a dataless placeholder, which rosie does not open, or the root
@@ -33,14 +33,14 @@ use crate::scan::{Entry, Mounts, Scan};
 pub fn scan_app<B>(
     gate: &Gate<B>,
     app: &Path,
-    home: &Home,
+    paths: &Paths,
     aggressive: AggressiveItems,
     mounts: Mounts,
 ) -> Result<Scan, Error>
 where
     B: Backend + Sync,
 {
-    let path = gate.check_typed_path(app)?;
+    let path = paths.resolve(gate, app)?;
     let entry = Entry::lstat(gate, &path)?;
     let name = path
         .file_name()
@@ -57,7 +57,7 @@ where
     let bundle = read_bundle(gate, &path)?;
     let processes = ProcessTable::query(gate)?;
     refuse_running(&processes, &bundle)?;
-    let installed = installed_apps(gate, home)?;
+    let installed = installed_apps(gate, paths)?;
     let others: Vec<BundleId> = installed
         .apps
         .into_iter()
@@ -69,10 +69,10 @@ where
         None => "app".to_owned(),
     };
 
-    let mut search = Search::new(gate, home, mounts, &processes, aggressive);
+    let mut search = Search::new(gate, paths, mounts, &processes, aggressive);
     search.add(itself, Holds::Plain, &rule, Twin::Normal)?;
 
-    for location in leftover_locations(home) {
+    for location in leftover_locations(paths) {
         for candidate in search.candidates(&location)? {
             let id_twin = bundle
                 .id

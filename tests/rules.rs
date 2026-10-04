@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, Gate, Home, Op};
+use rosie::fs::{Bounds, Gate, Op, Paths};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
     Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source, Tier,
@@ -36,9 +36,9 @@ fn gate(fake: &FakeBackend) -> Gate<&FakeBackend> {
 fn load(fake: &FakeBackend) -> Result<RuleSet, Error> {
     let gate = gate(fake);
     let bounds = bounds();
-    let home = Home::new(Path::new(HOME)).expect("absolute home");
+    let paths = Paths::new(Path::new(HOME)).expect("absolute paths");
     let packs = SettlePacks
-        .run(&Store::new(&gate, &home, &bounds.data_dir))
+        .run(&Store::new(&gate, &paths, &bounds.data_dir))
         .and_then(|settled| settled.pack_folders())
         .expect("installed packs list");
     RuleSet::load(&gate, &RuleLayers::new(packs, &bounds.config_dir))

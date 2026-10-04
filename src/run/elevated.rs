@@ -23,7 +23,7 @@ use thiserror::Error;
 use super::header::{self, Header, Nonce};
 use super::{ItemResult, OutputWindow, Reporter, Runner, outcomes};
 use crate::config;
-use crate::fs::{self, Argv, Backend, Gate, Home, ROOT_UID};
+use crate::fs::{self, Argv, Backend, Gate, Paths, ROOT_UID};
 use crate::plan::{self, Plan, RunStats};
 use crate::process::{self, Process, ProcessTable};
 
@@ -120,7 +120,7 @@ where
     if !plan.tools().is_empty() {
         return Err(Error::ToolElevated);
     }
-    let gate = user_gate(backend, &header.home)?;
+    let gate = user_gate(backend, &header.paths)?;
 
     let mut reporting = ReportingToRun {
         reporter,
@@ -185,7 +185,7 @@ fn admit<'a, B: Backend>(
         return Err(Error::NonceMismatch);
     }
 
-    let gate = Gate::new(backend, header.home.bounds(Vec::new(), ROOT_UID))?;
+    let gate = Gate::new(backend, header.paths.bounds(Vec::new(), ROOT_UID))?;
     let uid = process::effective_uid(&gate)?;
     if uid != ROOT_UID {
         return Err(Error::NotRoot { uid });
@@ -211,13 +211,13 @@ fn is_root_sudo(process: &Process) -> bool {
 /// A gate acting for the user whose home this is, bounded by the roots in their
 /// config. The user is the owner of the home folder. The child deletes through it only
 /// what `Gate::admit_delete_as_root` admits, which changes no permissions.
-fn user_gate<'b, B: Backend>(backend: &'b B, home: &Home) -> Result<Gate<&'b B>, Error> {
-    let bootstrap = Gate::new(backend, home.bounds(Vec::new(), ROOT_UID))?;
-    let user_uid = bootstrap.lstat(home)?.uid;
-    let file = config::load(&bootstrap, &home.config_dir(), home)?;
+fn user_gate<'b, B: Backend>(backend: &'b B, paths: &Paths) -> Result<Gate<&'b B>, Error> {
+    let bootstrap = Gate::new(backend, paths.bounds(Vec::new(), ROOT_UID))?;
+    let user_uid = bootstrap.lstat(paths.home())?.uid;
+    let file = config::load(&bootstrap, &paths.config_dir(), paths)?;
 
     let roots = file.config().roots.clone();
-    Ok(Gate::new(backend, home.bounds(roots, user_uid))?)
+    Ok(Gate::new(backend, paths.bounds(roots, user_uid))?)
 }
 
 #[cfg(test)]

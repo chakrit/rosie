@@ -14,7 +14,7 @@ use std::path::PathBuf;
 use super::Error;
 use super::listing::{FolderLookup, Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
-use crate::fs::{Backend, Gate, Home};
+use crate::fs::{Backend, Gate, Paths};
 use crate::plan::{
     AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Reach, Report, RunAs,
     Twin, WalkSkip,
@@ -69,8 +69,8 @@ struct Marks {
 
 pub(super) struct Search<'g, B: Backend> {
     gate: &'g Gate<B>,
-    /// Home anchors the volume check of each leftover location.
-    home: &'g Home,
+    /// Paths anchors the volume check of each leftover location.
+    paths: &'g Paths,
     mounts: Mounts,
     /// Read once per scan; every matched item passes through it before the plan.
     processes: &'g ProcessTable,
@@ -82,14 +82,14 @@ pub(super) struct Search<'g, B: Backend> {
 impl<'g, B: Backend + Sync> Search<'g, B> {
     pub(super) fn new(
         gate: &'g Gate<B>,
-        home: &'g Home,
+        paths: &'g Paths,
         mounts: Mounts,
         processes: &'g ProcessTable,
         aggressive: AggressiveItems,
     ) -> Self {
         Search {
             gate,
-            home,
+            paths,
             mounts,
             processes,
             builder: PlanBuilder::new(aggressive),
@@ -107,7 +107,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         let FolderLookup::Found(folder) = find_folder(self.gate, &location.path)? else {
             return Ok(Vec::new());
         };
-        if folder.is_behind_a_closed_mount(self.gate, self.home, self.mounts)? {
+        if folder.is_behind_a_closed_mount(self.gate, self.paths, self.mounts)? {
             self.log
                 .skip(location.path.clone(), WalkSkip::Closed(Needs::MOUNTS));
             return Ok(Vec::new());
@@ -199,7 +199,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
     pub(super) fn finish(self) -> Result<Scan, Error> {
         let Search {
             gate,
-            home: _,
+            paths: _,
             mounts: _,
             processes,
             mut builder,

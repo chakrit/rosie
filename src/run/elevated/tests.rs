@@ -104,7 +104,7 @@ fn root_file(path: &str) -> String {
 fn piped(nonce: &str, home: &str) -> Stdin {
     let header = Header {
         nonce: Nonce::parse(nonce).expect("valid nonce"),
-        home: Home::new(Path::new(home)).expect("absolute home"),
+        paths: Paths::new(Path::new(home)).expect("absolute home"),
     };
     Stdin::Pipe(header.encode(&items()).expect("encodable"))
 }
@@ -113,7 +113,7 @@ fn piped(nonce: &str, home: &str) -> Stdin {
 fn pipe_plan(plan: &str) -> Stdin {
     let header = Header {
         nonce: Nonce::parse(NONCE).expect("valid nonce"),
-        home: Home::new(Path::new(HOME)).expect("absolute home"),
+        paths: Paths::new(Path::new(HOME)).expect("absolute home"),
     };
     Stdin::Pipe(header.encode(plan).expect("encodable"))
 }
@@ -312,7 +312,7 @@ fn never_opens_the_users_read_only_folders_as_root() {
     );
     let header = Header {
         nonce: Nonce::parse(NONCE).expect("valid"),
-        home: Home::new(Path::new(HOME)).expect("absolute home"),
+        paths: Paths::new(Path::new(HOME)).expect("absolute home"),
     };
     let stdin = Stdin::Pipe(header.encode(&plan).expect("encodable"));
 

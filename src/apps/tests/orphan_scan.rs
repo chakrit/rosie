@@ -179,7 +179,7 @@ fn a_launch_job_listing_rosie_cannot_read_fails_the_scan() {
 
     let result = scan_orphans(
         &gate(&fake, &ALL_ROOTS),
-        &home(),
+        &paths(),
         AggressiveItems::Ticked,
         Mounts::Skip,
     );

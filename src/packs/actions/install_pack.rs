@@ -90,9 +90,14 @@ impl InstallPack<'_> {
 }
 
 /// Distinct archive names can name one file on the volume, which folds case and
-/// Unicode form; the later file is then a duplicate of the earlier one.
+/// Unicode form; the later file is then a duplicate of the earlier one. The FS layer
+/// reports it as a misspelling of the name already written, or the volume as a name
+/// that already exists.
 fn named_twice(error: fs::Error, rule: &RuleFile) -> Error {
     match &error {
+        fs::Error::Misspelled { .. } => Error::Duplicate {
+            path: rule.archive_path(),
+        },
         fs::Error::Io { source, .. } if source.kind() == ErrorKind::AlreadyExists => {
             Error::Duplicate {
                 path: rule.archive_path(),
@@ -111,7 +116,7 @@ mod tests {
 
     use super::*;
     use crate::fs::fake::{FakeBackend, USER_UID};
-    use crate::fs::{Bounds, Home, Op};
+    use crate::fs::{Bounds, Op, Paths};
 
     const HOME: &str = "/Users/me";
     const DATA: &str = "/Users/me/.local/share/rosie";
@@ -141,7 +146,7 @@ mod tests {
         let gate = gate(&fake);
         let store = Store::new(
             &gate,
-            &Home::new(Path::new(HOME)).expect("absolute home"),
+            &Paths::new(Path::new(HOME)).expect("absolute home"),
             Path::new(DATA),
         );
         let source = Source::default();
@@ -175,7 +180,7 @@ mod tests {
         let gate = gate(&fake);
         let store = Store::new(
             &gate,
-            &Home::new(Path::new(HOME)).expect("absolute home"),
+            &Paths::new(Path::new(HOME)).expect("absolute home"),
             Path::new(DATA),
         );
         let source = Source::default();

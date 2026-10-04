@@ -8,7 +8,7 @@ use rayon::prelude::*;
 
 use super::Error;
 use super::listing::{Listing, list_folder};
-use crate::fs::{self, Backend, FileKind, Gate, Home, SystemArgv, SystemTool};
+use crate::fs::{self, Backend, FileKind, Gate, Paths, SystemArgv, SystemTool};
 use crate::plan::Report;
 use crate::process;
 
@@ -254,13 +254,13 @@ pub(super) struct Installed {
 }
 
 /// The installed apps and their bundle IDs, read in parallel.
-pub(super) fn installed_apps<B>(gate: &Gate<B>, home: &Home) -> Result<Installed, Error>
+pub(super) fn installed_apps<B>(gate: &Gate<B>, paths: &Paths) -> Result<Installed, Error>
 where
     B: Backend + Sync,
 {
     let folders = [
         PathBuf::from("/Applications"),
-        home.join("Applications"),
+        paths.home().join("Applications"),
         PathBuf::from("/System/Applications"),
     ];
     let found = bundles_in(gate, &folders)?;

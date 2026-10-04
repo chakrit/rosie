@@ -45,7 +45,7 @@ impl<B: Backend> Gate<B> {
     /// Checks the folders above an already confined item and `lstat`s it.
     fn lstat_item(&self, path: &Path, entering: Entering) -> Result<Metadata, Error> {
         match entering {
-            Entering::OpeningUsersFolders => self.lstat_without_symlinks(path),
+            Entering::OpeningUsersFolders => self.lstat_real(path),
             Entering::RootControlledOnly => {
                 self.require_root_controlled_above(path)?;
                 self.io(Op::Lstat, path, self.backend.lstat(path))

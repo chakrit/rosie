@@ -4,7 +4,6 @@ use thiserror::Error;
 
 use super::glob::GlobError;
 use super::name::{Name, NameError, RuleId};
-use super::parse::COMMAND_PUNCTUATION;
 use crate::fs;
 
 #[derive(Debug, Error)]
@@ -136,12 +135,6 @@ pub enum Problem {
     #[error("`{field}` repeats the path {value:?}")]
     DuplicatePath { field: &'static str, value: String },
 
-    #[error("`{normal}` and `{aggressive}` must not share a value")]
-    TwinOverlap {
-        normal: &'static str,
-        aggressive: &'static str,
-    },
-
     #[error("`{field}`: {source}")]
     BadGlob {
         field: &'static str,
@@ -151,18 +144,6 @@ pub enum Problem {
 
     #[error("`{0}` is empty")]
     EmptyCommand(&'static str),
-
-    #[error(
-        "`{field}` = {value:?}: the character {character:?} is not allowed; a command runs \
-         without a shell, split on spaces, and holds only ASCII letters, digits, spaces, \
-         and {punctuation}",
-        punctuation = COMMAND_PUNCTUATION,
-    )]
-    CommandCharacter {
-        field: &'static str,
-        value: String,
-        character: char,
-    },
 
     #[error("Lua does not compile: {0}")]
     LuaSyntax(String),

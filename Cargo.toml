@@ -17,7 +17,6 @@ tar = { version = "0.4", default-features = false }
 thiserror = "2"
 toml = "1"
 toml_edit = { version = "0.22", features = ["serde"] }
-unicode-ident = "1"
 ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
 
 [dev-dependencies]

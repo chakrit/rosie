@@ -16,10 +16,6 @@ use super::rule::{
 };
 use crate::fs::Argv;
 
-/// Punctuation a `cmd` may hold besides ASCII letters, digits, and the spaces that
-/// separate its arguments.
-pub(super) const COMMAND_PUNCTUATION: &str = "-_./:=,@+%";
-
 /// One rule table from a file, keyed as written: a plain name or a qualified override.
 pub(super) struct Parsed {
     pub key: String,
@@ -173,7 +169,6 @@ fn folder(raw: &RawRule, detection: Detection) -> Result<Shape, Problem> {
         .transpose()?;
     let target = Twin::from_parts(normal, aggressive)
         .ok_or(Problem::Missing("`target` or `target_aggressive`"))?;
-    refuse_equal_twins(&target, "target", "target_aggressive")?;
     Ok(Shape::Folder(FolderRule { target, detection }))
 }
 
@@ -216,16 +211,6 @@ fn paths(raw: &RawRule) -> Result<Shape, Problem> {
         .transpose()?;
     let paths = Twin::from_parts(normal, aggressive)
         .ok_or(Problem::Missing("`paths` or `paths_aggressive`"))?;
-    if let Twin::Both { normal, aggressive } = &paths
-        && normal
-            .iter()
-            .any(|path| aggressive.iter().any(|other| other == path))
-    {
-        return Err(Problem::TwinOverlap {
-            normal: "paths",
-            aggressive: "paths_aggressive",
-        });
-    }
     Ok(Shape::Paths(paths))
 }
 
@@ -242,22 +227,7 @@ fn tool(raw: &RawRule) -> Result<Shape, Problem> {
         .transpose()?;
     let cmd = Twin::from_parts(normal, aggressive)
         .ok_or(Problem::Missing("`cmd` or `cmd_aggressive`"))?;
-    refuse_equal_twins(&cmd, "cmd", "cmd_aggressive")?;
     Ok(Shape::Tool(cmd))
-}
-
-fn refuse_equal_twins<T: PartialEq>(
-    twin: &Twin<T>,
-    normal: &'static str,
-    aggressive: &'static str,
-) -> Result<(), Problem> {
-    match twin {
-        Twin::Both {
-            normal: value,
-            aggressive: other,
-        } if value == other => Err(Problem::TwinOverlap { normal, aggressive }),
-        _ => Ok(()),
-    }
 }
 
 // fields
@@ -311,29 +281,14 @@ fn fixed_paths(field: &'static str, texts: &[String]) -> Result<FixedPaths, Prob
 }
 
 /// Splits a command on spaces into argv (`docs/spec/rules.md#tool-strategy`). It runs
-/// without a shell, so only characters that mean the same with or without one are
-/// admitted. This is the one parser of a rule's command: the plan takes the argv as is.
+/// without a shell, so every other character is a literal part of its argument. This is
+/// the one parser of a rule's command: the plan takes the argv as is.
 fn command(field: &'static str, text: &str) -> Result<Argv, Problem> {
-    let foreign = text
-        .chars()
-        .find(|&character| !is_command_character(character));
-    if let Some(character) = foreign {
-        return Err(Problem::CommandCharacter {
-            field,
-            value: text.into(),
-            character,
-        });
-    }
-
     let mut words = text.split(' ').filter(|word| !word.is_empty());
     let Some(program) = words.next() else {
         return Err(Problem::EmptyCommand(field));
     };
     Ok(words.fold(Argv::new(program), Argv::arg))
-}
-
-fn is_command_character(character: char) -> bool {
-    character.is_ascii_alphanumeric() || character == ' ' || COMMAND_PUNCTUATION.contains(character)
 }
 
 #[cfg(test)]
@@ -549,45 +504,18 @@ mod tests {
     }
 
     #[test]
-    fn refuses_command_characters_outside_the_argv_whitelist() {
-        let cases = [
-            ("tool --dir ~/x", '~'),
-            ("rm -f ~/Library/Caches/*", '~'),
-            ("rm -f /tmp/*", '*'),
-            ("sh -c 'rm -rf x'", '\''),
-            ("a && b", '&'),
-            ("echo $HOME", '$'),
-            ("a > b", '>'),
-            ("a\tb", '\t'),
-            ("ls [ab]", '['),
-            ("tool é", 'é'),
-        ];
-
-        for (cmd, character) in cases {
-            let text = format!("[rules.r]\nstrategy = \"tool\"\ncmd_aggressive = {cmd:?}");
-            let found = problem(&text);
-            assert!(
-                matches!(&found, Problem::CommandCharacter { field: "cmd_aggressive", character: c, .. }
-                    if *c == character),
-                "{cmd}: got {found}"
-            );
-            assert!(
-                found.to_string().contains(&format!("{character:?}")),
-                "{found}"
-            );
-        }
-    }
-
-    #[test]
-    fn accepts_commands_within_the_argv_whitelist() {
+    fn passes_shell_characters_through_as_literal_arguments() {
         let shape = only_shape(
             "[rules.r]\nstrategy = \"tool\"\n\
-             cmd = \"x-1 --filter=until:24h,a@b+c%d ./p_q/r\"",
+             cmd = \"sh -c 'rm $HOME/*' && é\"",
         );
 
-        let want = Argv::new("x-1")
-            .arg("--filter=until:24h,a@b+c%d")
-            .arg("./p_q/r");
+        let want = Argv::new("sh")
+            .arg("-c")
+            .arg("'rm")
+            .arg("$HOME/*'")
+            .arg("&&")
+            .arg("é");
         assert_eq!(shape, Shape::Tool(Twin::Normal(want)));
     }
 
@@ -775,30 +703,20 @@ mod tests {
     }
 
     #[test]
-    fn refuses_an_aggressive_twin_that_repeats_the_normal_value() {
-        let text =
-            "[rules.r]\nstrategy = \"name\"\ntarget = \"build\"\ntarget_aggressive = \"build\"";
-        assert!(
-            matches!(problem(text), Problem::TwinOverlap { .. }),
-            "{}",
-            problem(text)
-        );
-
-        let text = "[rules.r]\nstrategy = \"path\"\npaths = [\"~/a\", \"~/b\"]\n\
-                     paths_aggressive = [\"~/c\", \"~/a\"]";
-        assert!(
-            matches!(problem(text), Problem::TwinOverlap { .. }),
-            "{}",
-            problem(text)
-        );
-
-        let text = "[rules.r]\nstrategy = \"tool\"\ncmd = \"x  prune\"\n\
-                     cmd_aggressive = \"x prune \"";
-        assert!(
-            matches!(problem(text), Problem::TwinOverlap { .. }),
-            "{}",
-            problem(text)
-        );
+    fn loads_an_aggressive_twin_that_repeats_the_normal_value() {
+        for text in [
+            "[rules.r]\nstrategy = \"name\"\ntarget = \"build\"\ntarget_aggressive = \"build\"",
+            "[rules.r]\nstrategy = \"path\"\npaths = [\"~/a\", \"~/b\"]\n\
+             paths_aggressive = [\"~/c\", \"~/a\"]",
+            "[rules.r]\nstrategy = \"tool\"\ncmd = \"x prune\"\ncmd_aggressive = \"x prune\"",
+        ] {
+            let both = match only_shape(text) {
+                Shape::Folder(FolderRule { target, .. }) => matches!(target, Twin::Both { .. }),
+                Shape::Paths(paths) => matches!(paths, Twin::Both { .. }),
+                Shape::Tool(cmd) => matches!(cmd, Twin::Both { .. }),
+            };
+            assert!(both, "{text}");
+        }
     }
 
     #[test]

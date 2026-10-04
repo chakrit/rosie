@@ -121,8 +121,7 @@ mod tests {
         }
     }
 
-    /// `docs/spec/rules.md#layers-and-overrides` names the user-rules layer's pack `user`. Other
-    /// spellings are refused at install, by the volume (`tests/packs.rs`).
+    /// `docs/spec/rules.md#layers-and-overrides` names the user-rules layer's pack `user`.
     #[test]
     fn refuses_a_pack_named_user() {
         let parsed = "someone/user".parse::<Source>();

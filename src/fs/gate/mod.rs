@@ -242,7 +242,6 @@ impl<B: Backend> Gate<B> {
 
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsStr;
     use std::io::ErrorKind;
 
     use super::*;
@@ -804,55 +803,6 @@ mod tests {
         assert!(
             matches!(result, Err(Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound)
         );
-    }
-
-    // stored names
-
-    #[test]
-    fn names_the_entry_a_lookup_folds_onto_as_it_is_stored() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/packs/Rosie");
-        fake.add_dir("/Users/me/packs/other");
-        let gate = gate(&fake, &[]);
-
-        let stored = gate
-            .stored_name(path("/Users/me/packs"), OsStr::new("rosie"))
-            .expect("folded lookup");
-        let exact = gate
-            .stored_name(path("/Users/me/packs"), OsStr::new("other"))
-            .expect("exact lookup");
-
-        assert_eq!(stored, OsString::from("Rosie"));
-        assert_eq!(exact, OsString::from("other"));
-    }
-
-    #[test]
-    fn reports_a_missing_stored_name_as_not_found() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/packs/rosie");
-        let gate = gate(&fake, &[]);
-
-        let result = gate.stored_name(path("/Users/me/packs"), OsStr::new("rosy"));
-
-        assert!(
-            matches!(result, Err(Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound)
-        );
-    }
-
-    #[test]
-    fn refuses_a_stored_name_that_is_not_one_entry_name() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/packs/rosie");
-        let gate = gate(&fake, &[]);
-
-        for name in ["", ".", "..", "rosie/..", "rosie/", "/etc", "a/b"] {
-            let result = gate.stored_name(path("/Users/me/packs"), OsStr::new(name));
-
-            assert!(
-                matches!(&result, Err(Error::NotAnEntryName { name: refused }) if refused == name),
-                "{name:?}: got {result:?}"
-            );
-        }
     }
 
     // rosie's own data

@@ -62,10 +62,4 @@ impl<B: Backend> Settled<'_, '_, B> {
     pub(in crate::packs) fn store(&self) -> &Store<'_, B> {
         self.store
     }
-
-    /// The installed sources whose pack folder the volume finds under the pack name
-    /// `pack`; see [`Store::sources_named`].
-    pub(in crate::packs) fn sources_named(&self, pack: &str) -> Result<Vec<Source>, Error> {
-        self.store.sources_named(&self.sources()?, pack)
-    }
 }

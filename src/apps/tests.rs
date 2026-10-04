@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
 use super::fixture::{
-    ALL_ROOTS, HOME, failed, gate, home, install_app, install_wrapped_app, no_value, quiet,
+    ALL_ROOTS, HOME, failed, gate, home, install_app, install_wrapped_app, loaded, no_value, quiet,
     receipts, running, succeeded,
 };
 use super::*;
@@ -71,7 +71,7 @@ fn bar_app(fake: &FakeBackend) {
 /// Bar in `/Applications`, Baz in a suite folder, Qux in `~/Applications`, and Notes and Sys
 /// in `/System/Applications` are installed; only `launchd` runs.
 fn installed_suite(fake: &FakeBackend) {
-    running(fake, "    1     0     0 /sbin/launchd\n");
+    quiet(fake);
     install_app(fake, BAR, "com.foo.Bar", Some("Bar"));
     install_app(
         fake,

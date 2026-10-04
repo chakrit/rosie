@@ -3,8 +3,9 @@
 
 use super::Error;
 use super::bundle::{installed_apps, no_id_report};
+use super::claims::Claims;
 use super::locations::leftover_locations;
-use super::matching::{mentions_id, reads_as_bundle_id};
+use super::matching::reads_as_bundle_id;
 use super::search::Search;
 use crate::fs::{Backend, Gate, Home};
 use crate::plan::{AggressiveItems, Twin};
@@ -34,6 +35,8 @@ where
         return Err(unidentified.into_error());
     }
 
+    let claims = Claims::read(gate, &installed.apps)?;
+
     let processes = ProcessTable::query(gate)?;
     let mut search = Search::new(gate, home, mounts, &processes, aggressive);
     for path in &installed.no_id {
@@ -42,11 +45,7 @@ where
     for location in leftover_locations(home) {
         for candidate in search.candidates(&location)? {
             let reads_as_id = reads_as_bundle_id(&candidate.name, location.holds);
-            let accounted = installed
-                .apps
-                .iter()
-                .any(|app| mentions_id(&app.id, &candidate.name));
-            if reads_as_id && !accounted {
+            if reads_as_id && !claims.claim(&candidate.name) {
                 search.add(candidate, location.holds, RULE, Twin::Aggressive)?;
             }
         }

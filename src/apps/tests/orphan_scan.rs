@@ -113,3 +113,79 @@ fn a_case_variant_of_an_installed_id_is_not_an_orphan() {
 
     assert_eq!(deletes(&scanned), []);
 }
+
+// claimed IDs (`docs/spec/app.md#rosie-clean-orphans`): an ID something still claims is
+// never an orphan, ticked or not
+
+#[test]
+fn an_id_sharing_an_installed_apps_vendor_prefix_is_not_an_orphan() {
+    let fake = FakeBackend::new();
+    installed_suite(&fake);
+    fake.add_file("/Library/LaunchDaemons/com.foo.vmnetd.plist", "<plist/>");
+    fake.add_dir(lib("Group Containers/ABCDE12345.com.foo.helper"));
+    fake.add_dir(lib("Caches/com.food.App"));
+
+    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+
+    assert_eq!(
+        deletes(&scanned),
+        [(lib("Caches/com.food.App"), Status::Ticked)]
+    );
+}
+
+#[test]
+fn an_id_of_a_loaded_launch_job_is_not_an_orphan() {
+    let fake = FakeBackend::new();
+    installed_suite(&fake);
+    loaded(
+        &fake,
+        "-\t0\torg.swift.swiftpm\n321\t0\tcom.gone.Agent.helper\n",
+    );
+    fake.add_file(lib("LaunchAgents/com.gone.Agent.helper.plist"), "<plist/>");
+    fake.add_dir(lib("Caches/org.swift.swiftpm"));
+    fake.add_dir(lib("Caches/com.gone.Agent"));
+
+    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+
+    assert_eq!(
+        deletes(&scanned),
+        [(lib("Caches/com.gone.Agent"), Status::Ticked)]
+    );
+}
+
+#[test]
+fn an_id_of_an_installed_homebrew_formula_is_not_an_orphan() {
+    let fake = FakeBackend::new();
+    installed_suite(&fake);
+    fake.add_dir("/opt/homebrew/Cellar/redis/7.2.4");
+    fake.add_dir("/usr/local/Cellar/mysql/8.0");
+    fake.add_file(lib("LaunchAgents/homebrew.mxcl.redis.plist"), "<plist/>");
+    fake.add_file(lib("LaunchAgents/homebrew.mxcl.mysql.plist"), "<plist/>");
+    fake.add_file(lib("LaunchAgents/homebrew.mxcl.gone.plist"), "<plist/>");
+
+    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+
+    assert_eq!(
+        deletes(&scanned),
+        [(lib("LaunchAgents/homebrew.mxcl.gone.plist"), Status::Ticked)]
+    );
+}
+
+#[test]
+fn a_launch_job_listing_rosie_cannot_read_fails_the_scan() {
+    let fake = FakeBackend::new();
+    installed_suite(&fake);
+    loaded(&fake, "-\t0\n");
+
+    let result = scan_orphans(
+        &gate(&fake, &ALL_ROOTS),
+        &home(),
+        AggressiveItems::Ticked,
+        Mounts::Skip,
+    );
+
+    assert!(
+        matches!(result, Err(Error::LaunchJobs { .. })),
+        "expected a launch-job listing error, got {result:?}"
+    );
+}

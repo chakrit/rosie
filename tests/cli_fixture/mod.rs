@@ -12,6 +12,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use rosie::apps::launch_jobs_argv;
 use rosie::cli::{App, Console, Env, ExitStatus, PromptError, Terminals};
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{Argv, CommandOutput, Exit, Home};
@@ -81,6 +82,7 @@ impl Sandbox {
         };
         sandbox.running_as("501");
         sandbox.processes("");
+        sandbox.respond(launch_jobs_argv(), "PID\tStatus\tLabel\n");
         sandbox
     }
 

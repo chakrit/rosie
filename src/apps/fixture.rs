@@ -1,10 +1,11 @@
 //! Test fixtures for app and orphan scans: apps installed in the fake, with canned
-//! `plutil`, `ps`, and `pkgutil` output.
+//! `plutil`, `ps`, `pkgutil`, and `launchctl` output.
 
 use std::path::{Path, PathBuf};
 
 use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
+use super::claims::launch_jobs_argv;
 use crate::fs::fake::{FakeBackend, USER_UID};
 use crate::fs::{Bounds, CommandOutput, Exit, Gate, Home};
 use crate::process::ProcessTable;
@@ -79,14 +80,22 @@ pub(super) fn running(fake: &FakeBackend, ps: &str) {
     fake.respond(ProcessTable::argv(), succeeded(ps));
 }
 
+/// What `launchctl list` prints: its header, then `rows` of `<pid>\t<status>\t<label>`.
+pub(super) fn loaded(fake: &FakeBackend, rows: &str) {
+    let listing = format!("PID\tStatus\tLabel\n{rows}");
+    fake.respond(launch_jobs_argv(), succeeded(&listing));
+}
+
 pub(super) fn receipts(fake: &FakeBackend, pkgs: &str) {
     fake.respond(pkgs_argv(), succeeded(pkgs));
 }
 
-/// Canned answers for an app scan that finds no process and no receipt.
+/// Canned answers for a scan that finds no process, no receipt, and no loaded launch job
+/// but launchd's own.
 pub(super) fn quiet(fake: &FakeBackend) {
     running(fake, "    1     0     0 /sbin/launchd\n");
     receipts(fake, "com.apple.pkg.CLTools_SDK_macOS13\n");
+    loaded(fake, "1\t0\tcom.apple.launchd\n");
 }
 
 /// Installs an iPhone or iPad app as macOS on Apple silicon does: the real bundle in

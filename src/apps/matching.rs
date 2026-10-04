@@ -30,13 +30,13 @@ pub(super) fn claimed_by_other(id: &BundleId, other: &BundleId, name: &str, hold
     equal_or_longer && claims_by_id(other, name, holds)
 }
 
-/// Whether an installed app accounts for a leftover in orphan scans: its bundle ID
-/// appears anywhere in the name as whole dot-separated parts, in any case, as in
-/// `com.foo.Bar.plist`, `com.foo.bar.plist`, `<team>.com.foo.Bar`, or
-/// `group.com.foo.Bar`. Wider than [`claims_by_id`], so a leftover in doubt is never
-/// listed as an orphan.
-pub(super) fn mentions_id(id: &BundleId, name: &str) -> bool {
-    let id_parts: Vec<&str> = id.as_str().split('.').collect();
+/// Whether a dot-separated ID appears anywhere in a leftover name as whole parts, in any
+/// case, as `com.foo.Bar` does in `com.foo.Bar.plist`, `com.foo.bar.plist`,
+/// `<team>.com.foo.Bar`, and `group.com.foo.Bar`. Orphan scans use it to keep claimed
+/// leftovers out; wider than [`claims_by_id`], so a leftover in doubt is never listed as
+/// an orphan.
+pub(super) fn mentions(id: &str, name: &str) -> bool {
+    let id_parts: Vec<&str> = id.split('.').collect();
     let name_parts: Vec<&str> = name.split('.').collect();
     let same_parts = |window: &[&str]| {
         window
@@ -182,16 +182,16 @@ mod tests {
     }
 
     #[test]
-    fn an_installed_id_accounts_for_names_that_mention_it_whole() {
-        let bar = id("com.foo.Bar");
+    fn an_id_is_mentioned_only_as_whole_parts() {
+        let bar = "com.foo.Bar";
 
-        assert!(mentions_id(&bar, "com.foo.Bar.plist"));
-        assert!(mentions_id(&bar, "group.com.foo.Bar"));
-        assert!(mentions_id(&bar, "ABCDE12345.com.foo.Bar.shared"));
-        assert!(!mentions_id(&bar, "com.foo.Barista.plist"));
-        assert!(!mentions_id(&bar, "com.foo.Baz"));
-        assert!(mentions_id(&bar, "com.foo.bar.plist"));
-        assert!(mentions_id(&bar, "COM.FOO.BAR"));
+        assert!(mentions(bar, "com.foo.Bar.plist"));
+        assert!(mentions(bar, "group.com.foo.Bar"));
+        assert!(mentions(bar, "ABCDE12345.com.foo.Bar.shared"));
+        assert!(!mentions(bar, "com.foo.Barista.plist"));
+        assert!(!mentions(bar, "com.foo.Baz"));
+        assert!(mentions(bar, "com.foo.bar.plist"));
+        assert!(mentions(bar, "COM.FOO.BAR"));
     }
 
     #[test]

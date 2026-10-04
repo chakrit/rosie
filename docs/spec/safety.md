@@ -60,17 +60,22 @@ carries or widens roots.
 
 ## Symlinks
 
-Rosie never follows, resolves, or accepts a symlink. Nothing is canonicalized.
+Rosie never accepts a path that passes through a symlink, and never substitutes a
+resolved path for the one it was given. The ban is on what rosie accepts, not on how it
+detects links: `canonicalize` and other link-resolving calls are the detector.
 
+- Every written path (`roots` entries, rule fixed paths, typed paths, gate checks) is
+  made absolute by one call, `fs::Paths::resolve`: expand `~` against the injected home,
+  normalize by text (`.`, `..`, `//`), then `canonicalize` through the `Backend`.
+- A canonical form that differs from the normalized form means a symlink or a case or
+  Unicode-form misspelling; the path is refused, naming the canonical path. There is no
+  case folding.
+- A path that does not exist canonicalizes its deepest existing ancestor and appends the
+  rest.
 - `rosie roots add` refuses a path with a symlink component. A `roots` entry with one is
   a load error naming it.
 - A scan start folder or app argument with a symlink component is refused. Bare `rosie`
   uses the current directory, which is always the physical path.
-- Refusals name the real path to use instead.
-- User-typed paths (`roots add`, scan folder, app argument) are checked component by
-  component against the parent's directory listing, in the same pass as the symlink
-  check. A case or Unicode-form mismatch is refused, naming the correctly spelled path.
-  There is no case folding.
 - The walk never descends into a symlink. Symlinks never match rules.
 - Fixed rule paths that pass through a symlink hit this ban and fail like any refused
   path ([rules.md](rules.md#paths)).

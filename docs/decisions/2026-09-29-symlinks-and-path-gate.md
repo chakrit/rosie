@@ -2,13 +2,23 @@
 
 - **Date:** 2026-09-29
 - **PR:** `manual`
-- **Status:** accepted
+- **Status:** revised
 
 ## Decision
 
-Rosie never follows, resolves, or accepts a symlink. Every path that enters rosie from
-outside the walk is refused if it passes through one. The `roots` gate compares paths as
-written, component by component, after resolving `.` and `..` by text.
+Rosie never follows or accepts a path through a symlink. Every path that enters rosie
+from outside the walk is refused if it passes through one. The `roots` gate compares
+paths as written, component by component, after resolving `.` and `..` by text.
+
+**Revised 2026-10-04:** the ban is on accepting, not on detecting. Losing position 1
+below rejected canonicalizing a path and then *using* the result. Canonicalizing only to
+compare with the written path, and refusing on any difference, is the detector:
+`fs::Paths::resolve` does that and replaces a hand-written component walk that
+reimplemented `realpath` (link chasing with a hop limit, per-component spelling checks).
+The earlier wording "never resolves … nothing is canonicalized" was read as banning
+`canonicalize` itself. chakrit: "`fs::canonicalize` canont be ruled out just because it
+does niternal symlink correctly. our link detection algorithm should just match taht
+against roots or check individual path components."
 
 ## Rationale
 

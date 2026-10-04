@@ -2,7 +2,6 @@ use std::io::ErrorKind;
 use std::path::Path;
 use std::time::SystemTime;
 
-use super::clear_copy::{ClearCopy, Discarded};
 use super::settle_pack::{SettlePack, Unsettled};
 use crate::fs::{self, Backend, Gate};
 use crate::packs::archive::RuleFile;
@@ -32,7 +31,6 @@ impl InstallPack<'_> {
 
         let staging = store.staging_dir(self.source);
         self.stage(store.gate(), &staging)?;
-        self.refuse_reserved(store)?;
         self.swap_in(store, &settle, &staging)?;
 
         // The swap leaves the old pack set aside beside the new one; settling discards
@@ -54,24 +52,6 @@ impl InstallPack<'_> {
         let pulled_at = store::pulled_text(self.pulled_at);
         gate.create_own_file(&store::pulled_file(staging), pulled_at.as_bytes())?;
         Ok(())
-    }
-
-    /// Refuses a pack name the volume folds onto the reserved pack name `user`, clearing
-    /// the staging folder. Only the volume knows which names it folds together, and the
-    /// staging folder is the first entry spelled with the pack name, so it is asked here.
-    fn refuse_reserved<B: Backend>(&self, store: &Store<B>) -> Result<(), Error> {
-        if !store.stages_as_reserved(self.source)? {
-            return Ok(());
-        }
-
-        ClearCopy {
-            source: self.source,
-            copy: Discarded::Staging,
-        }
-        .run(store)?;
-        Err(Error::ReservedPack {
-            text: self.source.to_string(),
-        })
     }
 
     fn swap_in<B: Backend>(

@@ -81,12 +81,10 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
 /// | Step                                    | A crash or failure here leaves     | The next settle      |
 /// |-----------------------------------------|------------------------------------|----------------------|
 /// | 1. write `.new`                         | `<repo>` if replacing, and `.new`  | clears `.new`        |
-/// | 2. clear `.new` and stop, if the volume | `<repo>` if replacing, and part of | clears `.new`        |
-/// |    folds the pack name onto `user`      | `.new`                             |                      |
-/// | 3. rename `<repo>` to `.old`, if any    | a failure: `<repo>` and `.new`;    | puts back any `.old`,|
+/// | 2. rename `<repo>` to `.old`, if any    | a failure: `<repo>` and `.new`;    | puts back any `.old`,|
 /// |                                         | a crash after it: `.old` and       | and clears `.new`    |
 /// |                                         | `.new`                             |                      |
-/// | 4. rename `.new` to `<repo>`            | a failure on a first install:      | puts back any `.old`,|
+/// | 3. rename `.new` to `<repo>`            | a failure on a first install:      | puts back any `.old`,|
 /// |                                         | `.new`; one when replacing         | then clears `.new`   |
 /// |                                         | settles, putting `.old` back, then |                      |
 /// |                                         | clearing `.new`; if the move back  |                      |
@@ -95,10 +93,10 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
 /// |                                         | (`Error::Leftover`), `<repo>` and  |                      |
 /// |                                         | part of `.new`; a crash before it: |                      |
 /// |                                         | `.old` if replacing, and `.new`    |                      |
-/// | 5. settle: rename `.old` to `.removed`  | `<repo>` and `.old`                | discards `.old`      |
-/// | 6. settle: clear `.removed`             | `<repo>` and part of `.removed`    | clears `.removed`    |
+/// | 4. settle: rename `.old` to `.removed`  | `<repo>` and `.old`                | discards `.old`      |
+/// | 5. settle: clear `.removed`             | `<repo>` and part of `.removed`    | clears `.removed`    |
 ///
-/// A failure in steps 5 and 6 fails the pull, though the new pack is installed.
+/// A failure in steps 4 and 5 fails the pull, though the new pack is installed.
 ///
 /// # Remove (`RemovePack`, after settling every source)
 ///
@@ -185,29 +183,6 @@ impl<'g, B: Backend> Store<'g, B> {
         self.copy_dir(source, REMOVED_SUFFIX)
     }
 
-    /// `source` with its owner spelled as the volume stores the owner's folder, when it
-    /// finds one. GitHub owner names are case-insensitive, so the folder the volume folds
-    /// the owner onto is that owner's, and its packs keep that spelling.
-    pub(super) fn resolve(&self, source: &Source) -> Result<Source, Error> {
-        let owner = OsStr::new(source.owner());
-        let stored = match self.gate.stored_name(&self.dir, owner) {
-            Ok(stored) => stored,
-            Err(fs::Error::Io { source: error, .. }) if error.kind() == ErrorKind::NotFound => {
-                return Ok(source.clone());
-            }
-            Err(error) => return Err(error.into()),
-        };
-
-        let stray = || Error::StrayOwnerFolder {
-            owner: source.owner().to_owned(),
-            path: self.dir.join(&stored),
-        };
-        stored
-            .to_str()
-            .and_then(|stored| Source::from_names(stored, source.pack().as_str()))
-            .ok_or_else(stray)
-    }
-
     /// The sources of every pack in the folder, ordered, whether or not a copy beside it
     /// has been settled. Only [`super::actions::settle_packs::Settled`] lists packs for
     /// the rest of rosie, after settling.
@@ -235,56 +210,6 @@ impl<'g, B: Backend> Store<'g, B> {
             })
             .collect();
         Ok(sources.into_iter().collect())
-    }
-
-    /// The sources of `installed` whose pack folder the volume finds under the pack name
-    /// `pack` in any owner's folder: the pack spelled exactly, or, on a volume that folds
-    /// case or Unicode form, the pack `pack` folds onto, as its folder is spelled.
-    pub(super) fn sources_named(
-        &self,
-        installed: &[Source],
-        pack: &str,
-    ) -> Result<Vec<Source>, Error> {
-        let owners: BTreeSet<&str> = installed.iter().map(Source::owner).collect();
-
-        let mut named = Vec::new();
-        for owner in owners {
-            let stored = match self
-                .gate
-                .stored_name(&self.dir.join(owner), OsStr::new(pack))
-            {
-                Ok(stored) => stored,
-                Err(fs::Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound => {
-                    continue;
-                }
-                Err(error) => return Err(error.into()),
-            };
-            let found = stored
-                .to_str()
-                .and_then(|repo| Source::from_names(owner, repo));
-            named.extend(found.filter(|source| installed.contains(source)));
-        }
-        Ok(named)
-    }
-
-    /// Whether the volume folds `source`'s pack name onto the reserved pack name
-    /// `user`: a lookup of the reserved name's staging folder finds `source`'s staging
-    /// folder, which must exist.
-    pub(super) fn stages_as_reserved(&self, source: &Source) -> Result<bool, Error> {
-        let reserved = format!("{COPY_PREFIX}{}{STAGING_SUFFIX}", Name::user_pack());
-        let staging = self.staging_dir(source);
-
-        let stored = match self
-            .gate
-            .stored_name(&self.owner_dir(source), OsStr::new(&reserved))
-        {
-            Ok(stored) => stored,
-            Err(fs::Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound => {
-                return Ok(false);
-            }
-            Err(error) => return Err(error.into()),
-        };
-        Ok(staging.file_name() == Some(stored.as_os_str()))
     }
 
     /// Whether anything is at `path`, without following a symlink there.

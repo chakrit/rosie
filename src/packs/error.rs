@@ -84,12 +84,6 @@ pub enum Error {
     PackNameTaken { pack: String, installed: Source },
 
     #[error(
-        "the volume stores the owner {owner} under {path}, which is not a valid owner name; remove that entry first",
-        path = path.display(),
-    )]
-    StrayOwnerFolder { owner: String, path: PathBuf },
-
-    #[error(
         "{path} is in the packs folder but is not a pack: {problem}; move it out of there",
         path = path.display(),
     )]

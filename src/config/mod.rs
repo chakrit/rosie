@@ -122,20 +122,6 @@ pub enum Error {
         key: &'static str,
         expected: &'static str,
     },
-
-    #[error(
-        "{path}: \"{a}\" and \"{b}\" are both {resolved}; keep one",
-        path = path.display(),
-        a = a.display(),
-        b = b.display(),
-        resolved = resolved.display()
-    )]
-    DuplicateRoot {
-        path: PathBuf,
-        a: PathBuf,
-        b: PathBuf,
-        resolved: PathBuf,
-    },
 }
 
 // loading and seeding
@@ -248,7 +234,6 @@ fn parse<B: Backend>(
         .iter()
         .map(|root| gate.check_root_entry(&expand_home(root, home)))
         .collect::<Result<Vec<_>, _>>()?;
-    refuse_duplicate_roots(&raw.roots, &roots, path)?;
 
     let config = Config { roots, ..raw };
     Ok(ConfigFile { document, config })
@@ -287,27 +272,6 @@ fn validate_shape(document: &DocumentMut, path: &Path) -> Result<(), Error> {
             key: "roots",
             expected: "an array",
         });
-    }
-    Ok(())
-}
-
-/// Refuses two `roots` entries that read as the same path once `~` is expanded and dots
-/// are resolved, naming both as the user spelled them. A symlinked entry never reaches
-/// this check: `check_root_entry` already refuses it.
-fn refuse_duplicate_roots(
-    written: &[PathBuf],
-    checked: &[PathBuf],
-    path: &Path,
-) -> Result<(), Error> {
-    for (i, resolved) in checked.iter().enumerate() {
-        if let Some(j) = checked[..i].iter().position(|other| other == resolved) {
-            return Err(Error::DuplicateRoot {
-                path: path.to_path_buf(),
-                a: written[j].clone(),
-                b: written[i].clone(),
-                resolved: resolved.clone(),
-            });
-        }
     }
     Ok(())
 }
@@ -573,26 +537,6 @@ mod tests {
     }
 
     #[test]
-    fn two_spellings_of_the_same_root_are_a_load_error_naming_both() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/code");
-        fake.add_file(
-            "/Users/me/.config/rosie/config.toml",
-            "roots = [\"~/code\", \"/Users/me/code\"]\n",
-        );
-        let gate = gate(&fake);
-
-        let result = load(&gate, config_dir(), &home());
-
-        let Err(error @ Error::DuplicateRoot { .. }) = result else {
-            panic!("expected a duplicate-root error, got {result:?}");
-        };
-        let message = error.to_string();
-        assert!(message.contains("~/code"), "{message}");
-        assert!(message.contains("/Users/me/code"), "{message}");
-    }
-
-    #[test]
     fn load_or_seed_seeds_only_when_no_config_exists() {
         let fake = FakeBackend::new();
         fake.add_dir(HOME);
@@ -648,26 +592,6 @@ mod tests {
         let gate = gate(&fake);
 
         let result = seed(&gate, config_dir(), &home(), "walk = [true]\n");
-
-        assert!(
-            matches!(result, Err(Error::InvalidDefault(_))),
-            "{result:?}"
-        );
-        assert!(!fake.exists(config_path(config_dir())));
-    }
-
-    #[test]
-    fn a_default_with_duplicate_roots_is_reported_as_an_invalid_default_and_nothing_is_written() {
-        let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/code");
-        let gate = gate(&fake);
-
-        let result = seed(
-            &gate,
-            config_dir(),
-            &home(),
-            "roots = [\"~/code\", \"/Users/me/code\"]\n",
-        );
 
         assert!(
             matches!(result, Err(Error::InvalidDefault(_))),

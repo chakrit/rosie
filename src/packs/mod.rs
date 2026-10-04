@@ -59,18 +59,13 @@ pub struct Seed {
 
 /// `rosie rules pull [<source>]`: downloads the source's pack and installs it, replacing
 /// any installed copy wholesale.
-///
-/// GitHub owner names are case-insensitive, so when the volume already stores the
-/// requested owner's folder under another spelling, the pull downloads, installs, and
-/// reports the source under that stored spelling.
 pub fn pull<B: Backend, N: Network>(
     store: &Store<B>,
     network: &N,
-    requested: &Source,
+    source: &Source,
     now: SystemTime,
 ) -> Result<Pulled, Error> {
     let settled = SettlePacks.run(store)?;
-    let source = &store.resolve(requested)?;
     refuse_name_taken(&settled, source)?;
 
     let archive = DownloadArchive { source }.run(network)?;
@@ -101,13 +96,7 @@ pub fn seed_config<B: Backend, N: Network>(
 ) -> Result<Seed, Error> {
     let settled = SettlePacks.run(store)?;
     let first_run_due = settled.sources()?.is_empty();
-    let source = &match first_run_due {
-        true => store.resolve(&Source::default())?,
-        false => Source::default(),
-    };
-    if first_run_due {
-        refuse_name_taken(&settled, source)?;
-    }
+    let source = &Source::default();
 
     let archive = DownloadArchive { source }.run(network)?;
     let config = archive.config()?.to_owned();
@@ -143,13 +132,13 @@ fn install<B: Backend>(
     })
 }
 
-/// Two packs with one name would give their rules the same `pack/rule` identities, and a
-/// source the volume folds onto an installed pack would respell that pack and its rules.
-/// So a source is refused when the volume finds another installed source under its pack
-/// name; the refusal names that pack as it is spelled on disk.
+/// Two packs with one name would give their rules the same `pack/rule` identities, so a
+/// source is refused when another installed source has its pack name.
 fn refuse_name_taken<B: Backend>(settled: &Settled<B>, source: &Source) -> Result<(), Error> {
-    let named = settled.sources_named(source.pack().as_str())?;
-    let taken = named.into_iter().find(|other| other != source);
+    let installed = settled.sources()?;
+    let taken = installed
+        .into_iter()
+        .find(|other| other.pack() == source.pack() && other != source);
 
     match taken {
         Some(other) => Err(Error::PackNameTaken {

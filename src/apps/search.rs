@@ -212,6 +212,10 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                             refused.refuse(scope, entry, vec![marks.rule], pid, program);
                             None
                         }
+                        Verdict::Skipped(reason) => {
+                            log.skip(entry.path().to_path_buf(), reason);
+                            None
+                        }
                         Verdict::Problem(error) => {
                             log.problem(Problem::Path(error));
                             None

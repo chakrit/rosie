@@ -62,6 +62,12 @@ pub enum Error {
     )]
     Running { app: PathBuf, pid: u32 },
 
+    #[error(
+        "cannot read `launchctl list`, so the IDs of loaded launch jobs cannot be told from \
+         orphans; unexpected line: {line:?}"
+    )]
+    LaunchJobs { line: String },
+
     #[error("{path} is a dataless placeholder; rosie does not open it", path = path.display())]
     Placeholder { path: PathBuf },
 

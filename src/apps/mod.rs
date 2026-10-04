@@ -8,6 +8,7 @@
 
 mod app;
 mod bundle;
+mod claims;
 mod error;
 mod listing;
 mod locations;
@@ -20,6 +21,7 @@ use std::path::PathBuf;
 use crate::fs::{Backend, Gate, Home};
 
 pub use app::scan_app;
+pub use claims::launch_jobs_argv;
 pub use error::Error;
 pub use orphans::scan_orphans;
 

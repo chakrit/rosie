@@ -44,7 +44,7 @@ impl<B: Backend> Gate<B> {
     /// refused rather than unlinked.
     pub(super) fn admit_item(&self, path: &Path, meta: Metadata) -> Result<(), Error> {
         if meta.kind == FileKind::Symlink {
-            return Err(self.refuse_symlink(path, path, Path::new("")));
+            return Err(self.refuse_symlink_item(path));
         }
         self.refuse_mount_point(path, meta)
     }

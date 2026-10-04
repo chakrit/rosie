@@ -7,7 +7,7 @@ use super::claims::Claims;
 use super::locations::leftover_locations;
 use super::matching::reads_as_bundle_id;
 use super::search::Search;
-use crate::fs::{Backend, Gate, Home};
+use crate::fs::{Backend, Gate, Paths};
 use crate::plan::{AggressiveItems, Twin};
 use crate::process::ProcessTable;
 use crate::scan::{Mounts, Scan};
@@ -23,14 +23,14 @@ const RULE: &str = "orphans";
 /// only as a note, not a reason to fail the scan.
 pub fn scan_orphans<B>(
     gate: &Gate<B>,
-    home: &Home,
+    paths: &Paths,
     aggressive: AggressiveItems,
     mounts: Mounts,
 ) -> Result<Scan, Error>
 where
     B: Backend + Sync,
 {
-    let installed = installed_apps(gate, home)?;
+    let installed = installed_apps(gate, paths)?;
     if let Some(unidentified) = installed.unidentified.into_iter().next() {
         return Err(unidentified.into_error());
     }
@@ -38,11 +38,11 @@ where
     let claims = Claims::read(gate, &installed.apps)?;
 
     let processes = ProcessTable::query(gate)?;
-    let mut search = Search::new(gate, home, mounts, &processes, aggressive);
+    let mut search = Search::new(gate, paths, mounts, &processes, aggressive);
     for path in &installed.no_id {
         search.add_report(no_id_report(path)?);
     }
-    for location in leftover_locations(home) {
+    for location in leftover_locations(paths) {
         for candidate in search.candidates(&location)? {
             let reads_as_id = reads_as_bundle_id(&candidate.name, location.holds);
             if reads_as_id && !claims.claim(&candidate.name) {

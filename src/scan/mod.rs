@@ -24,7 +24,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::config::Walk;
-use crate::fs::{self, Backend, FileKind, Gate, Home};
+use crate::fs::{self, Backend, FileKind, Gate, Paths};
 use crate::plan::{self, AggressiveItems, Needs, Plan, PlanBuilder, ToolCmds, WalkSkip, WalkSkips};
 use crate::process::{self, ProcessTable};
 use crate::rules::{RuleId, RuleSet, Shape, Tier, Twin};
@@ -56,7 +56,7 @@ pub enum Error {
 /// (config `[walk]` with the CLI flags applied), and whether `--aggressive` was given.
 #[derive(Debug, Clone)]
 pub struct Settings {
-    pub home: Home,
+    pub paths: Paths,
     pub walk: Walk,
     pub aggressive: AggressiveItems,
 }
@@ -109,14 +109,14 @@ impl<B: Backend + Sync> Scanner<B> {
     /// walk looks at everything below it. A folder that is a dataless placeholder is
     /// not opened unless the walk may enter placeholders.
     pub fn tree<P: Progress>(&self, dir: &Path, progress: &P) -> Result<Scan, Error> {
-        let root = self.gate.check_typed_path(dir)?;
+        let root = self.settings.paths.resolve(&self.gate, dir)?;
         let root_meta = self.gate.lstat(&root)?;
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }
         let table = ProcessTable::query(&self.gate)?;
         let log = Log::default();
-        let fixed = FixedTargets::of(&self.rules, &self.settings.home).under(&root);
+        let fixed = FixedTargets::of(&self.rules, &self.settings.paths).under(&root);
         fixed.report_symlinked(&self.gate, &log);
         let fixed = fixed.into_map();
 
@@ -144,12 +144,12 @@ impl<B: Backend + Sync> Scanner<B> {
     pub fn caches<P: Progress>(&self, progress: &P) -> Result<Scan, Error> {
         let table = ProcessTable::query(&self.gate)?;
         let log = Log::default();
-        let fixed = FixedTargets::of(&self.rules, &self.settings.home).outermost();
+        let fixed = FixedTargets::of(&self.rules, &self.settings.paths).outermost();
 
         let targets = Targets::new(&self.gate, &table, &log, progress);
         let claim = FixedClaim {
             gate: &self.gate,
-            home: &self.settings.home,
+            paths: &self.settings.paths,
             mounts: self.settings.walk.into(),
             targets: &targets,
             log: &log,

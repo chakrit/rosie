@@ -22,8 +22,9 @@ pub trait Backend {
     /// Metadata of the path itself, never of a symlink's target.
     fn lstat(&self, path: &Path) -> io::Result<Metadata>;
 
-    /// The target a symlink points at, as stored in the link.
-    fn read_link(&self, path: &Path) -> io::Result<PathBuf>;
+    /// The path with every symlink followed, `.` and `..` applied, and each name spelled
+    /// as stored on disk (`realpath`). Fails when the path does not exist.
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf>;
 
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>>;
 
@@ -74,8 +75,8 @@ impl<B: Backend + ?Sized> Backend for &B {
         (**self).lstat(path)
     }
 
-    fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
-        (**self).read_link(path)
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        (**self).canonicalize(path)
     }
 
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>> {

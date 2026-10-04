@@ -15,7 +15,7 @@ use super::entry::{Entry, Mounts, NotAnEntry};
 use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
-use crate::fs::{self, Backend, Gate, Home};
+use crate::fs::{self, Backend, Gate, Paths};
 use crate::plan::{Needs, WalkSkip};
 use crate::rules::{FixedPath, RuleId, RuleSet, Shape, Tier};
 
@@ -23,10 +23,10 @@ use crate::rules::{FixedPath, RuleId, RuleSet, Shape, Tier};
 pub(super) struct FixedTargets(BTreeMap<PathBuf, Vec<RuleMatch>>);
 
 impl FixedTargets {
-    pub fn of(rules: &RuleSet, home: &Home) -> Self {
+    pub fn of(rules: &RuleSet, paths: &Paths) -> Self {
         let mut targets: BTreeMap<PathBuf, Vec<RuleMatch>> = BTreeMap::new();
         for (rule, tier, fixed) in fixed_paths(rules) {
-            let path = fixed.resolve(home);
+            let path = fixed.resolve(paths);
 
             let matched = RuleMatch {
                 rule: rule.clone(),
@@ -96,7 +96,7 @@ impl FixedTargets {
 /// counting from home for a path under home and from `/` otherwise.
 pub(super) struct FixedClaim<'a, B: Backend, P: Progress> {
     pub gate: &'a Gate<B>,
-    pub home: &'a Home,
+    pub paths: &'a Paths,
     pub mounts: Mounts,
     pub targets: &'a Targets<'a, B, P>,
     pub log: &'a Log,
@@ -113,7 +113,7 @@ impl<B: Backend + Sync, P: Progress> FixedClaim<'_, B, P> {
             Err(NotAnEntry::Fs(error)) => return self.log.entry_failed(path, error),
         };
 
-        let closed = entry.is_behind_a_closed_mount(self.gate, self.home, self.mounts);
+        let closed = entry.is_behind_a_closed_mount(self.gate, self.paths, self.mounts);
         match closed {
             Ok(false) => self.targets.claim(scope, entry, rules),
             Ok(true) => self.log.skip(path, WalkSkip::Closed(Needs::MOUNTS)),

@@ -44,7 +44,7 @@ const SYMLINK_MODE: u32 = 0o755;
 pub enum Call {
     ReadDir(PathBuf),
     Lstat(PathBuf),
-    ReadLink(PathBuf),
+    Canonicalize(PathBuf),
     ReadFile(PathBuf),
     WriteFile(PathBuf),
     CreateFile(PathBuf),
@@ -224,13 +224,9 @@ impl Backend for FakeBackend {
         })
     }
 
-    fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
-        let state = self.begin(Call::ReadLink(path.into()), path, Op::ReadLink)?;
-        let key = state.resolve(path)?;
-        match &state.node_at(&key).body {
-            Body::Symlink(target) => Ok(target.clone()),
-            _ => Err(ErrorKind::InvalidInput.into()),
-        }
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        let state = self.begin(Call::Canonicalize(path.into()), path, Op::Canonicalize)?;
+        state.follow(path)
     }
 
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>> {

@@ -15,7 +15,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use rosie::apps::launch_jobs_argv;
 use rosie::cli::{App, Console, Env, ExitStatus, PromptError, Terminals};
 use rosie::fs::fake::{Call, FakeBackend};
-use rosie::fs::{Argv, CommandOutput, Exit, Home};
+use rosie::fs::{Argv, CommandOutput, Exit, Paths};
 use rosie::process::ProcessTable;
 use rosie::run::PlainReporter;
 use rosie::run::elevated::Stdin;
@@ -151,7 +151,7 @@ impl Sandbox {
 
     pub fn run_with(&self, script: Script, args: &[&str]) -> Ran {
         let env = Env {
-            home: Home::new(Path::new(HOME)).expect("absolute home"),
+            paths: Paths::new(Path::new(HOME)).expect("absolute home"),
             cwd: PathBuf::from(CWD),
             exe: PathBuf::from(EXE),
             pid: PID,

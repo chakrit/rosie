@@ -120,17 +120,8 @@ pub enum Problem {
     #[error("`{field}` = {value:?} is not one folder name")]
     BadFolderName { field: &'static str, value: String },
 
-    #[error("`{field}` path {value:?} must be absolute or start with `~/`")]
+    #[error("`{field}` path {value:?} must start with `/`, or be `~` or start with `~/`")]
     BadPath { field: &'static str, value: String },
-
-    #[error(
-        "`{field}` path {value:?} has an empty, `.`, or `..` component (a trailing slash \
-         leaves one too)"
-    )]
-    BadPathComponent { field: &'static str, value: String },
-
-    #[error("`{field}` path {value:?} is the root or home folder itself")]
-    RootOrHome { field: &'static str, value: String },
 
     #[error("`{field}` repeats the path {value:?}")]
     DuplicatePath { field: &'static str, value: String },

@@ -8,7 +8,7 @@
 //!   commands pass through. Errors name their path or command.
 
 mod admission;
-mod components;
+mod canonical;
 mod lexical;
 mod removal;
 mod root_control;
@@ -77,18 +77,17 @@ impl<B: Backend> Gate<B> {
 
     /// `lstat`s a path of a scanned tree, such as a file a Lua rule tests for or a fixed
     /// leftover folder app mode lists. A path with a symlink in any component, the last
-    /// included, is refused rather than followed; a missing component is an `Io` error
-    /// naming it.
+    /// included, is refused rather than followed; a missing path is an `Io` error naming
+    /// it.
     pub fn lstat_link_free(&self, path: &Path) -> Result<Metadata, Error> {
         let path = resolve_dots(path)?;
-        self.lstat_without_symlinks(&path)
+        self.lstat_real(&path)
     }
 
     /// Reads a file of a scanned tree, such as a marker a Lua rule inspects. A path with
     /// a symlink in any component is refused rather than followed.
     pub fn read_file(&self, path: &Path) -> Result<Vec<u8>, Error> {
-        let path = resolve_dots(path)?;
-        self.lstat_without_symlinks(&path)?;
+        let path = self.check_real(path)?;
         self.io(Op::ReadFile, &path, self.backend.read_file(&path))
     }
 
@@ -133,14 +132,14 @@ impl<B: Backend> Gate<B> {
     /// Reads a file under rosie's own folders.
     pub fn read_own_file(&self, path: &Path) -> Result<Vec<u8>, Error> {
         let path = self.confine_to_own(path)?;
-        self.lstat_without_symlinks(&path)?;
+        self.check_real(&path)?;
         self.io(Op::ReadFile, &path, self.backend.read_file(&path))
     }
 
     /// Creates or replaces a file under rosie's own folders.
     pub fn write_own_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
         let path = self.confine_to_own(path)?;
-        self.refuse_symlinks_in_existing(&path)?;
+        self.check_real(&path)?;
         self.io(
             Op::WriteFile,
             &path,
@@ -152,7 +151,7 @@ impl<B: Backend> Gate<B> {
     /// the volume already holds the name under any spelling it treats as the same.
     pub fn create_own_file(&self, path: &Path, contents: &[u8]) -> Result<(), Error> {
         let path = self.confine_to_own(path)?;
-        self.refuse_symlinks_in_existing(&path)?;
+        self.check_real(&path)?;
         self.io(
             Op::CreateFile,
             &path,
@@ -163,7 +162,7 @@ impl<B: Backend> Gate<B> {
     /// Creates a folder under rosie's own folders, with any missing parents.
     pub fn create_own_dir_all(&self, path: &Path) -> Result<(), Error> {
         let path = self.confine_to_own(path)?;
-        self.refuse_symlinks_in_existing(&path)?;
+        self.check_real(&path)?;
         self.io(Op::CreateDir, &path, self.backend.create_dir_all(&path))
     }
 
@@ -172,8 +171,8 @@ impl<B: Backend> Gate<B> {
     pub fn rename_own(&self, from: &Path, to: &Path) -> Result<(), Error> {
         let from = self.confine_below_own(from)?;
         let to = self.confine_below_own(to)?;
-        self.lstat_without_symlinks(&from)?;
-        self.refuse_symlinks_in_existing(&to)?;
+        self.lstat_real(&from)?;
+        self.check_real(&to)?;
         self.io(Op::Rename, &from, self.backend.rename(&from, &to))
     }
 
@@ -181,7 +180,7 @@ impl<B: Backend> Gate<B> {
     /// folders themselves are never deleted.
     pub fn delete_own(&self, path: &Path) -> Result<(), Error> {
         let path = self.confine_below_own(path)?;
-        let meta = self.lstat_without_symlinks(&path)?;
+        let meta = self.lstat_real(&path)?;
         self.remove_item(&path, meta)
     }
 
@@ -536,7 +535,7 @@ mod tests {
         let gate = gate(&fake, &["/Users/me/code"]);
 
         let deleted = delete(&gate, path("/Users/me/code/escape/x"));
-        let typed = gate.check_typed_path(path("/Users/me/code/escape/x"));
+        let typed = gate.check_real(path("/Users/me/code/escape/x"));
 
         for result in [deleted, typed.map(drop)] {
             assert!(
@@ -547,40 +546,35 @@ mod tests {
     }
 
     #[test]
-    fn keeps_a_refusal_typed_when_the_link_cannot_be_read() {
+    fn refuses_a_path_through_a_dangling_link_leaving_its_real_path_unresolved() {
         let fake = FakeBackend::new();
-        fake.add_dir("/Users/me/elsewhere");
-        fake.add_symlink("/Users/me/code/link", "/Users/me/elsewhere");
-        fake.fail_on(
-            "/Users/me/code/link",
-            Op::ReadLink,
-            ErrorKind::PermissionDenied,
-        );
+        fake.add_dir("/Users/me/code");
+        fake.add_symlink("/Users/me/code/link", "/Users/me/gone");
         let gate = gate(&fake, &["/Users/me/code"]);
 
-        let result = delete(&gate, path("/Users/me/code/link/x"));
+        let through = gate.check_real(path("/Users/me/code/link/x"));
+        let at = gate.check_real(path("/Users/me/code/link"));
 
-        assert!(
-            matches!(result, Err(Error::Symlink { link, real: RealPath::Unresolved(_), .. }) if link == Path::new("/Users/me/code/link"))
-        );
+        for result in [through, at] {
+            assert!(
+                matches!(&result, Err(Error::Symlink { link, real: RealPath::Unresolved(_), .. }) if link == Path::new("/Users/me/code/link")),
+                "expected a symlink refusal, got {result:?}"
+            );
+        }
     }
 
     #[test]
-    fn leaves_the_real_path_unresolved_for_a_symlink_loop() {
+    fn refuses_a_path_through_a_symlink_loop() {
         let fake = FakeBackend::new();
+        fake.add_file("/Users/me/code/keep", "x");
         fake.add_symlink("/Users/me/code/a", "b");
         fake.add_symlink("/Users/me/code/b", "a");
         let gate = gate(&fake, &["/Users/me/code"]);
 
         let result = delete(&gate, path("/Users/me/code/a/x"));
 
-        assert!(matches!(
-            result,
-            Err(Error::Symlink {
-                real: RealPath::Unresolved(_),
-                ..
-            })
-        ));
+        assert!(result.is_err(), "expected a refusal, got {result:?}");
+        assert_eq!(removals(&fake), vec![]);
     }
 
     // deletion
@@ -757,7 +751,7 @@ mod tests {
         let gate = gate(&fake, &[]);
 
         let checked = gate
-            .check_typed_path(path("/Users/me/code/./app"))
+            .check_real(path("/Users/me/code/./app"))
             .expect("exact spelling");
 
         assert_eq!(checked, PathBuf::from("/Users/me/code/app"));
@@ -769,7 +763,7 @@ mod tests {
         fake.add_dir("/Users/me/Code/App");
         let gate = gate(&fake, &[]);
 
-        let result = gate.check_typed_path(path("/users/me/code/App"));
+        let result = gate.check_real(path("/users/me/code/App"));
 
         let Err(Error::Misspelled { typed, real }) = result else {
             panic!("expected a spelling refusal, got {result:?}");
@@ -785,7 +779,7 @@ mod tests {
         fake.add_symlink("/var", "private/var");
         let gate = gate(&fake, &[]);
 
-        let result = gate.check_typed_path(path("/var/folders/x"));
+        let result = gate.check_real(path("/var/folders/x"));
 
         assert!(
             matches!(result, Err(Error::Symlink { real: RealPath::Resolved(real), .. }) if real == Path::new("/private/var/folders/x"))
@@ -793,15 +787,16 @@ mod tests {
     }
 
     #[test]
-    fn reports_a_missing_typed_path_as_not_found() {
+    fn accepts_a_missing_path_below_its_real_deepest_ancestor() {
         let fake = FakeBackend::new();
         fake.add_dir("/Users/me");
         let gate = gate(&fake, &[]);
 
-        let result = gate.check_typed_path(path("/Users/me/nope"));
+        let result = gate.check_real(path("/Users/me/nope/deeper"));
 
-        assert!(
-            matches!(result, Err(Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound)
+        assert_eq!(
+            result.expect("nothing missing can be a link"),
+            PathBuf::from("/Users/me/nope/deeper")
         );
     }
 

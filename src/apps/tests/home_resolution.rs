@@ -1,10 +1,10 @@
-//! Home is a `Home`, resolved once where it is made, so a `..`-spelled home plans the
+//! The home in `Paths` is resolved once where it is made, so a `..`-spelled home plans the
 //! same as the home it resolves to.
 
 use super::*;
 
-fn dotted_home() -> Home {
-    Home::new(Path::new("/Users/me/../me")).expect("absolute home")
+fn dotted_home() -> Paths {
+    Paths::new(Path::new("/Users/me/../me")).expect("absolute paths")
 }
 
 #[test]
@@ -17,11 +17,11 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
     let plain = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
-    .expect("plain home");
+    .expect("plain paths");
     let dotted = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
@@ -29,7 +29,7 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
-    .expect("dotted home");
+    .expect("dotted paths");
 
     assert_eq!(deletes(&dotted), deletes(&plain));
 }
@@ -43,18 +43,18 @@ fn a_dotted_home_plans_the_same_orphan_scan_as_the_plain_home() {
 
     let plain = scan_orphans(
         &gate(&fake, &ALL_ROOTS),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
-    .expect("plain home");
+    .expect("plain paths");
     let dotted = scan_orphans(
         &gate(&fake, &ALL_ROOTS),
         &dotted_home(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
-    .expect("dotted home");
+    .expect("dotted paths");
 
     assert_eq!(deletes(&dotted), deletes(&plain));
 }
@@ -64,8 +64,8 @@ fn a_dotted_home_lists_the_same_picker_apps_as_the_plain_home() {
     let fake = FakeBackend::new();
     installed_suite(&fake);
 
-    let plain = picker_apps(&gate(&fake, &ALL_ROOTS), &home()).expect("plain home");
-    let dotted = picker_apps(&gate(&fake, &ALL_ROOTS), &dotted_home()).expect("dotted home");
+    let plain = picker_apps(&gate(&fake, &ALL_ROOTS), &paths()).expect("plain paths");
+    let dotted = picker_apps(&gate(&fake, &ALL_ROOTS), &dotted_home()).expect("dotted paths");
 
     assert_eq!(dotted, plain);
 }

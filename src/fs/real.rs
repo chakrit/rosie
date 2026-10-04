@@ -40,8 +40,8 @@ impl Backend for RealBackend {
         })
     }
 
-    fn read_link(&self, path: &Path) -> io::Result<PathBuf> {
-        fs::read_link(path)
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        fs::canonicalize(path)
     }
 
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>> {

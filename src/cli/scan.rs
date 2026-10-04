@@ -143,7 +143,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             false => AggressiveItems::Unticked,
         };
         let gate = self.roots_gate(config.config())?;
-        let home = &self.env.home;
+        let paths = &self.env.paths;
 
         match mode {
             Mode::Tree { dir, rules } => {
@@ -170,10 +170,10 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     Some(app) => self.absolute(app),
                     None => self.pick_app(&gate, app_usage)?,
                 };
-                let home = &self.env.home;
-                Ok(apps::scan_app(&gate, &app, home, aggressive, walk.into())?)
+                let paths = &self.env.paths;
+                Ok(apps::scan_app(&gate, &app, paths, aggressive, walk.into())?)
             }
-            Mode::Orphans => Ok(apps::scan_orphans(&gate, home, aggressive, walk.into())?),
+            Mode::Orphans => Ok(apps::scan_orphans(&gate, paths, aggressive, walk.into())?),
         }
     }
 
@@ -185,7 +185,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         aggressive: AggressiveItems,
     ) -> Scanner<&'a B> {
         let settings = Settings {
-            home: self.env.home.clone(),
+            paths: self.env.paths.clone(),
             walk,
             aggressive,
         };
@@ -194,7 +194,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     fn pick_app(&mut self, gate: &Gate<&'a B>, usage: &str) -> Result<PathBuf, Error> {
         let picker = self.picker(usage)?;
-        let apps = apps::picker_apps(gate, &self.env.home)?;
+        let apps = apps::picker_apps(gate, &self.env.paths)?;
         let options = apps
             .into_iter()
             .map(|app| (app.display().to_string(), app))
@@ -256,7 +256,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let gate = self.roots_gate(config.config())?;
         let elevation = Elevation {
             exe: self.env.exe.clone(),
-            home: self.env.home.clone(),
+            paths: self.env.paths.clone(),
         };
 
         let mut reporter = self.console.reporter();

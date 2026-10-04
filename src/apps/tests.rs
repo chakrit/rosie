@@ -4,13 +4,13 @@ use std::path::{Path, PathBuf};
 use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
 use super::fixture::{
-    ALL_ROOTS, HOME, failed, gate, home, install_app, install_wrapped_app, loaded, no_value, quiet,
-    receipts, running, succeeded,
+    ALL_ROOTS, HOME, failed, gate, install_app, install_wrapped_app, loaded, no_value, paths,
+    quiet, receipts, running, succeeded,
 };
 use super::*;
 use crate::fs::ROOT_UID;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{self, Home, Op};
+use crate::fs::{self, Op, Paths};
 use crate::plan::{AggressiveItems, Delete, LaunchDomain, Needs, RunAs, Size, Status, WalkSkip};
 use crate::scan::{Mounts, Scan};
 
@@ -29,7 +29,7 @@ fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) 
     scan_app(
         &gate(fake, roots),
         Path::new(BAR),
-        &home(),
+        &paths(),
         aggressive,
         Mounts::Skip,
     )
@@ -37,7 +37,7 @@ fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) 
 }
 
 fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {
-    scan_orphans(&gate(fake, &ALL_ROOTS), &home(), aggressive, Mounts::Skip).expect("orphan scan")
+    scan_orphans(&gate(fake, &ALL_ROOTS), &paths(), aggressive, Mounts::Skip).expect("orphan scan")
 }
 
 /// `(path, status)` of every delete entry, in plan order.

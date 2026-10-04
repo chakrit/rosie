@@ -11,8 +11,7 @@ use super::error::{Error, Problem};
 use super::glob::Glob;
 use super::lua::compile;
 use super::rule::{
-    Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, PathProblem,
-    Shape, Twin,
+    Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape, Twin,
 };
 use crate::fs::Argv;
 
@@ -251,19 +250,9 @@ fn fixed_paths(field: &'static str, texts: &[String]) -> Result<FixedPaths, Prob
     let parsed = texts
         .iter()
         .map(|text| {
-            FixedPath::parse(text).map_err(|problem| match problem {
-                PathProblem::NotAnchored => Problem::BadPath {
-                    field,
-                    value: text.clone(),
-                },
-                PathProblem::BadComponent => Problem::BadPathComponent {
-                    field,
-                    value: text.clone(),
-                },
-                PathProblem::RootOrHome => Problem::RootOrHome {
-                    field,
-                    value: text.clone(),
-                },
+            FixedPath::parse(text).ok_or_else(|| Problem::BadPath {
+                field,
+                value: text.clone(),
             })
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -393,7 +382,7 @@ mod tests {
         let Shape::Paths(paths) = shape else {
             panic!("expected a path rule");
         };
-        let home = &crate::fs::Home::new(Path::new("/Users/me")).expect("absolute home");
+        let home = &crate::fs::Paths::new(Path::new("/Users/me")).expect("absolute home");
         let resolved: Vec<(Tier, Vec<PathBuf>)> = paths
             .tiers()
             .map(|(tier, paths)| (tier, paths.iter().map(|p| p.resolve(home)).collect()))
@@ -647,23 +636,6 @@ mod tests {
             let text = format!("[rules.r]\nstrategy = \"path\"\npaths = [{path:?}]");
             assert!(matches!(problem(&text), Problem::BadPath { .. }), "{path}");
         }
-        for path in [
-            "~//x", "~/a//b", "~/./b", "~/../b", "~/a/..", "~/x/", "/a//b", "/./b", "/../b",
-            "/a/..", "/a/",
-        ] {
-            let text = format!("[rules.r]\nstrategy = \"path\"\npaths = [{path:?}]");
-            assert!(
-                matches!(problem(&text), Problem::BadPathComponent { .. }),
-                "{path}"
-            );
-        }
-        for path in ["/", "~"] {
-            let text = format!("[rules.r]\nstrategy = \"path\"\npaths = [{path:?}]");
-            assert!(
-                matches!(problem(&text), Problem::RootOrHome { .. }),
-                "{path}"
-            );
-        }
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"marker\"\ntarget = \"x\"\nmarker = [\"a/b\"]"),
             Problem::BadGlob {
@@ -678,28 +650,6 @@ mod tests {
                 "{cmd}"
             );
         }
-    }
-
-    #[test]
-    fn bad_path_problems_name_the_true_reason() {
-        let text = "[rules.r]\nstrategy = \"path\"\npaths = [\"relative/x\"]";
-        assert_eq!(
-            problem(text).to_string(),
-            "`paths` path \"relative/x\" must be absolute or start with `~/`"
-        );
-
-        let text = "[rules.r]\nstrategy = \"path\"\npaths = [\"~/a/../b\"]";
-        assert!(
-            problem(text)
-                .to_string()
-                .contains("has an empty, `.`, or `..` component")
-        );
-
-        let text = "[rules.r]\nstrategy = \"path\"\npaths = [\"~\"]";
-        assert_eq!(
-            problem(text).to_string(),
-            "`paths` path \"~\" is the root or home folder itself"
-        );
     }
 
     #[test]

@@ -5,7 +5,7 @@ mod backend;
 mod error;
 pub mod fake;
 mod gate;
-mod home;
+mod paths;
 mod real;
 
 pub use backend::{
@@ -14,5 +14,5 @@ pub use backend::{
 };
 pub use error::{Error, Op, RealPath};
 pub use gate::{Admitted, Bounds, Exposure, Gate, resolve_dots};
-pub use home::Home;
+pub use paths::Paths;
 pub use real::RealBackend;

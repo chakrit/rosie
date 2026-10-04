@@ -19,7 +19,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
         &gate(fake, &ALL_ROOTS),
         Path::new(app),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )

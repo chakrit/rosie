@@ -113,7 +113,7 @@ pub enum RealPath {
 pub enum Op {
     ReadDir,
     Lstat,
-    ReadLink,
+    Canonicalize,
     ReadFile,
     WriteFile,
     CreateFile,
@@ -129,7 +129,7 @@ impl Op {
         match self {
             Op::ReadDir => "cannot list",
             Op::Lstat => "cannot inspect",
-            Op::ReadLink => "cannot read link",
+            Op::Canonicalize => "cannot resolve",
             Op::ReadFile => "cannot read",
             Op::WriteFile => "cannot write",
             Op::CreateFile => "cannot create",

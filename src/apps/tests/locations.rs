@@ -50,7 +50,7 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
@@ -81,7 +81,7 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
@@ -117,7 +117,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
         scan_app(
             &gate(fake, &ALL_ROOTS),
             Path::new(BAR),
-            &home(),
+            &paths(),
             AggressiveItems::Unticked,
             Mounts::Skip,
         )
@@ -132,7 +132,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     assert!(
         fails(scan_orphans(
             &gate(&orphan, &ALL_ROOTS),
-            &home(),
+            &paths(),
             AggressiveItems::Unticked,
             Mounts::Skip
         )),
@@ -200,7 +200,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
         scan_app(
             &gate(fake, &ALL_ROOTS),
             Path::new(BAR),
-            &home(),
+            &paths(),
             AggressiveItems::Unticked,
             mounts,
         )

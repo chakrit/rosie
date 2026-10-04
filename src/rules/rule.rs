@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use super::glob::Glob;
 use super::name::RuleId;
-use crate::fs::{Argv, Home};
+use crate::fs::{Argv, Paths};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
@@ -175,61 +175,24 @@ impl FixedPaths {
     }
 }
 
-/// A fixed path as a rule writes it: absolute, or under the home folder via `~`.
+/// A fixed path as a rule writes it, anchored at `/` or at the home folder by `~` or
+/// `~/…`. `roots` decides what it may reach (`docs/spec/rules.md#paths`).
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub enum FixedPath {
-    Absolute(PathBuf),
-    /// The non-empty path below the home folder, with only normal components: never
-    /// empty, since `~` and `~/` alone are load errors.
-    Home(PathBuf),
-}
+pub struct FixedPath(PathBuf);
 
 impl FixedPath {
-    pub(super) fn parse(text: &str) -> Result<FixedPath, PathProblem> {
-        let home = match text {
-            "~" => Some(""),
-            _ => text.strip_prefix("~/"),
-        };
-        match (home, text.strip_prefix('/')) {
-            (Some(rest), _) => rest_to_path(rest, || FixedPath::Home(PathBuf::from(rest))),
-            (None, Some(rest)) => rest_to_path(rest, || FixedPath::Absolute(PathBuf::from(text))),
-            (None, None) => Err(PathProblem::NotAnchored),
-        }
+    /// The written path, or `None` when it is anchored at neither `/` nor `~`.
+    pub(super) fn parse(text: &str) -> Option<FixedPath> {
+        let anchored = text.starts_with('/') || text == "~" || text.starts_with("~/");
+        anchored.then(|| FixedPath(PathBuf::from(text)))
     }
 
-    /// The absolute path, with `~` taken as the injected home folder. It has no `.` or
-    /// `..`: neither spelling admits one and home has its own resolved.
-    pub fn resolve(&self, home: &Home) -> PathBuf {
-        match self {
-            FixedPath::Absolute(path) => path.clone(),
-            FixedPath::Home(rest) => home.join(rest),
-        }
+    /// The absolute path, made by [`Paths::expand`].
+    pub fn resolve(&self, paths: &Paths) -> PathBuf {
+        paths
+            .expand(&self.0)
+            .expect("a fixed path is anchored at `/` or `~`, so it expands")
     }
-}
-
-/// Why a fixed path was refused.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum PathProblem {
-    /// Neither absolute nor `~`/`~/…`.
-    NotAnchored,
-    /// An empty, `.`, or `..` component (including a trailing slash, which leaves a
-    /// trailing empty component).
-    BadComponent,
-    /// Exactly `/`, `~`, or `~/`: the root or home folder itself.
-    RootOrHome,
-}
-
-/// Builds a fixed path from the text after the anchor (`~/` or `/`), refusing an empty
-/// remainder (the anchor alone) and any `.`, `..`, or empty component, so the remainder
-/// never resolves to a different path than the one written.
-fn rest_to_path(rest: &str, make: impl FnOnce() -> FixedPath) -> Result<FixedPath, PathProblem> {
-    if rest.is_empty() {
-        return Err(PathProblem::RootOrHome);
-    }
-    let normal = rest
-        .split('/')
-        .all(|segment| !segment.is_empty() && segment != "." && segment != "..");
-    normal.then(make).ok_or(PathProblem::BadComponent)
 }
 
 /// A "what to clean" value and its `_aggressive` twin; at least one is set

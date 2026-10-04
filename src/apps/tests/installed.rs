@@ -76,7 +76,7 @@ fn an_installed_app_whose_id_cannot_be_read_fails_the_orphan_scan_naming_it() {
 
         let result = scan_orphans(
             &gate(&fake, &ALL_ROOTS),
-            &home(),
+            &paths(),
             AggressiveItems::Unticked,
             Mounts::Skip,
         );
@@ -104,7 +104,7 @@ fn an_installed_app_with_no_bundle_id_is_a_note_not_a_failure() {
 
     let scanned = scan_orphans(
         &gate(&fake, &ALL_ROOTS),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
@@ -203,7 +203,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
     let scanned = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
@@ -229,7 +229,7 @@ fn a_wrapper_holding_several_apps_has_no_info_plist() {
     let result = scan_app(
         &gate(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
@@ -249,7 +249,7 @@ fn the_picker_lists_apps_in_both_application_folders() {
     fake.add_symlink("/Applications/Linked.app", "/Users/me/Applications/Qux.app");
     fake.add_file("/Applications/.DS_Store", "x");
 
-    let apps = picker_apps(&gate(&fake, &ALL_ROOTS), &home()).expect("listing");
+    let apps = picker_apps(&gate(&fake, &ALL_ROOTS), &paths()).expect("listing");
 
     assert_eq!(
         apps,
@@ -270,11 +270,11 @@ fn an_install_folder_rosie_may_not_list_fails_the_orphan_scan_and_the_picker() {
 
     let orphans = scan_orphans(
         &gate(&fake, &ALL_ROOTS),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
-    let picker = picker_apps(&gate(&fake, &ALL_ROOTS), &home());
+    let picker = picker_apps(&gate(&fake, &ALL_ROOTS), &paths());
 
     assert!(
         matches!(orphans, Err(Error::UnlistableAppFolder { ref folder, .. }) if folder == Path::new("/Applications")),
@@ -309,11 +309,11 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
 
     let orphans = scan_orphans(
         &gate(&fake, &ALL_ROOTS),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     );
-    let picker = picker_apps(&gate(&fake, &ALL_ROOTS), &home()).expect("listing");
+    let picker = picker_apps(&gate(&fake, &ALL_ROOTS), &paths()).expect("listing");
 
     let orphans = orphans.expect("orphan scan");
     assert_eq!(
@@ -335,7 +335,7 @@ fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scan, Error> {
     scan_app(
         &gate(fake, &ALL_ROOTS),
         Path::new(NPLAYER),
-        &home(),
+        &paths(),
         AggressiveItems::Unticked,
         Mounts::Skip,
     )
@@ -412,7 +412,7 @@ fn the_picker_lists_apps_sorted_by_path_across_folders() {
 
     let apps = picker_apps(
         &gate,
-        &Home::new(Path::new("/Accounts/me")).expect("absolute home"),
+        &Paths::new(Path::new("/Accounts/me")).expect("absolute paths"),
     )
     .expect("listing");
 
@@ -435,7 +435,7 @@ fn an_app_folder_entry_rosie_cannot_lstat_fails_the_orphan_scan() {
 
         let result = scan_orphans(
             &gate(&fake, &ALL_ROOTS),
-            &home(),
+            &paths(),
             AggressiveItems::Unticked,
             Mounts::Skip,
         );

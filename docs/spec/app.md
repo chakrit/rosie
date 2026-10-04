@@ -29,8 +29,9 @@ is a plan like any other ([plan.md](plan.md)).
   ([safety.md](safety.md#cleanup-targets)).
 - An app argument with a symlink component is refused
   ([safety.md](safety.md#symlinks)).
-- The plan is refused while the app is running
-  ([safety.md](safety.md#running-processes)).
+- Before listing leftovers, app mode runs the bundle's own delete checks. Any refusal
+  (outside roots, mount point, running process, …) refuses the whole operation, naming
+  the reason ([safety.md](safety.md#running-processes)).
 - Rule packs may add per-bundle-ID leftover paths, for example from Homebrew zap data
   ([rules.md](rules.md#packs)).
 - Every filesystem item is gated by `roots` ([safety.md](safety.md#roots)).

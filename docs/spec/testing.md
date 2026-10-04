@@ -44,7 +44,7 @@ the right strategy or script for each rule.
   behind a `Mutex`.
 - Tests assert on the fake's recorded calls, including which tool `cmd` a rule ran.
 - One contract suite runs against both the fake and `RealBackend` on a temp folder. It
-  covers file operations only; `ps` and sudo are covered by the fake plus smoke tests of
+  covers file operations only; `lsof`, `ps`, and sudo are covered by the fake plus smoke tests of
   the refusal paths.
 - The sandbox tier runs the CLI in-process through `App<B>` with the fake. A few smoke
   tests run the real binary on temp folders with `env_clear()` and a sandboxed `HOME`

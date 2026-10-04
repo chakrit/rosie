@@ -8,7 +8,7 @@ Status: accepted.
 - No ObjC bindings and no FFI, beyond the deliberate picks `mlua` and
   `security-framework` (via native-tls). Do not add FFI crates or invent new FFI. No
   `libc` crate.
-- Prefer system CLIs (`ps`, `id`, `launchctl`, `pkgutil`, `plutil`) and std.
+- Prefer system CLIs (`ps`, `lsof`, `id`, `launchctl`, `pkgutil`, `plutil`) and std.
 - Simplify uses of Rust types as much as we can.
 - No `dyn` for the FS interaction layer; static generics
   ([safety.md](safety.md#fs-interaction-layer)).

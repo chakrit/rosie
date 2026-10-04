@@ -103,9 +103,12 @@ off:
 
 ## Running processes
 
-Every plan, in every mode, refuses items that any process is executing from. Detection
-parses `ps -axo pid=,ppid=,uid=,comm=`. The `comm` path is matched as written against
-item paths, component by component. Bare names and symlinked launches are not matched.
+- A delete, in every mode, is refused when a running process executes from inside its
+  path. The check is one of the FS layer's delete checks.
+- Detection takes one snapshot per scan or run with `lsof -nP -d txt -F pn`. Each
+  reported path is matched against item paths, component by component.
+- Decision record:
+  [running-process check in the FS layer](../decisions/2026-10-04-running-check-in-fs-layer.md).
 
 ## Deletion
 

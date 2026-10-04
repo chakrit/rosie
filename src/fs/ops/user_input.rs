@@ -7,18 +7,20 @@ use super::{FsOp, sealed};
 use crate::fs::backend::{Backend, Metadata};
 use crate::fs::context::FsContext;
 use crate::fs::error::Error;
+use crate::fs::links::EnterLinks;
 
 /// The owner of every op on what the user names.
 pub enum UserInput {}
 
 impl UserInput {
-    /// Makes a written path absolute and accepts it only as its own canonical form on
-    /// disk: `~` expanded against the injected home, `.`, `..`, and repeated `/`
-    /// resolved by text, then any difference from the canonical form refused as a
-    /// symlink or a misspelling, naming the canonical path. A missing path is checked
-    /// up to its deepest existing ancestor.
-    pub fn path(path: &Path) -> Resolve<'_> {
-        Resolve { path }
+    /// Makes a written path absolute and returns where it is on disk: `~` expanded
+    /// against the injected home, `.`, `..`, and repeated `/` resolved by text, then
+    /// compared with its canonical form. A misspelling is refused, naming the canonical
+    /// path. A path through a symlink is refused the same way, unless `links` allows
+    /// one in a path rosie is given; then its real location is returned. A missing path
+    /// is checked up to its deepest existing ancestor.
+    pub fn path(path: &Path, links: EnterLinks) -> Resolve<'_> {
+        Resolve { path, links }
     }
 
     /// Reads a file the user named, such as a plan, following any symlink on its way.
@@ -34,6 +36,7 @@ impl UserInput {
 
 pub struct Resolve<'p> {
     path: &'p Path,
+    links: EnterLinks,
 }
 
 pub struct Read<'p> {
@@ -53,7 +56,7 @@ impl<B: Backend> FsOp<B> for Resolve<'_> {
 
     fn perform(self, ctx: &FsContext<B>) -> Result<PathBuf, Error> {
         let expanded = ctx.paths().expand(self.path)?;
-        ctx.check_real(&expanded)
+        ctx.locate(&expanded, self.links)
     }
 }
 
@@ -90,7 +93,8 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_dir("/Users/me/Library/Caches");
 
-        let resolved = UserInput::path(Path::new("~//Library/Caches/gone")).perform(&ctx(&fake));
+        let resolved = UserInput::path(Path::new("~//Library/Caches/gone"), EnterLinks::None)
+            .perform(&ctx(&fake));
 
         assert_eq!(
             resolved.expect("real path"),
@@ -104,7 +108,8 @@ mod tests {
         fake.add_dir("/Users/me/dotfiles/cargo");
         fake.add_symlink("/Users/me/.cargo", "dotfiles/cargo");
 
-        let resolved = UserInput::path(Path::new("~/.cargo/registry")).perform(&ctx(&fake));
+        let resolved =
+            UserInput::path(Path::new("~/.cargo/registry"), EnterLinks::None).perform(&ctx(&fake));
 
         let Err(Error::Symlink { link, real, .. }) = resolved else {
             panic!("expected a symlink refusal, got {resolved:?}");
@@ -120,12 +125,61 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_dir("/Users/me/Library/Caches");
 
-        let resolved = UserInput::path(Path::new("~/library/caches/x")).perform(&ctx(&fake));
+        let resolved =
+            UserInput::path(Path::new("~/library/caches/x"), EnterLinks::None).perform(&ctx(&fake));
 
         let Err(Error::Misspelled { real, .. }) = resolved else {
             panic!("expected a spelling refusal, got {resolved:?}");
         };
         assert_eq!(real, PathBuf::from("/Users/me/Library/Caches/x"));
+    }
+
+    // `enter_links = "roots"` (`docs/spec/safety.md#enter_links`)
+
+    #[test]
+    fn takes_a_path_through_a_symlink_to_its_real_location_when_links_are_allowed() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/dotfiles/cargo/registry");
+        fake.add_symlink("/Users/me/.cargo", "dotfiles/cargo");
+
+        for links in [EnterLinks::Roots, EnterLinks::All] {
+            let resolved =
+                UserInput::path(Path::new("~/.cargo/registry"), links).perform(&ctx(&fake));
+
+            assert_eq!(
+                resolved.expect("the real location"),
+                PathBuf::from("/Users/me/dotfiles/cargo/registry")
+            );
+        }
+    }
+
+    #[test]
+    fn still_refuses_a_misspelling_when_links_are_allowed() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/Library/Caches");
+
+        let resolved = UserInput::path(Path::new("~/library/caches/x"), EnterLinks::Roots)
+            .perform(&ctx(&fake));
+
+        assert!(
+            matches!(resolved, Err(Error::Misspelled { .. })),
+            "got {resolved:?}"
+        );
+    }
+
+    #[test]
+    fn still_refuses_a_dangling_link_when_links_are_allowed() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me");
+        fake.add_symlink("/Users/me/.cargo", "dotfiles/cargo");
+
+        let resolved =
+            UserInput::path(Path::new("~/.cargo/registry"), EnterLinks::Roots).perform(&ctx(&fake));
+
+        assert!(
+            matches!(resolved, Err(Error::Symlink { .. })),
+            "got {resolved:?}"
+        );
     }
 
     // `rosie run /tmp/plan.toml` reads the plan through macOS's `/tmp` link.

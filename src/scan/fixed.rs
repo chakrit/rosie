@@ -1,9 +1,11 @@
 //! Fixed rule paths as scan targets (`docs/spec/rules.md#paths`).
 //!
-//! Each path is resolved with the injected home, so two spellings of one path, such as
-//! `/Users/me/.npm` and `~/.npm`, are one target listing both rules. A path through a
-//! symlink hits the symlink ban and is reported like any refused path; an absent path
-//! is simply not planned.
+//! Each path is resolved with the injected home and then located on disk, so two
+//! spellings of one path, such as `/Users/me/.npm` and `~/.npm`, are one target listing
+//! both rules. A path through a symlink hits the symlink ban and is reported like any
+//! refused path, unless `enter_links` allows the link; then the path is a target at its
+//! real location (`docs/spec/safety.md#enter_links`). An absent path is simply not
+//! planned.
 
 use std::collections::{BTreeMap, HashMap};
 use std::path::{Path, PathBuf};
@@ -15,46 +17,65 @@ use super::entry::{Entry, Mounts, NotAnEntry};
 use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
-use crate::fs::{self, Backend, Cleanup, FsContext, FsOp, Paths};
+use crate::fs::{self, Backend, Cleanup, EnterLinks, FsContext, FsOp, Paths};
 use crate::plan::{Needs, WalkSkip};
 use crate::rules::{FixedPath, RuleId, RuleSet, Shape, Tier};
 
-/// Every fixed rule path, resolved, with the rules that list it.
-pub(super) struct FixedTargets(BTreeMap<PathBuf, Vec<RuleMatch>>);
+/// Every fixed rule path located on disk, with the rules that list it, and every path
+/// that could not be located, as written, with why.
+pub(super) struct FixedTargets {
+    located: BTreeMap<PathBuf, Vec<RuleMatch>>,
+    refused: Vec<(PathBuf, fs::Error)>,
+}
 
 impl FixedTargets {
-    pub fn of(rules: &RuleSet, paths: &Paths) -> Self {
-        let mut targets: BTreeMap<PathBuf, Vec<RuleMatch>> = BTreeMap::new();
+    pub fn of<B: Backend>(
+        rules: &RuleSet,
+        paths: &Paths,
+        ctx: &FsContext<B>,
+        links: EnterLinks,
+    ) -> Self {
+        let mut written: BTreeMap<PathBuf, Vec<RuleMatch>> = BTreeMap::new();
         for (rule, tier, fixed) in fixed_paths(rules) {
-            let path = fixed.resolve(paths);
-
             let matched = RuleMatch {
                 rule: rule.clone(),
                 tier,
             };
-            let listed = targets.entry(path).or_default();
-            if !listed.contains(&matched) {
-                listed.push(matched);
+            add(&mut written, fixed.resolve(paths), [matched]);
+        }
+
+        let mut located: BTreeMap<PathBuf, Vec<RuleMatch>> = BTreeMap::new();
+        let mut refused = Vec::new();
+        for (path, matches) in written {
+            match Cleanup::locate(&path, links).perform(ctx) {
+                Ok(real) => add(&mut located, real, matches),
+                Err(error) => refused.push((path, error)),
             }
         }
-        FixedTargets(targets)
+        FixedTargets { located, refused }
     }
 
-    /// Only the paths at or below `root`.
+    /// Only the paths at or below `root`: located ones by where they are, refused ones
+    /// as written.
     pub fn under(self, root: &Path) -> Self {
-        let below = self
-            .0
+        let located = self
+            .located
             .into_iter()
             .filter(|(path, _)| path.starts_with(root))
             .collect();
-        FixedTargets(below)
+        let refused = self
+            .refused
+            .into_iter()
+            .filter(|(path, _)| path.starts_with(root))
+            .collect();
+        FixedTargets { located, refused }
     }
 
-    /// Only the outermost paths: one inside another collapses into it, as the walk
-    /// would never reach it past a match.
+    /// Only the outermost located paths: one inside another collapses into it, as the
+    /// walk would never reach it past a match.
     pub fn outermost(self) -> Self {
         let mut kept: BTreeMap<PathBuf, Vec<RuleMatch>> = BTreeMap::new();
-        for (path, rules) in self.0 {
+        for (path, rules) in self.located {
             // `Path` orders by component, so an enclosing path sorts just before.
             let enclosed = kept
                 .last_key_value()
@@ -63,29 +84,42 @@ impl FixedTargets {
                 kept.insert(path, rules);
             }
         }
-        FixedTargets(kept)
-    }
-
-    /// Reports each path that passes through a symlink. The walk never enters a link,
-    /// so it would pass such a path by without a word.
-    pub fn report_symlinked<B: Backend>(&self, ctx: &FsContext<B>, log: &Log) {
-        for path in self.0.keys() {
-            if let Err(error @ fs::Error::Symlink { .. }) =
-                Cleanup::lstat_link_free(path).perform(ctx)
-            {
-                log.problem(Problem::Path(error));
-            }
+        FixedTargets {
+            located: kept,
+            refused: self.refused,
         }
     }
 
-    /// The paths, for the walk to look each entry up in.
-    pub fn into_map(self) -> HashMap<PathBuf, Vec<RuleMatch>> {
-        self.0.into_iter().collect()
+    /// Reports each path that could not be located, such as one through a symlink
+    /// `enter_links` does not allow, and returns the located ones. The walk never
+    /// enters a link, so it would pass such a path by without a word.
+    pub fn report_refused(self, log: &Log) -> BTreeMap<PathBuf, Vec<RuleMatch>> {
+        for (path, error) in self.refused {
+            log.entry_failed(path, error);
+        }
+        self.located
     }
+}
 
-    pub fn into_iter(self) -> impl Iterator<Item = (PathBuf, Vec<RuleMatch>)> {
-        self.0.into_iter()
+/// Adds `matches` to the rules listing `path`, each rule once.
+fn add(
+    targets: &mut BTreeMap<PathBuf, Vec<RuleMatch>>,
+    path: PathBuf,
+    matches: impl IntoIterator<Item = RuleMatch>,
+) {
+    let listed = targets.entry(path).or_default();
+    for matched in matches {
+        if !listed.contains(&matched) {
+            listed.push(matched);
+        }
     }
+}
+
+/// The located paths, for the walk to look each entry up in.
+pub(super) fn by_path(
+    located: BTreeMap<PathBuf, Vec<RuleMatch>>,
+) -> HashMap<PathBuf, Vec<RuleMatch>> {
+    located.into_iter().collect()
 }
 
 /// Claims fixed paths for `caches`, checking each path itself as the walk would, and the

@@ -9,6 +9,7 @@ use std::path::{Component, Path, PathBuf};
 use super::{FsContext, resolve_dots};
 use crate::fs::backend::{Backend, FileKind, Metadata};
 use crate::fs::error::{Error, Op, RealPath};
+use crate::fs::links::EnterLinks;
 
 /// What the disk makes of a path that rosie normalized by text.
 enum Canonical {
@@ -43,6 +44,23 @@ impl<B: Backend> FsContext<B> {
                     real: RealPath::Unresolved(Box::new(source)),
                 })
             }
+        }
+    }
+
+    /// Where a path rosie is given is on disk. With `links` allowing a symlink in it, a
+    /// path whose canonical form differs only by passing through one is taken to its
+    /// real location; anything else is [`FsContext::check_real`].
+    pub(in crate::fs) fn locate(&self, path: &Path, links: EnterLinks) -> Result<PathBuf, Error> {
+        if !links.allows_given_links() {
+            return self.check_real(path);
+        }
+
+        match self.check_real(path) {
+            Err(Error::Symlink {
+                real: RealPath::Resolved(real),
+                ..
+            }) => Ok(real),
+            checked => checked,
         }
     }
 

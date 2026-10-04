@@ -5,7 +5,8 @@ mod scan_fixture;
 
 use std::path::{Path, PathBuf};
 
-use rosie::fs::ROOT_UID;
+use rosie::config::Walk;
+use rosie::fs::{EnterLinks, ROOT_UID};
 use rosie::plan::{AggressiveItems, ItemKind, RunAs, Selection, Status, WalkSkip};
 use scan_fixture::*;
 
@@ -21,6 +22,16 @@ fn npm_home() -> rosie::fs::fake::FakeBackend {
 fn aggressive() -> Options {
     Options {
         aggressive: AggressiveItems::Ticked,
+        ..Options::default()
+    }
+}
+
+fn links(enter_links: EnterLinks) -> Options {
+    Options {
+        walk: Walk {
+            enter_links,
+            ..Walk::default()
+        },
         ..Options::default()
     }
 }
@@ -118,6 +129,24 @@ fn a_fixed_path_through_a_symlink_is_refused_and_reported() {
         problem.contains("passes through the symlink /Users/me/Library/Caches"),
         "{problem}"
     );
+}
+
+/// `enter_links = "roots"` (`docs/spec/safety.md#enter_links`).
+#[test]
+fn a_fixed_path_through_a_symlink_is_planned_at_its_real_location_when_links_are_allowed() {
+    let fake = fake_home();
+    add_rules(
+        &fake,
+        "caches.toml",
+        "[rules.tool-cache]\nstrategy = \"path\"\npaths = [\"~/Library/Caches/tool\"]\n",
+    );
+    fake.add_file("/Users/me/real-caches/tool/f", "x");
+    fake.add_symlink("/Users/me/Library/Caches", "/Users/me/real-caches");
+
+    let scan = caches_with(&fake, links(EnterLinks::Roots));
+
+    assert_eq!(paths(&scan), ["/Users/me/real-caches/tool"]);
+    assert!(scan.problems.is_empty(), "{:?}", problems(&scan));
 }
 
 #[test]

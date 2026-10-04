@@ -6,8 +6,9 @@ mod scan_fixture;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use rosie::config::Walk;
 use rosie::fs::fake::{Call, FakeBackend};
-use rosie::fs::{self, Op, ROOT_UID};
+use rosie::fs::{self, EnterLinks, Op, ROOT_UID};
 use rosie::plan::{AggressiveItems, Needs, RunAs, Status, WalkSetting, WalkSkip};
 use rosie::scan::{Error, NoProgress};
 use scan_fixture::*;
@@ -852,6 +853,51 @@ fn a_fixed_file_under_the_folder_is_a_file_target() {
     assert_eq!(delete.path, Path::new("/Users/me/.lesshst"));
     assert_eq!(delete.kind, rosie::plan::ItemKind::File);
     assert_eq!(delete.size.get(), 4096);
+}
+
+// `enter_links` (`docs/spec/safety.md#enter_links`)
+
+fn links(enter_links: EnterLinks) -> Options {
+    Options {
+        walk: Walk {
+            enter_links,
+            ..Walk::default()
+        },
+        ..Options::default()
+    }
+}
+
+#[test]
+fn a_fixed_path_through_a_symlink_is_matched_at_its_real_location_when_links_are_allowed() {
+    let fake = fake_home();
+    add_rules(
+        &fake,
+        "caches.toml",
+        "[rules.tool-cache]\nstrategy = \"path\"\npaths = [\"~/Library/Caches/tool\"]\n",
+    );
+    fake.add_file("/Users/me/real-caches/tool/f", "x");
+    fake.add_symlink("/Users/me/Library/Caches", "/Users/me/real-caches");
+
+    let scan = tree_with(&fake, HOME, links(EnterLinks::Roots));
+
+    assert_eq!(paths(&scan), ["/Users/me/real-caches/tool"]);
+    assert!(scan.problems.is_empty(), "{:?}", problems(&scan));
+}
+
+#[test]
+fn a_scan_folder_through_a_symlink_is_walked_at_its_real_location_when_links_are_allowed() {
+    let fake = node_home();
+    node_project(&fake, "/Users/me/code/app");
+    fake.add_symlink("/Users/me/work", "/Users/me/code");
+
+    let refused = scanner(&fake, Options::default()).tree(Path::new("/Users/me/work"), &NoProgress);
+    let scan = tree_with(&fake, "/Users/me/work", links(EnterLinks::Roots));
+
+    assert!(
+        matches!(refused, Err(Error::Fs(fs::Error::Symlink { .. }))),
+        "{refused:?}"
+    );
+    assert_eq!(paths(&scan), ["/Users/me/code/app/node_modules"]);
 }
 
 #[test]

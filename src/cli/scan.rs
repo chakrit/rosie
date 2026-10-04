@@ -137,7 +137,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         flags: &ScanFlags,
         app_usage: &str,
     ) -> Result<Scan, Error> {
-        let walk = walk_with_mounts_flag(config.config().walk, flags);
+        let walk = walk_with_scan_flags(config.config().walk, flags);
         let aggressive = match flags.aggressive {
             true => AggressiveItems::Ticked,
             false => AggressiveItems::Unticked,
@@ -171,7 +171,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     None => self.pick_app(&ctx, app_usage)?,
                 };
                 let paths = &self.env.paths;
-                Ok(apps::scan_app(&ctx, &app, paths, aggressive, walk.into())?)
+                Ok(apps::scan_app(&ctx, &app, paths, aggressive, walk)?)
             }
             Mode::Orphans => Ok(apps::scan_orphans(&ctx, paths, aggressive, walk.into())?),
         }
@@ -287,10 +287,12 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 }
 
 /// The config's `[walk]` settings, with `enter_mounts` turned on by `--enter-mounts`
-/// (`docs/spec/safety.md#walk-skips`).
-fn walk_with_mounts_flag(config: Walk, flags: &ScanFlags) -> Walk {
+/// and `enter_links` replaced by `--enter-links` (`docs/spec/safety.md#walk-skips`).
+fn walk_with_scan_flags(config: Walk, flags: &ScanFlags) -> Walk {
+    let enter_links = flags.enter_links.unwrap_or(config.enter_links);
     Walk {
         enter_mounts: config.enter_mounts || flags.enter_mounts,
+        enter_links,
         ..config
     }
 }

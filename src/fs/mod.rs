@@ -5,6 +5,7 @@ mod backend;
 mod context;
 mod error;
 pub mod fake;
+mod links;
 mod ops;
 mod paths;
 mod real;
@@ -15,6 +16,7 @@ pub use backend::{
 };
 pub use context::{Acting, Bounds, FsContext, resolve_dots, running_argv};
 pub use error::{Error, Op, RealPath};
+pub use links::EnterLinks;
 pub use ops::{Cleanup, FsOp, Rosie, UserInput};
 pub use paths::Paths;
 pub use real::RealBackend;

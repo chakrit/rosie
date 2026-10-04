@@ -5,6 +5,7 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::fs::EnterLinks;
 use crate::plan::{WalkSetting, WalkSkip};
 use crate::rules::Name;
 use crate::run::elevated;
@@ -102,6 +103,10 @@ pub struct ScanFlags {
     /// Walk across volumes (overrides `[walk] enter_mounts`).
     #[arg(long, global = true)]
     pub enter_mounts: bool,
+
+    /// `none`, `roots`, or `all` (overrides `[walk] enter_links`).
+    #[arg(long, global = true, value_name = "LEVEL", value_parser = parse_enter_links)]
+    pub enter_links: Option<EnterLinks>,
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -244,4 +249,11 @@ fn parse_plan_source(text: &str) -> Result<PlanSource, String> {
 
 fn parse_name(text: &str) -> Result<Name, String> {
     Name::parse(text).map_err(|error| error.to_string())
+}
+
+fn parse_enter_links(text: &str) -> Result<EnterLinks, String> {
+    EnterLinks::parse(text).ok_or_else(|| {
+        let levels: Vec<&str> = EnterLinks::ALL.into_iter().map(EnterLinks::label).collect();
+        format!("expected one of: {}", levels.join(", "))
+    })
 }

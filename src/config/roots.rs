@@ -11,11 +11,12 @@ pub fn list(config: &Config) -> &[PathBuf] {
     &config.roots
 }
 
-/// `roots add <path>`: refuses a path with a symlink component or a spelling that does
-/// not match the disk, naming the real path (`docs/spec/safety.md#symlinks`). The entry
-/// written is the checked path, with `.` and `..` resolved, spelled under `~` when the
-/// user typed `~` and the path is still under home. Adding an already-listed root writes
-/// nothing.
+/// `roots add <path>`: refuses a path with a symlink component, unless the config's
+/// `enter_links` allows one, or a spelling that does not match the disk, naming the
+/// real path (`docs/spec/safety.md#symlinks`). The entry written is the path as typed,
+/// with `.` and `..` resolved, spelled under `~` when the user typed `~` and the path
+/// is still under home; a resolved path never replaces it. Adding a root already listed
+/// for the same location writes nothing.
 pub fn add<B: Backend>(
     ctx: &FsContext<B>,
     config_dir: &Path,
@@ -23,22 +24,23 @@ pub fn add<B: Backend>(
     file: &ConfigFile,
     path: &Path,
 ) -> Result<ConfigFile, Error> {
-    let checked = UserInput::path(path).perform(ctx)?;
-    if file.config.roots.contains(&checked) {
+    let located = UserInput::path(path, file.config.walk.enter_links).perform(ctx)?;
+    if file.config.roots.contains(&located) {
         return Ok(file.clone());
     }
 
-    let entry = spelled_as_typed(path, &checked, paths);
+    let entry = spelled_as_typed(path, &paths.expand(path)?, paths);
     let entry = entry.to_str().ok_or_else(|| Error::RootNotUtf8 {
-        path: checked.clone(),
+        path: located.clone(),
     })?;
     let edited = document::with_root(&file.document, entry);
 
     store(ctx, config_dir, &edited.to_string())
 }
 
-/// `roots remove <path>`: `path` is matched the way entries are read, with `~` expanded
-/// and dots resolved. A path that is not listed is refused and nothing is written.
+/// `roots remove <path>`: `path` is matched with `~` expanded and dots resolved, against
+/// each entry as written and as located on disk. A path that is not listed is refused
+/// and nothing is written.
 pub fn remove<B: Backend>(
     ctx: &FsContext<B>,
     config_dir: &Path,
@@ -48,10 +50,10 @@ pub fn remove<B: Backend>(
 ) -> Result<ConfigFile, Error> {
     let target = paths.expand(path)?;
     let index = file
-        .config
-        .roots
+        .written_roots
         .iter()
-        .position(|root| *root == target)
+        .zip(&file.config.roots)
+        .position(|(written, located)| *written == target || *located == target)
         .ok_or(Error::NotARoot { path: target })?;
 
     let edited = document::without_root(&file.document, index);
@@ -204,6 +206,61 @@ mod tests {
             panic!("expected a spelling refusal, got {result:?}");
         };
         assert_eq!(real, PathBuf::from("/Users/me/Code"));
+    }
+
+    // `enter_links = "roots"` (`docs/spec/safety.md#enter_links`)
+
+    const STOW: &str = "[walk]\nenter_links = \"roots\"\n";
+
+    fn stowed(fake: &FakeBackend) {
+        fake.add_dir("/Users/me/dotfiles/cargo/registry");
+        fake.add_symlink("/Users/me/.cargo", "dotfiles/cargo");
+    }
+
+    #[test]
+    fn adds_a_root_through_a_symlink_as_written_when_links_are_allowed() {
+        let fake = FakeBackend::new();
+        stowed(&fake);
+        fake.add_file(CONFIG_FILE, format!("roots = []\n{STOW}"));
+        let ctx = ctx(&fake);
+
+        let updated = add(
+            &ctx,
+            config_dir(),
+            &paths(),
+            &loaded(&ctx),
+            Path::new("~/.cargo/registry"),
+        )
+        .expect("a root through a link");
+
+        assert_eq!(
+            list(updated.config()),
+            &[PathBuf::from("/Users/me/dotfiles/cargo/registry")]
+        );
+        let text = file_text(&ctx);
+        assert!(text.contains("\"~/.cargo/registry\""), "{text}");
+    }
+
+    #[test]
+    fn removes_a_root_through_a_symlink_by_its_written_spelling() {
+        let fake = FakeBackend::new();
+        stowed(&fake);
+        fake.add_file(
+            CONFIG_FILE,
+            format!("roots = [\"~/.cargo/registry\"]\n{STOW}"),
+        );
+        let ctx = ctx(&fake);
+
+        let updated = remove(
+            &ctx,
+            config_dir(),
+            &paths(),
+            &loaded(&ctx),
+            Path::new("~/.cargo/registry"),
+        )
+        .expect("remove the root as written");
+
+        assert_eq!(list(updated.config()), &[] as &[PathBuf]);
     }
 
     #[test]

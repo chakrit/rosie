@@ -21,9 +21,9 @@ use serde::Deserialize;
 use thiserror::Error;
 use toml_edit::DocumentMut;
 
-use crate::fs::{self, Backend, FsContext, FsOp, Rosie, UserInput};
+use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, Rosie, UserInput};
 
-pub use keys::{Key, WalkFlag};
+pub use keys::{Key, WalkKey};
 
 const FILE_NAME: &str = "config.toml";
 
@@ -45,25 +45,31 @@ pub struct Walk {
     pub enter_bundles: bool,
     pub enter_mounts: bool,
     pub enter_placeholders: bool,
+    pub enter_links: EnterLinks,
 }
 
 impl Walk {
-    pub fn flag(self, flag: WalkFlag) -> bool {
-        match flag {
-            WalkFlag::EnterBundles => self.enter_bundles,
-            WalkFlag::EnterMounts => self.enter_mounts,
-            WalkFlag::EnterPlaceholders => self.enter_placeholders,
+    /// The value of `key`, as `config get` shows it.
+    pub fn value(self, key: WalkKey) -> String {
+        match key {
+            WalkKey::EnterBundles => self.enter_bundles.to_string(),
+            WalkKey::EnterMounts => self.enter_mounts.to_string(),
+            WalkKey::EnterPlaceholders => self.enter_placeholders.to_string(),
+            WalkKey::EnterLinks => self.enter_links.label().to_owned(),
         }
     }
 }
 
 /// The user's config file as loaded: the document as written, and its validated typed
-/// reading with every root expanded and checked. `config.roots[i]` is the reading of the
-/// `i`th entry of the document's `roots` array.
+/// reading with every root checked and located on disk. `config.roots[i]` is where the
+/// `i`th entry of the document's `roots` array is on disk, and `written_roots[i]` is
+/// that entry as written, with `~` expanded and dots resolved; the two differ only
+/// through a symlink `enter_links` allows.
 #[derive(Debug, Clone)]
 pub struct ConfigFile {
     document: DocumentMut,
     config: Config,
+    written_roots: Vec<PathBuf>,
 }
 
 impl ConfigFile {
@@ -104,8 +110,12 @@ pub enum Error {
     #[error("roots is not set through `config`; use `rosie roots add` or `rosie roots remove`")]
     RootsNotSettable,
 
-    #[error("{key} does not accept `{value}`; use true or false")]
-    InvalidValue { key: &'static str, value: String },
+    #[error("{key} does not accept `{value}`; use one of: {allowed}")]
+    InvalidValue {
+        key: &'static str,
+        value: String,
+        allowed: String,
+    },
 
     #[error("{path} is not one of the roots", path = path.display())]
     NotARoot { path: PathBuf },
@@ -217,14 +227,24 @@ fn parse<B: Backend>(text: &str, path: &Path, ctx: &FsContext<B>) -> Result<Conf
         source,
     })?;
 
+    let links = raw.walk.enter_links;
     let roots = raw
         .roots
         .iter()
-        .map(|root| UserInput::path(root).perform(ctx))
+        .map(|root| UserInput::path(root, links).perform(ctx))
+        .collect::<Result<Vec<_>, _>>()?;
+    let written_roots = raw
+        .roots
+        .iter()
+        .map(|root| ctx.paths().expand(root))
         .collect::<Result<Vec<_>, _>>()?;
 
     let config = Config { roots, ..raw };
-    Ok(ConfigFile { document, config })
+    Ok(ConfigFile {
+        document,
+        config,
+        written_roots,
+    })
 }
 
 /// Parses `text` as an editable document. The typed reading is a second, separate parse
@@ -449,10 +469,10 @@ mod tests {
         let seeded = seed(&ctx, config_dir(), default_text).expect("seed");
         let added = roots::add(&ctx, config_dir(), &paths(), &seeded, Path::new("~/code"))
             .expect("add a root");
-        let set = keys::set(&ctx, config_dir(), &added, WalkFlag::EnterBundles, "true")
+        let set = keys::set(&ctx, config_dir(), &added, WalkKey::EnterBundles, "true")
             .expect("set a flag");
         let unset =
-            keys::unset(&ctx, config_dir(), &set, WalkFlag::EnterBundles).expect("unset the flag");
+            keys::unset(&ctx, config_dir(), &set, WalkKey::EnterBundles).expect("unset the flag");
         roots::remove(
             &ctx,
             config_dir(),

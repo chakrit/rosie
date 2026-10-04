@@ -8,6 +8,7 @@ use super::fixture::{
     receipts, succeeded,
 };
 use super::*;
+use crate::config::Walk;
 use crate::fs::ROOT_UID;
 use crate::fs::fake::{FakeBackend, USER_UID};
 use crate::fs::{self, Op, Paths};
@@ -31,7 +32,7 @@ fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) 
         Path::new(BAR),
         &paths(),
         aggressive,
-        Mounts::Skip,
+        Walk::default(),
     )
     .expect("app scan")
 }

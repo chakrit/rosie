@@ -23,7 +23,7 @@ fn refuses_an_app_argument_through_a_symlink() {
         Path::new("/Users/me/Bar.app"),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(
@@ -56,7 +56,7 @@ fn a_symlinked_info_plist_is_refused_by_app_and_orphan_scans() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
     let orphans = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
@@ -87,7 +87,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
         Path::new(app),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     )
 }
 

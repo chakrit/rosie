@@ -19,7 +19,7 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     )
     .expect("plain paths");
     let dotted = scan_app(
@@ -27,7 +27,7 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
         Path::new(BAR),
         &dotted_home(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     )
     .expect("dotted paths");
 

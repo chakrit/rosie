@@ -6,28 +6,28 @@
 
 use toml_edit::{Array, DocumentMut, Item, Value, table, value};
 
-use super::WalkFlag;
+use super::WalkKey;
 
-// walk flags
+// walk keys
 
-pub(super) fn with_flag(document: &DocumentMut, flag: WalkFlag, on: bool) -> DocumentMut {
+pub(super) fn with_walk_value(document: &DocumentMut, key: WalkKey, set: Value) -> DocumentMut {
     let mut edited = document.clone();
     let walk = edited
         .entry("walk")
         .or_insert_with(table)
         .as_table_like_mut()
         .expect("a loaded config's walk is a table");
-    walk.insert(flag.field(), value(on));
+    walk.insert(key.field(), value(set));
     edited
 }
 
-/// The document without `flag`, or `None` when the document does not set it.
-pub(super) fn without_flag(document: &DocumentMut, flag: WalkFlag) -> Option<DocumentMut> {
+/// The document without `key`, or `None` when the document does not set it.
+pub(super) fn without_walk_key(document: &DocumentMut, key: WalkKey) -> Option<DocumentMut> {
     let mut edited = document.clone();
     edited
         .get_mut("walk")
         .and_then(Item::as_table_like_mut)
-        .and_then(|walk| walk.remove(flag.field()))?;
+        .and_then(|walk| walk.remove(key.field()))?;
     Some(edited)
 }
 

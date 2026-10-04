@@ -10,8 +10,8 @@ use std::path::Path;
 
 use common::{Harness, RealHarness, contract, empty_bounds, error_kind, sorted};
 use rosie::fs::{
-    Backend, Bounds, Cleanup, Error, FileKind, FsContext, FsOp, Paths, RealBackend, Rosie,
-    UserInput,
+    Backend, Bounds, Cleanup, EnterLinks, Error, FileKind, FsContext, FsOp, Paths, RealBackend,
+    Rosie, UserInput,
 };
 
 contract!(
@@ -484,7 +484,7 @@ fn real_gate_refuses_a_unicode_form_mismatch_naming_the_disk_spelling() {
         .expect("create NFD folder");
     let ctx = FsContext::new(RealBackend, empty_bounds(&h)).expect("ctx");
 
-    let result = UserInput::path(&h.root().join("Caf\u{e9}")).perform(&ctx);
+    let result = UserInput::path(&h.root().join("Caf\u{e9}"), EnterLinks::None).perform(&ctx);
 
     assert!(matches!(result, Err(Error::Misspelled { real, .. }) if real == decomposed));
 }
@@ -496,7 +496,7 @@ fn real_gate_refuses_a_case_mismatch_naming_the_disk_spelling() {
     RealBackend.create_dir_all(&spelled).expect("create folder");
     let ctx = FsContext::new(RealBackend, empty_bounds(&h)).expect("ctx");
 
-    let result = UserInput::path(&h.root().join("code")).perform(&ctx);
+    let result = UserInput::path(&h.root().join("code"), EnterLinks::None).perform(&ctx);
 
     assert!(matches!(result, Err(Error::Misspelled { real, .. }) if real == spelled));
 }

@@ -239,7 +239,7 @@ fn a_failing_receipt_listing_fails_the_scan() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(
@@ -309,7 +309,7 @@ fn refuses_the_plan_while_the_app_is_running() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(
@@ -332,7 +332,7 @@ fn refuses_the_whole_plan_when_the_bundle_is_outside_the_roots() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(
@@ -353,7 +353,7 @@ fn a_process_from_a_sibling_app_does_not_block_the_plan() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(result.is_ok(), "{result:?}");
@@ -401,7 +401,7 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
         Path::new("/Users/me/code"),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
@@ -471,7 +471,7 @@ fn another_installed_copy_with_the_same_id_keeps_shared_leftovers_unticked() {
         Path::new(beta),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     )
     .expect("app scan");
 
@@ -524,7 +524,7 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
             Path::new(BAR),
             &paths(),
             AggressiveItems::Unticked,
-            Mounts::Skip,
+            Walk::default(),
         );
 
         assert!(matches!(result, Err(Error::Fs(_))), "{folder}: {result:?}");
@@ -646,7 +646,7 @@ fn a_package_id_a_plan_cannot_hold_fails_the_scan() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(matches!(result, Err(Error::Plan(_))), "{result:?}");

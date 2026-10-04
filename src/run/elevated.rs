@@ -209,8 +209,8 @@ fn is_root_sudo(process: &Process) -> bool {
 }
 
 /// A context acting as root for the user whose home this is, bounded by the roots in
-/// their config. The user is the owner of the home folder. Acting as root, it deletes
-/// only through folders no one but root can change, and changes no permissions.
+/// their config. The user is the owner of the home folder. Acting as root, it changes
+/// no permissions.
 fn root_ctx<'b, B: Backend>(backend: &'b B, paths: &Paths) -> Result<FsContext<&'b B>, Error> {
     let bootstrap = FsContext::new(backend, paths.bounds(Vec::new(), ROOT_UID))?;
     let user_uid = UserInput::lstat(paths.home()).perform(&bootstrap)?.uid;

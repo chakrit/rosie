@@ -6,7 +6,7 @@ use std::path::Path;
 
 use super::{FsOp, sealed};
 use crate::fs::backend::{Backend, Metadata};
-use crate::fs::context::{Acting, FsContext};
+use crate::fs::context::FsContext;
 use crate::fs::error::Error;
 
 /// The owner of every op on scanned trees and cleanup targets.
@@ -70,14 +70,6 @@ impl Delete<'_> {
     /// it is, is decided first. `perform` checks again.
     pub fn verify<B: Backend>(&self, ctx: &FsContext<B>) -> Result<(), Error> {
         ctx.admit_delete(self.path).map(|_| ())
-    }
-
-    /// Runs the checks the user's own process runs before it performs this delete,
-    /// whoever the context acts as. The elevated child uses it for a user's delete
-    /// whose `system` job it only boots out: the user's process performs that delete
-    /// later, checking it again.
-    pub fn verify_as_user<B: Backend>(&self, ctx: &FsContext<B>) -> Result<(), Error> {
-        ctx.admit_delete_as(self.path, Acting::User).map(|_| ())
     }
 }
 

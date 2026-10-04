@@ -14,7 +14,6 @@ mod admission;
 mod canonical;
 mod lexical;
 mod removal;
-mod root_control;
 mod running;
 
 use std::ffi::OsString;
@@ -28,7 +27,6 @@ use super::paths::Paths;
 use running::Running;
 
 pub use lexical::resolve_dots;
-pub use root_control::Exposure;
 pub use running::running_argv;
 
 /// Everything a context is bounded by, injected by the caller and never read from the

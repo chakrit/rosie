@@ -16,8 +16,8 @@
 //!
 //! A run has up to three steps: the user's part; the elevated part; then, in the
 //! user's process again, the user's deletes the elevated part only booted `system`
-//! jobs out for. The elevated child's context acts as root, which deletes only through
-//! folders no one but root can change, and never deletes a user's item.
+//! jobs out for. The elevated child's context acts as root; the child never deletes a
+//! user's item.
 //!
 //! A failed item is reported and the run goes on.
 
@@ -190,20 +190,15 @@ impl<B: Backend + Sync> Runner<B> {
 
     /// Says why one delete must not run: it is stale, or the context refuses it, such as
     /// for a process running from it, for the running processes being unknown, or for a
-    /// path outside the roots. `Ok` when it may run. A delete this process only boots a
-    /// job out for, the user's in the elevated child, is checked as the user's process
-    /// will check it.
+    /// path outside the roots. `Ok` when it may run.
     fn verify(&self, delete: &Delete) -> Result<(), Refusal> {
         if let Some(reason) = self.staleness(delete) {
             return Err(Refusal::Skipped(SkipReason::Stale, reason));
         }
 
-        let op = Cleanup::delete(&delete.path);
-        let verified = match delete.run_as == self.acting() {
-            true => op.verify(&self.ctx),
-            false => op.verify_as_user(&self.ctx),
-        };
-        verified.map_err(refusal_of)
+        Cleanup::delete(&delete.path)
+            .verify(&self.ctx)
+            .map_err(refusal_of)
     }
 
     /// Why the entry no longer describes what is on disk: its path is missing, a folder
@@ -309,9 +304,7 @@ type Verdicts<'a> = BTreeMap<&'a Path, Result<(), Refusal>>;
 
 /// Why the context refused a delete. One a process runs from, or one the running
 /// processes could not be checked for (`docs/spec/safety.md#running-processes`), is
-/// skipped with its bootouts; so is one root may not delete, because someone other
-/// than root could change a folder on its way, for the user to delete by hand. Any
-/// other refusal fails the delete.
+/// skipped with its bootouts. Any other refusal fails the delete.
 fn refusal_of(error: fs::Error) -> Refusal {
     match error {
         error @ fs::Error::Running { .. } => {
@@ -319,10 +312,6 @@ fn refusal_of(error: fs::Error) -> Refusal {
         }
         error @ fs::Error::RunningUnknown { .. } => {
             Refusal::Skipped(SkipReason::ProcessCheckFailed, error.to_string())
-        }
-        error @ fs::Error::NotRootControlled { .. } => {
-            let reason = format!("{error}; delete it manually");
-            Refusal::Skipped(SkipReason::UnsafeToElevate, reason)
         }
         error => Refusal::Refused(error.to_string()),
     }

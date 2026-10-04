@@ -3,7 +3,6 @@
 use std::fmt;
 
 use thiserror::Error;
-use unicode_ident::{is_xid_continue, is_xid_start};
 
 /// The longest pack or rule name, in characters.
 const MAX_CHARS: usize = 64;
@@ -13,21 +12,21 @@ const MAX_CHARS: usize = 64;
 pub struct Name(Box<str>);
 
 impl Name {
-    /// Accepts a letter or digit first, then letters, digits, `_`, or `-`, at most 64
+    /// Accepts an ASCII letter first, then ASCII letters, digits, `_`, or `-`, at most 64
     /// characters in all.
     pub fn parse(text: &str) -> Result<Name, NameError> {
         let mut chars = text.chars();
         let Some(first) = chars.next() else {
             return Err(NameError::Empty);
         };
-        if !(is_xid_start(first) || first.is_ascii_digit()) {
+        if !first.is_ascii_alphabetic() {
             return Err(NameError::BadFirst(first));
         }
-        if let Some(bad) = chars.find(|&c| !(is_xid_continue(c) || c == '-')) {
+        if let Some(bad) = chars.find(|&c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
             return Err(NameError::BadChar(bad));
         }
 
-        let length = text.chars().count();
+        let length = text.len();
         match length > MAX_CHARS {
             true => Err(NameError::TooLong(length)),
             false => Ok(Name(text.into())),
@@ -86,10 +85,10 @@ pub enum NameError {
     #[error("a name cannot be empty")]
     Empty,
 
-    #[error("a name must start with a letter or digit, not {0:?}")]
+    #[error("a name must start with an ASCII letter, not {0:?}")]
     BadFirst(char),
 
-    #[error("a name may hold only letters, digits, `_`, and `-`, not {0:?}")]
+    #[error("a name may hold only ASCII letters, digits, `_`, and `-`, not {0:?}")]
     BadChar(char),
 
     #[error("a name is at most {MAX_CHARS} characters, not {0}")]
@@ -104,15 +103,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn accepts_letters_digits_underscores_and_dashes() {
-        for text in [
-            "node-modules",
-            "cargo_target",
-            "9lives",
-            "rosie",
-            "ñandú",
-            "日本",
-        ] {
+    fn accepts_ascii_letters_digits_underscores_and_dashes() {
+        for text in ["node-modules", "cargo_target", "py3", "Rosie", "x"] {
             assert_eq!(
                 Name::parse(text).map(|name| name.to_string()),
                 Ok(text.to_string())
@@ -121,14 +113,21 @@ mod tests {
     }
 
     #[test]
-    fn refuses_a_bad_first_character() {
-        for (text, first) in [("-x", '-'), ("_x", '_'), (".x", '.'), (" x", ' ')] {
+    fn refuses_a_first_character_that_is_not_an_ascii_letter() {
+        for (text, first) in [
+            ("-x", '-'),
+            ("_x", '_'),
+            (".x", '.'),
+            (" x", ' '),
+            ("9lives", '9'),
+            ("ñandú", 'ñ'),
+        ] {
             assert_eq!(Name::parse(text), Err(NameError::BadFirst(first)), "{text}");
         }
     }
 
     #[test]
-    fn refuses_separators_punctuation_whitespace_and_emoji() {
+    fn refuses_anything_but_ascii_letters_digits_underscores_and_dashes() {
         for (text, bad) in [
             ("a/b", '/'),
             ("a.b", '.'),
@@ -136,6 +135,8 @@ mod tests {
             ("a\tb", '\t'),
             ("a!", '!'),
             ("a+b", '+'),
+            ("a·b", '·'),
+            ("café", 'é'),
             ("a🦀", '🦀'),
         ] {
             assert_eq!(Name::parse(text), Err(NameError::BadChar(bad)), "{text}");
@@ -144,9 +145,9 @@ mod tests {
     }
 
     #[test]
-    fn counts_the_length_in_characters() {
-        let longest = "é".repeat(64);
-        let too_long = "é".repeat(65);
+    fn refuses_more_than_64_characters() {
+        let longest = "a".repeat(64);
+        let too_long = "a".repeat(65);
 
         assert!(Name::parse(&longest).is_ok());
         assert_eq!(Name::parse(&too_long), Err(NameError::TooLong(65)));

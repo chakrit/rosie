@@ -319,32 +319,6 @@ fn pull_installs_a_new_pack_under_the_owner_as_stored() {
     );
 }
 
-/// `İ` lowercases to `i` and a combining dot, so the fake folds 33 of them onto a name
-/// of 66 characters, which is too long to be an owner.
-#[test]
-fn pull_refuses_an_owner_the_volume_stores_under_an_invalid_name() {
-    let fake = fake_home();
-    let gate = gate(&fake);
-    let store = Store::new(&gate, &home(), Path::new(DATA));
-    let invalid = "i\u{307}".repeat(33);
-    let stray = format!("{DATA}/packs/{invalid}");
-    fake.add_dir(&stray);
-    let requested = format!("{}/rosie", "\u{130}".repeat(33));
-    let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
-    let network = Canned::serving(&url_of(&requested), tarball);
-
-    let result = packs::pull(&store, &network, &source(&requested), at(1));
-
-    assert!(
-        matches!(&result, Err(Error::StrayEntry { path, .. }) if *path == Path::new(&stray)),
-        "got {result:?}"
-    );
-    assert_eq!(listing(&fake, &stray), Vec::<std::ffi::OsString>::new());
-}
-
-// The fake folds case only; the same refusals under another Unicode form run against
-// the real volume in `pack_names.rs`.
-
 #[test]
 fn pull_refuses_a_pack_the_volume_folds_onto_the_reserved_name_user() {
     let fake = fake_home();

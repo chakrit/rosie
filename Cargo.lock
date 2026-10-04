@@ -712,7 +712,6 @@ dependencies = [
  "thiserror",
  "toml",
  "toml_edit",
- "unicode-ident",
  "ureq",
 ]
 

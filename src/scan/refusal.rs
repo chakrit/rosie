@@ -24,8 +24,9 @@ use super::entry::Entry;
 use super::log::{Log, Problem, SizingLog};
 use super::progress::NoProgress;
 use super::sizing::{Measure, Sizer};
+use super::skip::WalkSkip;
 use crate::fs::{self, Backend, Cleanup, FsContext};
-use crate::plan::{Reach, RunAs, Size, WalkSkip};
+use crate::plan::{Reach, RunAs, Size};
 
 /// An item left out of the plan because a process runs a program from inside it.
 #[derive(Debug, Clone, PartialEq, Eq)]

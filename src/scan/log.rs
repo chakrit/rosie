@@ -6,8 +6,9 @@ use std::sync::{Mutex, MutexGuard};
 
 use thiserror::Error;
 
+use super::skip::WalkSkip;
 use crate::fs;
-use crate::plan::{self, WalkSkip};
+use crate::plan;
 use crate::rules;
 
 /// A path the scan did not enter, and why.

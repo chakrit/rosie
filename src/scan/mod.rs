@@ -17,6 +17,7 @@ mod log;
 mod progress;
 mod refusal;
 mod sizing;
+mod skip;
 mod targets;
 mod walk;
 
@@ -26,7 +27,7 @@ use thiserror::Error;
 
 use crate::config::Walk;
 use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, UserInput};
-use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder, WalkSkips};
+use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder};
 use crate::rules::{RuleId, RuleSet, Shape};
 use crate::tier::Tier;
 
@@ -36,6 +37,7 @@ pub use progress::{NoProgress, Progress};
 pub use refusal::Refused;
 pub(crate) use refusal::Screening;
 pub use sizing::{Measure, Sizer};
+pub use skip::{Needs, WalkSetting, WalkSkip, WalkSkips};
 
 use fixed::{FixedClaim, FixedTargets};
 use targets::Targets;

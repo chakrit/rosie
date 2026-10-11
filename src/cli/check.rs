@@ -21,10 +21,10 @@ use super::{Error, ExitStatus};
 use crate::apps;
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
 use crate::packs::Network;
-use crate::plan::{
-    Delete, Disagreement, Needs, PlanStats, RunAs, Status, StatusKind, Tally, WalkSkip,
+use crate::plan::{Delete, Disagreement, PlanStats, RunAs, Status, StatusKind, Tally};
+use crate::scan::{
+    self, Needs, PathScan, Problem, Refused, Scan, Scanner, Settings, Skipped, WalkSkip,
 };
-use crate::scan::{self, PathScan, Problem, Refused, Scan, Scanner, Settings, Skipped};
 use crate::shell;
 use crate::tier::Tier;
 

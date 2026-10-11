@@ -12,9 +12,9 @@ use crate::apps;
 use crate::config::ConfigFile;
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::packs::Network;
-use crate::plan::{ItemSize, Outcome, Plan, Selection, SkipReason, WalkSkips};
-use crate::run::{Elevation, Runner};
-use crate::scan::{Refused, Scan};
+use crate::plan::{ItemSize, Plan, PlanStats, Selection};
+use crate::run::{Elevation, Outcome, Runner, SkipReason};
+use crate::scan::{Refused, Scan, WalkSkips};
 
 /// What the scan behind a run skipped, which the end-of-run stats count beside the
 /// run's own items (`docs/spec/plan.md#stats`). A saved plan's run has none.
@@ -290,8 +290,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         for refused in skips.refused {
             stats.record(ItemSize::Known(refused.size), RUNNING_PROCESS);
         }
-        stats.walk_skips = skips.walk;
-        self.note(stats.to_string().trim_end())?;
+        self.note(stats_lines(stats, skips.walk).trim_end())?;
         Ok(stats.any_failed())
     }
 
@@ -305,7 +304,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     fn show_stats(&mut self, plan: &Plan, skips: WalkSkips) -> Result<(), Error> {
-        self.note(stats_lines(plan, skips).trim_end())?;
+        self.note(stats_lines(PlanStats::of(plan), skips).trim_end())?;
         Ok(())
     }
 }

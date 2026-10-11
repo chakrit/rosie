@@ -8,8 +8,8 @@ use std::path::{Path, PathBuf};
 use rosie::config::Walk;
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{self, EnterLinks};
-use rosie::plan::{Needs, WalkSkip};
 use rosie::scan::{Error, NoProgress};
+use rosie::scan::{Needs, WalkSkip};
 use scan_fixture::*;
 
 fn listed(fake: &FakeBackend, path: &str) -> bool {

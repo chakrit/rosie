@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use rosie::config::Walk;
 use rosie::fs::fake::{Call, FakeBackend};
-use rosie::plan::{Needs, WalkSetting, WalkSkip};
+use rosie::scan::{Needs, WalkSetting, WalkSkip};
 use scan_fixture::*;
 
 const NPM_CACACHE: &str =

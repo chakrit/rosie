@@ -21,10 +21,10 @@ use std::os::unix::fs::FileTypeExt as _;
 use thiserror::Error;
 
 use super::header::{self, Header, Nonce};
-use super::{ItemResult, OutputWindow, Reporter, Runner, outcomes};
+use super::{ItemResult, OutputWindow, Reporter, RunStats, Runner, outcomes};
 use crate::config;
 use crate::fs::{self, Argv, Backend, FsContext, FsOp, Paths, ROOT_UID, UserInput};
-use crate::plan::{self, Plan, RunStats};
+use crate::plan::{self, Plan};
 use crate::process::{self, Process, ProcessTable};
 
 /// The hidden subcommand name.
@@ -132,11 +132,7 @@ where
         return Err(error.into());
     }
 
-    let mut stats = RunStats::default();
-    for result in results {
-        stats.record(result.size, result.outcome);
-    }
-    Ok(stats)
+    Ok(results.into_iter().collect())
 }
 
 /// Hands every event to the child's own reporter, and writes each finished item's

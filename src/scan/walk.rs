@@ -25,10 +25,11 @@ use super::RuleMatch;
 use super::entry::{Entry, InFolder, Readable, Sealed, Volume};
 use super::log::{Log, Problem};
 use super::progress::Progress;
+use super::skip::{Needs, WalkSetting, WalkSkip};
 use super::targets::Targets;
 use crate::config::Walk;
 use crate::fs::{self, Backend, Cleanup, EnterLinks, FileKind, FsContext, FsOp, Metadata};
-use crate::plan::{Needs, WalkSetting, WalkSkip};
+
 use crate::rules::{self, Candidate, LuaSandbox, RuleSet};
 
 /// Folder extensions of macOS bundles, which the walk does not enter by default.

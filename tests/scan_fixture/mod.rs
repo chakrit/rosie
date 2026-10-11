@@ -195,7 +195,7 @@ pub fn size_of(scan: &Scan, path: &str) -> u64 {
 }
 
 /// The skipped paths as (path, reason).
-pub fn skipped(scan: &Scan) -> Vec<(&str, rosie::plan::WalkSkip)> {
+pub fn skipped(scan: &Scan) -> Vec<(&str, rosie::scan::WalkSkip)> {
     scan.skipped
         .iter()
         .map(|skip| (skip.path.to_str().expect("utf-8"), skip.reason))

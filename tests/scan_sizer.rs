@@ -9,7 +9,8 @@ mod scan_fixture;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::{self, Op};
-use rosie::plan::{Size, WalkSkip};
+use rosie::plan::Size;
+use rosie::scan::WalkSkip;
 use rosie::scan::{Entry, Log, NoProgress, NotAnEntry, Sizer, Skipped};
 use scan_fixture::{HOME, ctx, fake_home};
 

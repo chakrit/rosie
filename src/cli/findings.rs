@@ -1,9 +1,11 @@
 //! The lines the CLI prints about a scan besides the plan, from any mode. Every skip
 //! names its path or subject and briefly why (`docs/spec/plan.md`).
 
+use std::fmt;
+
 use super::args::Mode;
-use crate::plan::{Plan, PlanStats, Report, WalkSkip, WalkSkips};
-use crate::scan::{Problem, Refused, Scan, Skipped};
+use crate::plan::Report;
+use crate::scan::{Problem, Refused, Scan, Skipped, WalkSkip, WalkSkips};
 
 /// Every skip and problem of `scan`, one per line. `mode` decides whether a walk-skip
 /// line may point to a flag: only the flags the mode that produced it actually accepts.
@@ -23,9 +25,10 @@ pub(super) fn findings_lines(scan: &Scan, mode: &Mode) -> Vec<String> {
         .collect()
 }
 
-/// The stats scan and confirmation show: the plan's tallies, then walk-skip counts.
-pub(super) fn stats_lines(plan: &Plan, skips: WalkSkips) -> String {
-    let stats = PlanStats::of(plan).to_string();
+/// The stats lines: the plan's tallies, as scan and confirmation show them, or the
+/// run's, as the end of a run shows them; then walk-skip counts.
+pub(super) fn stats_lines(stats: impl fmt::Display, skips: WalkSkips) -> String {
+    let stats = stats.to_string();
     match skips.total() {
         0 => stats,
         _ => format!("{stats}{skips}\n"),
@@ -70,7 +73,9 @@ pub(super) fn problem_line(problem: &Problem) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::{AgreedTiers, Needs, WalkSkip};
+    use crate::plan::{AgreedTiers, ItemSize, Plan, Size};
+    use crate::run::{Outcome, RunStats};
+    use crate::scan::Needs;
 
     #[test]
     fn a_report_only_item_is_a_skip_naming_its_subject_why_and_the_steps() {
@@ -135,6 +140,19 @@ mod tests {
                 "skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not \
                  downloaded (use --enter-placeholders to open)"
             ]
+        );
+    }
+
+    #[test]
+    fn run_stats_lines_end_with_the_walk_skip_counts() {
+        let mut stats = RunStats::default();
+        stats.record(ItemSize::Known(Size::bytes(3_400_000_000)), Outcome::Done);
+        let skips: WalkSkips = [WalkSkip::Closed(Needs::MOUNTS)].into_iter().collect();
+
+        assert_eq!(
+            stats_lines(stats, skips),
+            "freed 3.4 GB; done: 1 item, 3.4 GB\n\
+             walk skipped 1 mount\n"
         );
     }
 }

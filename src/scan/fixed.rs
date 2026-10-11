@@ -16,9 +16,10 @@ use super::RuleMatch;
 use super::entry::{Entry, Mounts, NotAnEntry};
 use super::log::{Log, Problem};
 use super::progress::Progress;
+use super::skip::{Needs, WalkSkip};
 use super::targets::Targets;
 use crate::fs::{self, Backend, Cleanup, EnterLinks, FsContext, FsOp};
-use crate::plan::{Needs, WalkSkip};
+
 use crate::rules::{FixedPath, RuleId, RuleSet, Shape};
 use crate::tier::Tier;
 

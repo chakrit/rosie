@@ -16,10 +16,10 @@ use super::Error;
 use super::listing::{FolderLookup, Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
 use crate::fs::{Backend, FsContext};
-use crate::plan::{
-    AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Report, WalkSkip,
+use crate::plan::{AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Report};
+use crate::scan::{
+    Entry, InFolder, Log, Mounts, Needs, NoProgress, Scan, Screening, Sizer, WalkSkip,
 };
-use crate::scan::{Entry, InFolder, Log, Mounts, NoProgress, Scan, Screening, Sizer};
 use crate::tier::Tier;
 
 /// A file or folder a scan may match by name. Symlinks never match, so none is ever a

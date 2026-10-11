@@ -10,9 +10,10 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
+use super::skip::WalkSkip;
 use crate::config::Walk;
 use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, Paths};
-use crate::plan::{ItemKind, WalkSkip};
+use crate::plan::ItemKind;
 
 /// A path with the metadata its own `lstat` gave, free of symlinks along the whole
 /// path and not sealed: neither a dataless placeholder nor a mount root.

@@ -7,7 +7,8 @@ use std::path::{Path, PathBuf};
 
 use rosie::config::Walk;
 use rosie::fs::{EnterLinks, ROOT_UID};
-use rosie::plan::{AggressiveItems, ItemKind, RunAs, Selection, Status, WalkSkip};
+use rosie::plan::{AggressiveItems, ItemKind, RunAs, Selection, Status};
+use rosie::scan::WalkSkip;
 use scan_fixture::*;
 
 const NPM: &str = "[rules.npm-cache]\nstrategy = \"path\"\npaths = [\"~/.npm\"]\n";

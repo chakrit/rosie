@@ -1,8 +1,9 @@
 use std::fmt;
 use std::path::PathBuf;
 
+use super::Outcome;
 use crate::fs::Argv;
-use crate::plan::{ItemSize, Outcome};
+use crate::plan::ItemSize;
 
 /// How one item of a run ended, and what it was.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -56,7 +57,8 @@ impl fmt::Display for ItemResult {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::{Size, SkipReason};
+    use crate::plan::Size;
+    use crate::run::SkipReason;
 
     /// Every run skip names its path and why (`docs/spec/plan.md`).
     #[test]

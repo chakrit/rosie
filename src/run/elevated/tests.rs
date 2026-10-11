@@ -4,9 +4,9 @@ use std::path::{Path, PathBuf};
 use super::*;
 use crate::fs::fake::{Call, FakeBackend};
 use crate::fs::{Argv, CommandOutput, Exit, Op};
-use crate::plan::{Outcome, Size, Tally};
+use crate::plan::{Size, Tally};
 use crate::run::outcomes::{Key, Record};
-use crate::run::{ItemResult, OutputWindow};
+use crate::run::{ItemResult, Outcome, OutputWindow};
 
 const HOME: &str = "/Users/me";
 const NONCE: &str = "0123456789abcdef0123456789abcdef";

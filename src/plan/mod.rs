@@ -31,10 +31,7 @@ pub use builder::{AggressiveItems, AgreedTiers, Built, PathMatch, PlanBuilder, R
 pub use conflict::Disagreement;
 pub use error::Error;
 pub use size::Size;
-pub use stats::{
-    ItemSize, Needs, Outcome, PlanStats, RunStats, SkipReason, Tally, WalkSetting, WalkSkip,
-    WalkSkips,
-};
+pub use stats::{ItemSize, PlanStats, Tally};
 pub use trim::CleanEntry;
 
 /// Everything one scan proposes, grouped by what each entry does.

@@ -7,10 +7,10 @@ use clap::{Args, Parser, Subcommand};
 
 use crate::config::Walk;
 use crate::fs::EnterLinks;
-use crate::plan::{AggressiveItems, WalkSetting, WalkSkip};
+use crate::plan::AggressiveItems;
 use crate::rules::Name;
 use crate::run::elevated;
-use crate::scan::Settings;
+use crate::scan::{Settings, WalkSetting, WalkSkip};
 
 #[derive(Debug, Parser)]
 #[command(name = "rosie", version, about = "A macOS cleanup CLI for developers.")]

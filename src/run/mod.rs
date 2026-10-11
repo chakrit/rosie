@@ -27,6 +27,7 @@ mod header;
 mod item;
 mod outcomes;
 mod report;
+mod stats;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -36,12 +37,13 @@ use std::thread::{self, ScopedJoinHandle};
 use rayon::prelude::*;
 
 use crate::fs::{self, Acting, Argv, Backend, Cleanup, Exit, FsContext, FsOp};
-use crate::plan::{Delete, ItemSize, Outcome, Plan, RunAs, RunStats, Runnable, SkipReason};
+use crate::plan::{Delete, ItemSize, Plan, RunAs, Runnable};
 use report::Forwarding;
 
 pub use elevate::Elevation;
 pub use item::{ItemResult, Subject};
 pub use report::{OutputWindow, PlainReporter, Reporter, TerminalReporter};
+pub use stats::{Outcome, RunStats, SkipReason};
 
 pub struct Runner<B: Backend> {
     ctx: FsContext<B>,
@@ -82,11 +84,7 @@ impl<B: Backend + Sync> Runner<B> {
             results.extend(after);
         }
 
-        let mut stats = RunStats::default();
-        for result in results {
-            stats.record(result.size, result.outcome);
-        }
-        stats
+        results.into_iter().collect()
     }
 
     /// Runs the part of `plan` that this process executes, as whoever it acts as. Only

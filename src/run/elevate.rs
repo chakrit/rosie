@@ -7,11 +7,11 @@ use std::path::PathBuf;
 use super::header::{Header, Nonce};
 use super::outcomes::{self, Key, Record};
 use super::{
-    ItemResult, Refusal, Reporter, Runner, Subject, elevated, exit_reason, item_count, path_result,
-    unrun,
+    ItemResult, Outcome, Refusal, Reporter, Runner, SkipReason, Subject, elevated, exit_reason,
+    item_count, path_result, unrun,
 };
 use crate::fs::{Argv, Backend};
-use crate::plan::{Delete, Outcome, Plan, RunAs, Runnable, SkipReason};
+use crate::plan::{Delete, Plan, RunAs, Runnable};
 
 /// What launching the elevated child needs, injected by `main`.
 #[derive(Debug, Clone)]

@@ -247,8 +247,8 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::plan::{ItemSize, Outcome, Size, SkipReason};
-    use crate::run::Subject;
+    use crate::plan::{ItemSize, Size};
+    use crate::run::{Outcome, SkipReason, Subject};
 
     fn window_of(lines: &[&str]) -> OutputWindow {
         let mut window = OutputWindow::default();

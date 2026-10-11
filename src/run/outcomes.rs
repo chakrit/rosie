@@ -23,7 +23,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::item::{ItemResult, Subject};
-use crate::plan::{Outcome, SkipReason};
+use super::{Outcome, SkipReason};
 
 const HEADER: &str = "rosie-outcomes 1";
 const END: char = '\0';

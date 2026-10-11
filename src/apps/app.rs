@@ -16,9 +16,10 @@ use crate::config::Walk;
 use crate::fs::{
     Backend, Cleanup, FileKind, FsContext, FsOp, Paths, SystemArgv, SystemTool, UserInput,
 };
-use crate::plan::{AggressiveItems, Report, Twin};
+use crate::plan::{AggressiveItems, Report};
 use crate::process;
 use crate::scan::{Entry, Mounts, Scan};
+use crate::tier::Tier;
 
 /// Scans for `app` and its leftovers in the user's home and the system folders.
 ///
@@ -81,29 +82,29 @@ where
     };
 
     let mut search = Search::new(ctx, paths, mounts, aggressive);
-    search.add(itself, Holds::Plain, &rule, Twin::Normal)?;
+    search.add(itself, Holds::Plain, &rule, Tier::Normal)?;
 
     for location in leftover_locations(paths) {
         for candidate in search.candidates(&location)? {
-            let id_twin = bundle
+            let id_tier = bundle
                 .id
                 .as_ref()
                 .filter(|id| claims_by_id(id, &candidate.name, location.holds))
-                .map(|id| id_match_twin(id, &others, &candidate.name, location.holds));
+                .map(|id| id_match_tier(id, &others, &candidate.name, location.holds));
             let by_name = bundle
                 .name
                 .as_ref()
                 .is_some_and(|name| claims_by_name(name, &candidate.name));
-            match (id_twin, by_name) {
-                (Some(twin), _) => search.add(candidate, location.holds, &rule, twin)?,
-                (None, true) => search.add(candidate, location.holds, &rule, Twin::Aggressive)?,
+            match (id_tier, by_name) {
+                (Some(tier), _) => search.add(candidate, location.holds, &rule, tier)?,
+                (None, true) => search.add(candidate, location.holds, &rule, Tier::Aggressive)?,
                 (None, false) => {}
             }
         }
     }
 
-    for (package, twin) in receipts(ctx, &bundle, &others)? {
-        search.add_receipt(&package, twin)?;
+    for (package, tier) in receipts(ctx, &bundle, &others)? {
+        search.add_receipt(&package, tier)?;
     }
     for report in reports(ctx, &bundle)? {
         search.add_report(report);
@@ -118,13 +119,13 @@ where
 /// `others`: a second copy with the same ID, or an app with a longer ID that also
 /// matches it (`com.foo.Bar.canary.plist` while `com.foo.Bar.canary` is installed and
 /// `com.foo.Bar` is being removed). Then it is aggressive.
-fn id_match_twin(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -> Twin {
+fn id_match_tier(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -> Tier {
     let shared = others
         .iter()
         .any(|other| claimed_by_other(id, other, name, holds));
     match shared {
-        true => Twin::Aggressive,
-        false => Twin::Normal,
+        true => Tier::Aggressive,
+        false => Tier::Normal,
     }
 }
 
@@ -135,12 +136,12 @@ pub(super) fn pkgs_argv() -> SystemArgv {
 }
 
 /// The installed package receipts whose IDs are bundle-ID matches of the app, each with
-/// the twin [`id_match_twin`] gives it. An app with no bundle ID matches none.
+/// the tier [`id_match_tier`] gives it. An app with no bundle ID matches none.
 fn receipts<B: Backend>(
     ctx: &FsContext<B>,
     bundle: &Bundle,
     others: &[BundleId],
-) -> Result<Vec<(String, Twin)>, Error> {
+) -> Result<Vec<(String, Tier)>, Error> {
     let Some(id) = &bundle.id else {
         return Ok(Vec::new());
     };
@@ -149,8 +150,8 @@ fn receipts<B: Backend>(
         .lines()
         .filter(|package| claims_by_id(id, package, Holds::Plain))
         .map(|package| {
-            let twin = id_match_twin(id, others, package, Holds::Plain);
-            (package.to_owned(), twin)
+            let tier = id_match_tier(id, others, package, Holds::Plain);
+            (package.to_owned(), tier)
         });
     Ok(matching.collect())
 }

@@ -11,3 +11,4 @@ pub mod rules;
 pub mod run;
 pub mod scan;
 pub mod shell;
+pub mod tier;

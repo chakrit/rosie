@@ -19,6 +19,6 @@ pub use name::{Name, NameError, RuleId};
 pub use pack::load_pack;
 pub use rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Rule, Shape,
-    Source, Tier, Twin,
+    Source,
 };
 pub use set::{Candidate, RuleSet, TargetRule};

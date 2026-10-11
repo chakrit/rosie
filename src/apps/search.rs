@@ -17,12 +17,12 @@ use super::listing::{FolderLookup, Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
 use crate::fs::{Backend, FsContext, Paths};
 use crate::plan::{
-    AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Report, RunAs, Twin,
-    WalkSkip,
+    AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Report, RunAs, WalkSkip,
 };
 use crate::scan::{
     Entry, InFolder, Log, Mounts, NoProgress, Problem, RefusedItems, Scan, Sizer, Verdict, screen,
 };
+use crate::tier::Tier;
 
 /// A file or folder a scan may match by name. Symlinks never match, so none is ever a
 /// candidate.
@@ -65,7 +65,7 @@ struct Marks {
     launch: Option<LaunchDomain>,
     run_as: RunAs,
     rule: String,
-    twin: Twin,
+    tier: Tier,
 }
 
 pub(super) struct Search<'g, B: Backend> {
@@ -145,7 +145,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         candidate: Candidate,
         holds: Holds,
         rule: &str,
-        twin: Twin,
+        tier: Tier,
     ) -> Result<(), Error> {
         let (entry, kind) = match candidate.found {
             Found::Item { entry, kind } => (entry, kind),
@@ -170,14 +170,14 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
             launch,
             run_as,
             rule: rule.to_owned(),
-            twin,
+            tier,
         };
         self.matched.push((entry, marks));
         Ok(())
     }
 
-    pub(super) fn add_receipt(&mut self, package: &str, twin: Twin) -> Result<(), Error> {
-        self.builder.add_receipt(package, twin)?;
+    pub(super) fn add_receipt(&mut self, package: &str, tier: Tier) -> Result<(), Error> {
+        self.builder.add_receipt(package, tier)?;
         Ok(())
     }
 
@@ -241,7 +241,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                 run_as: marks.run_as,
                 reach,
                 rule: marks.rule,
-                twin: marks.twin,
+                tier: marks.tier,
             };
             match marks.launch {
                 Some(domain) => builder.add_launch_job(found, domain)?,

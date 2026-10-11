@@ -8,6 +8,7 @@ use std::path::PathBuf;
 use super::glob::Glob;
 use super::name::RuleId;
 use crate::fs::{Paths, ShellCommand};
+use crate::tier::Twin;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
@@ -193,52 +194,4 @@ impl FixedPath {
             .expand(&self.0)
             .expect("a fixed path is anchored at `/` or `~`, so it expands")
     }
-}
-
-/// A "what to clean" value and its `_aggressive` twin; at least one is set
-/// (`docs/spec/rules.md#aggressive-twins`).
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum Twin<T> {
-    Normal(T),
-    Aggressive(T),
-    Both { normal: T, aggressive: T },
-}
-
-impl<T> Twin<T> {
-    pub(super) fn from_parts(normal: Option<T>, aggressive: Option<T>) -> Option<Twin<T>> {
-        match (normal, aggressive) {
-            (Some(normal), Some(aggressive)) => Some(Twin::Both { normal, aggressive }),
-            (Some(normal), None) => Some(Twin::Normal(normal)),
-            (None, Some(aggressive)) => Some(Twin::Aggressive(aggressive)),
-            (None, None) => None,
-        }
-    }
-
-    pub fn normal(&self) -> Option<&T> {
-        match self {
-            Twin::Normal(normal) | Twin::Both { normal, .. } => Some(normal),
-            Twin::Aggressive(_) => None,
-        }
-    }
-
-    pub fn aggressive(&self) -> Option<&T> {
-        match self {
-            Twin::Aggressive(aggressive) | Twin::Both { aggressive, .. } => Some(aggressive),
-            Twin::Normal(_) => None,
-        }
-    }
-
-    /// Each value set, with the tier it belongs to.
-    pub fn tiers(&self) -> impl Iterator<Item = (Tier, &T)> {
-        let normal = self.normal().map(|value| (Tier::Normal, value));
-        let aggressive = self.aggressive().map(|value| (Tier::Aggressive, value));
-        normal.into_iter().chain(aggressive)
-    }
-}
-
-/// Whether an item comes from a plain field or its `_aggressive` twin.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Tier {
-    Normal,
-    Aggressive,
 }

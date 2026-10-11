@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use super::conflict::conflict_hint;
 use super::{
     Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, Status, Tool, check_path, outside_roots_hint,
+    Selection, Size, Status, StatusKind, Tool, check_path, outside_roots_hint,
 };
 use crate::fs::ShellCommand;
 
@@ -271,10 +271,9 @@ fn numbered<T, E>(
 impl DeleteTable {
     fn into_delete(self) -> Result<Delete, String> {
         let path = absolute_path("path", self.path)?;
-        let kind = match self.kind.as_str() {
-            "file" => ItemKind::File,
-            "folder" => ItemKind::Folder,
-            other => return Err(format!("type {other:?} is not one of file, folder")),
+        let Some(kind) = ItemKind::parse(&self.kind) else {
+            let kinds = ItemKind::ALL.map(ItemKind::label).join(", ");
+            return Err(format!("type {:?} is not one of {kinds}", self.kind));
         };
         let Some(bytes) = self.size else {
             return Err("size is missing".to_owned());
@@ -377,25 +376,33 @@ fn absolute_path(field: &str, text: String) -> Result<PathBuf, String> {
 }
 
 fn status(text: &str) -> Result<Status, String> {
-    match text {
-        "clean" => Ok(Status::Clean),
-        "keep" => Ok(Status::Keep),
-        "outside-roots" => Ok(Status::OutsideRoots),
-        "conflict" => {
-            Err("status \"conflict\" is a rule conflict; resolve it to clean or keep".to_owned())
-        }
-        other => Err(format!(
-            "status {other:?} is not one of clean, keep, outside-roots, conflict"
+    let Some(kind) = StatusKind::parse(text) else {
+        let statuses = StatusKind::ALL.map(StatusKind::label).join(", ");
+        return Err(format!("status {text:?} is not one of {statuses}"));
+    };
+
+    match kind {
+        StatusKind::Clean => Ok(Status::Clean),
+        StatusKind::Keep => Ok(Status::Keep),
+        StatusKind::OutsideRoots => Ok(Status::OutsideRoots),
+        StatusKind::Conflict => Err(format!(
+            "status {text:?} is a rule conflict; resolve it to {} or {}",
+            StatusKind::Clean.label(),
+            StatusKind::Keep.label()
         )),
     }
 }
 
 /// Commands are outside the roots gate, so they are never `outside-roots`.
 fn selection(text: &str) -> Result<Selection, String> {
-    match text {
-        "clean" => Ok(Selection::Clean),
-        "keep" => Ok(Selection::Keep),
-        other => Err(format!("status {other:?} is not one of clean, keep")),
+    match StatusKind::parse(text) {
+        Some(StatusKind::Clean) => Ok(Selection::Clean),
+        Some(StatusKind::Keep) => Ok(Selection::Keep),
+        _ => Err(format!(
+            "status {text:?} is not one of {}, {}",
+            StatusKind::Clean.label(),
+            StatusKind::Keep.label()
+        )),
     }
 }
 
@@ -403,9 +410,10 @@ fn selection(text: &str) -> Result<Selection, String> {
 mod tests {
     use super::*;
 
-    use crate::plan::{AggressiveItems, PathMatch, PlanBuilder, Reach, ToolCmds, Twin};
+    use crate::plan::{AggressiveItems, PathMatch, PlanBuilder, Reach};
+    use crate::tier::{Tier, Twin};
 
-    fn found(path: &str, reach: Reach, twin: Twin) -> PathMatch {
+    fn found(path: &str, reach: Reach, tier: Tier) -> PathMatch {
         PathMatch {
             path: PathBuf::from(path),
             kind: ItemKind::Folder,
@@ -413,7 +421,7 @@ mod tests {
             run_as: RunAs::User,
             reach,
             rule: "rosie/node".to_owned(),
-            twin,
+            tier,
         }
     }
 
@@ -421,10 +429,10 @@ mod tests {
     fn every_kind() -> Plan {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
-            .add_path(found("/w/app/node_modules", Reach::InRoots, Twin::Normal))
+            .add_path(found("/w/app/node_modules", Reach::InRoots, Tier::Normal))
             .expect("valid");
         builder
-            .add_path(found("/w/app/.venv", Reach::InRoots, Twin::Aggressive))
+            .add_path(found("/w/app/.venv", Reach::InRoots, Tier::Aggressive))
             .expect("valid");
         builder
             .add_path(PathMatch {
@@ -433,7 +441,7 @@ mod tests {
                 ..found(
                     "/elsewhere/it's \"odd\"\n$x",
                     Reach::OutsideRoots,
-                    Twin::Normal,
+                    Tier::Normal,
                 )
             })
             .expect("valid");
@@ -445,7 +453,7 @@ mod tests {
                     ..found(
                         "/Library/LaunchDaemons/com.x.helper.plist",
                         Reach::InRoots,
-                        Twin::Normal,
+                        Tier::Normal,
                     )
                 },
                 LaunchDomain::System,
@@ -456,7 +464,7 @@ mod tests {
                 found(
                     "/Users/me/Library/LaunchAgents/com.x.plist",
                     Reach::InRoots,
-                    Twin::Normal,
+                    Tier::Normal,
                 ),
                 LaunchDomain::Gui(501),
             )
@@ -468,20 +476,20 @@ mod tests {
                     ..found(
                         "/w/app/support/com.x.inner.plist",
                         Reach::InRoots,
-                        Twin::Normal,
+                        Tier::Normal,
                     )
                 },
                 LaunchDomain::Gui(501),
             )
             .expect("valid");
         builder
-            .add_path(found("/w/app/support", Reach::InRoots, Twin::Aggressive))
+            .add_path(found("/w/app/support", Reach::InRoots, Tier::Aggressive))
             .expect("valid");
         builder.add_tool(
             "rosie/docker",
-            ToolCmds::Twins {
-                cmd: &crate::plan::tool_command("docker system prune --force"),
-                cmd_aggressive: &crate::plan::tool_command("docker system prune --all --force"),
+            &Twin::Both {
+                normal: crate::plan::tool_command("docker system prune --force"),
+                aggressive: crate::plan::tool_command("docker system prune --all --force"),
             },
         );
         let brew = ShellCommand::new(
@@ -490,9 +498,9 @@ mod tests {
             BTreeMap::from([("HOMEBREW_NO_ENV_HINTS".to_owned(), "1".to_owned())]),
         )
         .expect("valid");
-        builder.add_tool("user/brew", ToolCmds::Normal(&brew));
+        builder.add_tool("user/brew", &Twin::Normal(brew));
         builder
-            .add_receipt("com.x.pkg", Twin::Normal)
+            .add_receipt("com.x.pkg", Tier::Normal)
             .expect("valid");
         builder.add_report(
             Report::new(
@@ -681,10 +689,10 @@ mod tests {
     /// A plan with `/w/a` matched by two rules that disagree on its tier.
     fn conflicted() -> Plan {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
-        for (rule, twin) in [("rosie/a", Twin::Normal), ("alice/b", Twin::Aggressive)] {
+        for (rule, tier) in [("rosie/a", Tier::Normal), ("alice/b", Tier::Aggressive)] {
             let found = PathMatch {
                 rule: rule.to_owned(),
-                ..found("/w/a", Reach::InRoots, twin)
+                ..found("/w/a", Reach::InRoots, tier)
             };
             builder.add_path(found).expect("valid");
         }

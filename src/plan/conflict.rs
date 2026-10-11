@@ -8,7 +8,8 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ptr;
 
-use super::{Delete, Plan, Selection, Status, Twin};
+use super::{Delete, Plan, Selection, Status};
+use crate::tier::Tier;
 
 /// The rules that matched one entry, or entries nested in it, at each tier. Both lists
 /// are non-empty and sorted.
@@ -50,37 +51,37 @@ pub(super) fn conflict_hint(disagreement: &Disagreement) -> String {
 /// disagrees with itself: when its twins both match one path it counts as normal, and
 /// when it also matches inside a path it matched, the outer match's tier stands.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub(super) struct Tiers(BTreeMap<String, Twin>);
+pub(super) struct Tiers(BTreeMap<String, Tier>);
 
 /// What the rules of one entry say about its tier.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(super) enum Verdict {
-    Agreed(Twin),
+    Agreed(Tier),
     Disagreed(Disagreement),
 }
 
 impl Tiers {
-    pub(super) fn of(rule: String, twin: Twin) -> Self {
-        Tiers(BTreeMap::from([(rule, twin)]))
+    pub(super) fn of(rule: String, tier: Tier) -> Self {
+        Tiers(BTreeMap::from([(rule, tier)]))
     }
 
-    pub(super) fn add(&mut self, rule: String, twin: Twin) {
-        let tier = self.0.entry(rule).or_insert(twin);
-        if twin == Twin::Normal {
-            *tier = Twin::Normal;
+    pub(super) fn add(&mut self, rule: String, tier: Tier) {
+        let stored = self.0.entry(rule).or_insert(tier);
+        if tier == Tier::Normal {
+            *stored = Tier::Normal;
         }
     }
 
     pub(super) fn absorb(&mut self, inner: Tiers) {
-        for (rule, twin) in inner.0 {
-            self.0.entry(rule).or_insert(twin);
+        for (rule, tier) in inner.0 {
+            self.0.entry(rule).or_insert(tier);
         }
     }
 
     pub(super) fn verdict(&self) -> Verdict {
         let (normal, aggressive): (Vec<_>, Vec<_>) =
-            self.0.iter().partition(|(_, twin)| **twin == Twin::Normal);
-        let names = |rules: Vec<(&String, &Twin)>| -> Vec<String> {
+            self.0.iter().partition(|(_, tier)| **tier == Tier::Normal);
+        let names = |rules: Vec<(&String, &Tier)>| -> Vec<String> {
             rules.into_iter().map(|(rule, _)| rule.clone()).collect()
         };
 
@@ -89,9 +90,9 @@ impl Tiers {
                 normal: names(normal),
                 aggressive: names(aggressive),
             }),
-            (true, false) => Verdict::Agreed(Twin::Aggressive),
+            (true, false) => Verdict::Agreed(Tier::Aggressive),
             // `Tiers` is never empty: it starts from one rule.
-            (false, true) | (true, true) => Verdict::Agreed(Twin::Normal),
+            (false, true) | (true, true) => Verdict::Agreed(Tier::Normal),
         }
     }
 }
@@ -136,17 +137,17 @@ mod tests {
 
     #[test]
     fn rules_at_one_tier_agree() {
-        let mut tiers = Tiers::of("rosie/a".to_owned(), Twin::Aggressive);
-        tiers.add("alice/b".to_owned(), Twin::Aggressive);
+        let mut tiers = Tiers::of("rosie/a".to_owned(), Tier::Aggressive);
+        tiers.add("alice/b".to_owned(), Tier::Aggressive);
 
-        assert_eq!(tiers.verdict(), Verdict::Agreed(Twin::Aggressive));
+        assert_eq!(tiers.verdict(), Verdict::Agreed(Tier::Aggressive));
     }
 
     #[test]
     fn rules_at_different_tiers_disagree_naming_each_side() {
-        let mut tiers = Tiers::of("rosie/a".to_owned(), Twin::Normal);
-        let mut inner = Tiers::of("alice/b".to_owned(), Twin::Aggressive);
-        inner.add("bob/c".to_owned(), Twin::Normal);
+        let mut tiers = Tiers::of("rosie/a".to_owned(), Tier::Normal);
+        let mut inner = Tiers::of("alice/b".to_owned(), Tier::Aggressive);
+        inner.add("bob/c".to_owned(), Tier::Normal);
         tiers.absorb(inner);
 
         let Verdict::Disagreed(disagreement) = tiers.verdict() else {
@@ -158,18 +159,18 @@ mod tests {
 
     #[test]
     fn one_rule_matching_inside_its_own_outer_match_keeps_the_outer_tier() {
-        let mut outer = Tiers::of("rosie/a".to_owned(), Twin::Aggressive);
-        outer.absorb(Tiers::of("rosie/a".to_owned(), Twin::Normal));
+        let mut outer = Tiers::of("rosie/a".to_owned(), Tier::Aggressive);
+        outer.absorb(Tiers::of("rosie/a".to_owned(), Tier::Normal));
 
-        assert_eq!(outer.verdict(), Verdict::Agreed(Twin::Aggressive));
+        assert_eq!(outer.verdict(), Verdict::Agreed(Tier::Aggressive));
     }
 
     #[test]
     fn one_rule_matching_at_both_tiers_is_normal() {
-        let mut tiers = Tiers::of("rosie/a".to_owned(), Twin::Aggressive);
-        tiers.add("rosie/a".to_owned(), Twin::Normal);
-        tiers.add("rosie/a".to_owned(), Twin::Aggressive);
+        let mut tiers = Tiers::of("rosie/a".to_owned(), Tier::Aggressive);
+        tiers.add("rosie/a".to_owned(), Tier::Normal);
+        tiers.add("rosie/a".to_owned(), Tier::Aggressive);
 
-        assert_eq!(tiers.verdict(), Verdict::Agreed(Twin::Normal));
+        assert_eq!(tiers.verdict(), Verdict::Agreed(Tier::Normal));
     }
 }

@@ -25,10 +25,11 @@ use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
 use crate::packs::Network;
 use crate::plan::{
     AggressiveItems, Delete, Disagreement, Needs, PlanStats, RunAs, Status, StatusKind, Tally,
-    Twin, WalkSkip,
+    WalkSkip,
 };
 use crate::scan::{self, PathScan, Problem, Refused, Scan, Scanner, Skipped};
 use crate::shell;
+use crate::tier::Tier;
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// Prints one line per path, in columns, after scanning them all with one context,
@@ -263,7 +264,7 @@ enum Verdict<'s> {
 /// A plan entry's status, with the tier its rules agree on where it shows.
 #[derive(Debug)]
 enum Planned<'s> {
-    Clean(Twin),
+    Clean(Tier),
     Keep,
     OutsideRoots,
     Conflict(&'s Disagreement),
@@ -413,7 +414,7 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
     let rules = delete.rules.join(", ");
     let what = match (place, planned) {
         (Place::Inside, _) => Some(format!("inside {} ({rules})", shown.path(&delete.path))),
-        (Place::At, Planned::Clean(tier)) => Some(format!("{rules} ({})", tier_label(*tier))),
+        (Place::At, Planned::Clean(tier)) => Some(format!("{rules} ({})", tier.label())),
         (Place::At, Planned::Keep) => Some(format!("{rules} (aggressive)")),
         (Place::At, Planned::OutsideRoots) => None,
         (Place::At, Planned::Conflict(disagreement)) => Some(sides(disagreement)),
@@ -440,13 +441,6 @@ fn sides(disagreement: &Disagreement) -> String {
         disagreement.normal().join(", "),
         disagreement.aggressive().join(", ")
     )
-}
-
-fn tier_label(tier: Twin) -> &'static str {
-    match tier {
-        Twin::Normal => "normal",
-        Twin::Aggressive => "aggressive",
-    }
 }
 
 /// `running: Slack (pid 4123)`, after `inside <item> (<rules>)` below the item.

@@ -6,12 +6,12 @@ use std::sync::{Mutex, MutexGuard};
 
 use rayon::Scope;
 
+use super::RuleMatch;
 use super::entry::Entry;
 use super::log::{Log, Problem, SizingLog};
 use super::progress::Progress;
 use super::refusal::{Refused, RefusedItems, Verdict, screen};
 use super::sizing::{Measure, Sizer};
-use super::{RuleMatch, plan_twin};
 use crate::fs::{Backend, FsContext};
 use crate::plan::{ItemKind, PathMatch, Reach, RunAs};
 
@@ -53,7 +53,7 @@ impl Target {
             run_as: self.run_as,
             reach: self.reach,
             rule: matched.rule.to_string(),
-            twin: plan_twin(matched.tier),
+            tier: matched.tier,
         })
     }
 }

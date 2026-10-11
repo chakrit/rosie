@@ -178,12 +178,13 @@ mod tests {
     use crate::fs::ShellCommand;
     use crate::plan::{
         AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
-        Size, ToolCmds, Twin, tool_command,
+        Size, tool_command,
     };
+    use crate::tier::{Tier, Twin};
 
     const HOSTILE: &str = "/w/it's \"$HOME\"`id`\nrm -rf ~ #";
 
-    fn found(path: &str, reach: Reach, twin: Twin) -> PathMatch {
+    fn found(path: &str, reach: Reach, tier: Tier) -> PathMatch {
         PathMatch {
             path: PathBuf::from(path),
             kind: ItemKind::Folder,
@@ -191,16 +192,16 @@ mod tests {
             run_as: RunAs::User,
             reach,
             rule: "rosie/node".to_owned(),
-            twin,
+            tier,
         }
     }
 
     fn plan() -> Plan {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let paths = [
-            found(HOSTILE, Reach::InRoots, Twin::Normal),
-            found(&format!("/x{HOSTILE}"), Reach::OutsideRoots, Twin::Normal),
-            found(&format!("/y{HOSTILE}"), Reach::InRoots, Twin::Aggressive),
+            found(HOSTILE, Reach::InRoots, Tier::Normal),
+            found(&format!("/x{HOSTILE}"), Reach::OutsideRoots, Tier::Normal),
+            found(&format!("/y{HOSTILE}"), Reach::InRoots, Tier::Aggressive),
         ];
         for found in paths {
             builder.add_path(found).expect("valid");
@@ -210,21 +211,21 @@ mod tests {
                 found(
                     "/Library/LaunchDaemons/com.x.plist",
                     Reach::InRoots,
-                    Twin::Normal,
+                    Tier::Normal,
                 ),
                 LaunchDomain::System,
             )
             .expect("valid");
         builder.add_tool(
             "rosie/docker",
-            ToolCmds::Normal(&tool_command("docker system prune --force")),
+            &Twin::Normal(tool_command("docker system prune --force")),
         );
         builder.add_tool(
             "rosie/tool",
-            ToolCmds::Aggressive(&tool_command("tool clean --dir=/tmp/x$y")),
+            &Twin::Aggressive(tool_command("tool clean --dir=/tmp/x$y")),
         );
         builder
-            .add_receipt("com.x.pkg", Twin::Normal)
+            .add_receipt("com.x.pkg", Tier::Normal)
             .expect("valid");
         builder.add_report(
             Report::new(
@@ -430,10 +431,10 @@ mod tests {
     #[test]
     fn refuses_a_plan_with_an_unresolved_conflict() {
         let mut builder = PlanBuilder::new(AggressiveItems::Clean);
-        for (rule, twin) in [("rosie/a", Twin::Normal), ("alice/b", Twin::Aggressive)] {
+        for (rule, tier) in [("rosie/a", Tier::Normal), ("alice/b", Tier::Aggressive)] {
             let found = PathMatch {
                 rule: rule.to_owned(),
-                ..found("/w/a", Reach::InRoots, twin)
+                ..found("/w/a", Reach::InRoots, tier)
             };
             builder.add_path(found).expect("valid");
         }
@@ -451,12 +452,12 @@ mod tests {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
             .add_launch_job(
-                found("/w/app/com.x.plist", Reach::InRoots, Twin::Aggressive),
+                found("/w/app/com.x.plist", Reach::InRoots, Tier::Aggressive),
                 LaunchDomain::Gui(501),
             )
             .expect("valid");
         builder
-            .add_path(found("/w/app", Reach::InRoots, Twin::Normal))
+            .add_path(found("/w/app", Reach::InRoots, Tier::Normal))
             .expect("valid");
 
         let script = builder.build().plan.to_sh().expect("no conflicts");

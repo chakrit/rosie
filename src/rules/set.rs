@@ -8,8 +8,9 @@ use super::error::Error;
 use super::layers::{self, RuleLayers};
 use super::lua::LuaSandbox;
 use super::name::{Name, RuleId};
-use super::rule::{Detection, Rule, Shape, Tier};
+use super::rule::{Detection, Rule, Shape};
 use crate::fs::{Backend, Cleanup, FsContext, FsOp};
+use crate::tier::Tier;
 
 /// Every rule from every layer, in identity order, with the folder rules indexed once
 /// by target name.

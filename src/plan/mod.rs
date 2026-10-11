@@ -27,9 +27,7 @@ use crate::shell;
 
 use deletes::Deletes;
 
-pub use builder::{
-    AggressiveItems, AgreedTiers, Built, PathMatch, PlanBuilder, Reach, ToolCmds, Twin,
-};
+pub use builder::{AggressiveItems, AgreedTiers, Built, PathMatch, PlanBuilder, Reach};
 pub use conflict::Disagreement;
 pub use error::Error;
 pub use size::Size;
@@ -418,11 +416,20 @@ pub enum ItemKind {
 }
 
 impl ItemKind {
+    pub const ALL: [ItemKind; 2] = [ItemKind::File, ItemKind::Folder];
+
     pub fn label(self) -> &'static str {
         match self {
             ItemKind::File => "file",
             ItemKind::Folder => "folder",
         }
+    }
+
+    /// The kind a plan entry's `type` names.
+    pub fn parse(label: &str) -> Option<ItemKind> {
+        ItemKind::ALL
+            .into_iter()
+            .find(|candidate| candidate.label() == label)
     }
 
     /// Whether `lstat` still reports this kind.
@@ -476,6 +483,13 @@ pub enum StatusKind {
 }
 
 impl StatusKind {
+    pub const ALL: [StatusKind; 4] = [
+        StatusKind::Clean,
+        StatusKind::Keep,
+        StatusKind::OutsideRoots,
+        StatusKind::Conflict,
+    ];
+
     pub fn label(self) -> &'static str {
         match self {
             StatusKind::Clean => "clean",
@@ -483,6 +497,13 @@ impl StatusKind {
             StatusKind::OutsideRoots => "outside-roots",
             StatusKind::Conflict => "conflict",
         }
+    }
+
+    /// The kind a plan entry's `status` names.
+    pub fn parse(label: &str) -> Option<StatusKind> {
+        StatusKind::ALL
+            .into_iter()
+            .find(|candidate| candidate.label() == label)
     }
 }
 

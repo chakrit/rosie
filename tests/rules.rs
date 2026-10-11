@@ -9,9 +9,9 @@ use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, Cleanup, FsContext, FsOp, Op, Paths};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
-    Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source, Tier,
-    Twin,
+    Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source,
 };
+use rosie::tier::{Tier, Twin};
 
 const HOME: &str = "/Users/me";
 const PACKS: &str = "/Users/me/.local/share/rosie/packs";

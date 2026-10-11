@@ -26,8 +26,9 @@ use thiserror::Error;
 
 use crate::config::Walk;
 use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Paths, UserInput};
-use crate::plan::{self, AggressiveItems, AgreedTiers, Plan, PlanBuilder, ToolCmds, WalkSkips};
-use crate::rules::{RuleId, RuleSet, Shape, Tier, Twin};
+use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder, WalkSkips};
+use crate::rules::{RuleId, RuleSet, Shape};
+use crate::tier::Tier;
 
 pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry, Sealed};
 pub use log::{Log, Problem, Skipped};
@@ -240,16 +241,7 @@ impl<B: Backend + Sync> Scanner<B> {
             let Shape::Tool(commands) = rule.shape() else {
                 continue;
             };
-            let cmds = match commands {
-                Twin::Normal(cmd) => ToolCmds::Normal(cmd),
-                Twin::Aggressive(cmd) => ToolCmds::Aggressive(cmd),
-                Twin::Both { normal, aggressive } => ToolCmds::Twins {
-                    cmd: normal,
-                    cmd_aggressive: aggressive,
-                },
-            };
-
-            builder.add_tool(&rule.id().to_string(), cmds);
+            builder.add_tool(&rule.id().to_string(), commands);
         }
     }
 
@@ -272,13 +264,5 @@ impl<B: Backend + Sync> Scanner<B> {
             skipped,
             problems,
         }
-    }
-}
-
-/// The plan's name for a rule field's tier.
-fn plan_twin(tier: Tier) -> plan::Twin {
-    match tier {
-        Tier::Normal => plan::Twin::Normal,
-        Tier::Aggressive => plan::Twin::Aggressive,
     }
 }

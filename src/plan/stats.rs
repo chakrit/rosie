@@ -503,10 +503,10 @@ mod tests {
     use super::*;
     use crate::plan::{
         AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
-        ToolCmds, Twin,
     };
+    use crate::tier::{Tier, Twin};
 
-    fn found(path: &str, bytes: u64, reach: Reach, twin: Twin) -> PathMatch {
+    fn found(path: &str, bytes: u64, reach: Reach, tier: Tier) -> PathMatch {
         PathMatch {
             path: PathBuf::from(path),
             kind: ItemKind::Folder,
@@ -514,7 +514,7 @@ mod tests {
             run_as: RunAs::User,
             reach,
             rule: "rosie/r".to_owned(),
-            twin,
+            tier,
         }
     }
 
@@ -530,27 +530,27 @@ mod tests {
     fn plan_stats_total_clean_keep_and_outside_roots_items() {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let matches = [
-            found("/w/a", 1_000, Reach::InRoots, Twin::Normal),
-            found("/w/b", 2_500, Reach::InRoots, Twin::Normal),
-            found("/w/c", 40_000, Reach::InRoots, Twin::Aggressive),
-            found("/x/d", 7, Reach::OutsideRoots, Twin::Normal),
+            found("/w/a", 1_000, Reach::InRoots, Tier::Normal),
+            found("/w/b", 2_500, Reach::InRoots, Tier::Normal),
+            found("/w/c", 40_000, Reach::InRoots, Tier::Aggressive),
+            found("/x/d", 7, Reach::OutsideRoots, Tier::Normal),
         ];
         for found in matches {
             builder.add_path(found).expect("valid match");
         }
         let prune = crate::plan::tool_command("docker system prune --force");
         let prune_all = crate::plan::tool_command("docker system prune --all --force");
-        let docker = ToolCmds::Twins {
-            cmd: &prune,
-            cmd_aggressive: &prune_all,
+        let docker = Twin::Both {
+            normal: prune,
+            aggressive: prune_all,
         };
-        builder.add_tool("rosie/docker", docker);
+        builder.add_tool("rosie/docker", &docker);
         builder
-            .add_receipt("com.x.pkg", Twin::Normal)
+            .add_receipt("com.x.pkg", Tier::Normal)
             .expect("valid");
         builder
             .add_launch_job(
-                found("/w/e.plist", 300, Reach::InRoots, Twin::Normal),
+                found("/w/e.plist", 300, Reach::InRoots, Tier::Normal),
                 LaunchDomain::System,
             )
             .expect("valid plist");

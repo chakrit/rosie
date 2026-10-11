@@ -11,9 +11,10 @@ use super::error::{Error, Problem};
 use super::glob::Glob;
 use super::lua::compile;
 use super::rule::{
-    Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape, Twin,
+    Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape,
 };
 use crate::fs::ShellCommand;
+use crate::tier::Twin;
 
 /// One rule table from a file, keyed as written: a plain name or a qualified override.
 pub(super) struct Parsed {
@@ -288,7 +289,7 @@ mod tests {
     use std::path::PathBuf;
 
     use super::*;
-    use crate::rules::rule::Tier;
+    use crate::tier::Tier;
 
     fn parse(text: &str) -> Result<Vec<Parsed>, Error> {
         let lua = Lua::new();

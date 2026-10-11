@@ -20,30 +20,13 @@ use super::{
     Selection, Size, Status, Tool, check_path,
 };
 use crate::fs::ShellCommand;
+use crate::tier::{Tier, Twin};
 
 /// Whether `--aggressive` was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AggressiveItems {
     Keep,
     Clean,
-}
-
-/// Which of a rule's twin fields matched (`docs/spec/rules.md#aggressive-twins`).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Twin {
-    Normal,
-    Aggressive,
-}
-
-/// A tool rule's commands, as its `cmd` and `cmd_aggressive` fields give them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum ToolCmds<'a> {
-    Normal(&'a ShellCommand),
-    Aggressive(&'a ShellCommand),
-    Twins {
-        cmd: &'a ShellCommand,
-        cmd_aggressive: &'a ShellCommand,
-    },
 }
 
 /// Whether a path lies within the `roots` allowlist, as the roots gate decides it.
@@ -62,7 +45,7 @@ pub struct PathMatch {
     pub run_as: RunAs,
     pub reach: Reach,
     pub rule: String,
-    pub twin: Twin,
+    pub tier: Tier,
 }
 
 /// What [`PlanBuilder::build`] makes: the plan, and the tier its rules agree on for each
@@ -76,10 +59,10 @@ pub struct Built {
 /// The tier each delete entry's rules, and the rules of the paths nested in it, agree
 /// on, by the entry's path. A conflict entry has none.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AgreedTiers(BTreeMap<PathBuf, Twin>);
+pub struct AgreedTiers(BTreeMap<PathBuf, Tier>);
 
 impl AgreedTiers {
-    pub fn of(&self, path: &Path) -> Option<Twin> {
+    pub fn of(&self, path: &Path) -> Option<Tier> {
         self.0.get(path).copied()
     }
 }
@@ -137,37 +120,29 @@ impl PlanBuilder {
     /// Adds a tool rule's commands, each its own entry keyed by the rule. Without
     /// `--aggressive` its `cmd` is `clean` and its `cmd_aggressive` listed `keep`; with
     /// it, `cmd_aggressive` replaces `cmd`.
-    pub fn add_tool(&mut self, rule: &str, cmds: ToolCmds<'_>) {
-        let fields = match (cmds, self.aggressive) {
-            (ToolCmds::Normal(cmd), _) => vec![(cmd, Twin::Normal)],
-            (ToolCmds::Aggressive(cmd), _) => vec![(cmd, Twin::Aggressive)],
-            (ToolCmds::Twins { cmd_aggressive, .. }, AggressiveItems::Clean) => {
-                vec![(cmd_aggressive, Twin::Aggressive)]
+    pub fn add_tool(&mut self, rule: &str, cmds: &Twin<ShellCommand>) {
+        let fields: Vec<(Tier, &ShellCommand)> = match (cmds, self.aggressive) {
+            (Twin::Both { aggressive, .. }, AggressiveItems::Clean) => {
+                vec![(Tier::Aggressive, aggressive)]
             }
-            (
-                ToolCmds::Twins {
-                    cmd,
-                    cmd_aggressive,
-                },
-                AggressiveItems::Keep,
-            ) => vec![(cmd, Twin::Normal), (cmd_aggressive, Twin::Aggressive)],
+            (cmds, _) => cmds.tiers().collect(),
         };
 
         let tools: Vec<Tool> = fields
             .into_iter()
-            .map(|(command, twin)| Tool {
+            .map(|(tier, command)| Tool {
                 rule: rule.to_owned(),
                 command: command.clone(),
-                selection: self.selection(twin),
+                selection: self.selection(tier),
             })
             .collect();
         self.tools.extend(tools);
     }
 
-    pub fn add_receipt(&mut self, package: &str, twin: Twin) -> Result<(), Error> {
+    pub fn add_receipt(&mut self, package: &str, tier: Tier) -> Result<(), Error> {
         let package = Package::new(package.to_owned())?;
 
-        let selection = self.selection(twin);
+        let selection = self.selection(tier);
         self.receipts.push(Receipt { package, selection });
         Ok(())
     }
@@ -181,8 +156,8 @@ impl PlanBuilder {
         let mut agreed = BTreeMap::new();
         let deletes = Deletes::collapsing(self.deletes, |found| {
             let verdict = found.tiers.verdict();
-            if let Verdict::Agreed(twin) = &verdict {
-                agreed.insert(found.path.clone(), *twin);
+            if let Verdict::Agreed(tier) = &verdict {
+                agreed.insert(found.path.clone(), *tier);
             }
             found.into_delete(verdict, aggressive)
         });
@@ -210,13 +185,13 @@ impl PlanBuilder {
             kind: found.kind,
             size: found.size,
             rules: Vec::new(),
-            tiers: Tiers::of(found.rule.clone(), found.twin),
+            tiers: Tiers::of(found.rule.clone(), found.tier),
             reach: found.reach,
             run_as: found.run_as,
             bootouts: Vec::new(),
         });
 
-        entry.tiers.add(found.rule.clone(), found.twin);
+        entry.tiers.add(found.rule.clone(), found.tier);
         if !entry.rules.contains(&found.rule) {
             entry.rules.push(found.rule);
             entry.rules.sort();
@@ -226,17 +201,17 @@ impl PlanBuilder {
 
     // selection
 
-    fn selection(&self, twin: Twin) -> Selection {
-        self.aggressive.selection(twin)
+    fn selection(&self, tier: Tier) -> Selection {
+        self.aggressive.selection(tier)
     }
 }
 
 impl AggressiveItems {
-    fn selection(self, twin: Twin) -> Selection {
-        match (twin, self) {
-            (Twin::Normal, _) => Selection::Clean,
-            (Twin::Aggressive, AggressiveItems::Clean) => Selection::Clean,
-            (Twin::Aggressive, AggressiveItems::Keep) => Selection::Keep,
+    fn selection(self, tier: Tier) -> Selection {
+        match (tier, self) {
+            (Tier::Normal, _) => Selection::Clean,
+            (Tier::Aggressive, AggressiveItems::Clean) => Selection::Clean,
+            (Tier::Aggressive, AggressiveItems::Keep) => Selection::Keep,
         }
     }
 }
@@ -261,7 +236,7 @@ impl FoundPath {
     fn into_delete(self, verdict: Verdict, aggressive: AggressiveItems) -> Delete {
         let status = match (self.reach, verdict) {
             (Reach::OutsideRoots, _) => Status::OutsideRoots,
-            (Reach::InRoots, Verdict::Agreed(twin)) => aggressive.selection(twin).into(),
+            (Reach::InRoots, Verdict::Agreed(tier)) => aggressive.selection(tier).into(),
             (Reach::InRoots, Verdict::Disagreed(disagreement)) => Status::Conflict(disagreement),
         };
 
@@ -301,7 +276,7 @@ mod tests {
     use super::*;
     use crate::plan::{Runnable, tool_command};
 
-    fn found(path: &str, rule: &str, twin: Twin) -> PathMatch {
+    fn found(path: &str, rule: &str, tier: Tier) -> PathMatch {
         PathMatch {
             path: PathBuf::from(path),
             kind: ItemKind::Folder,
@@ -309,14 +284,14 @@ mod tests {
             run_as: RunAs::User,
             reach: Reach::InRoots,
             rule: rule.to_owned(),
-            twin,
+            tier,
         }
     }
 
-    fn plist(path: &str, twin: Twin) -> PathMatch {
+    fn plist(path: &str, tier: Tier) -> PathMatch {
         PathMatch {
             kind: ItemKind::File,
-            ..found(path, "app/x", twin)
+            ..found(path, "app/x", tier)
         }
     }
 
@@ -364,9 +339,9 @@ mod tests {
         let plan = built(
             AggressiveItems::Keep,
             vec![
-                found("/w/app/node_modules", "rosie/node", Twin::Normal),
-                found("/w/app/node_modules", "user/js", Twin::Normal),
-                found("/w/app/node_modules", "rosie/node", Twin::Normal),
+                found("/w/app/node_modules", "rosie/node", Tier::Normal),
+                found("/w/app/node_modules", "user/js", Tier::Normal),
+                found("/w/app/node_modules", "rosie/node", Tier::Normal),
             ],
         );
 
@@ -381,11 +356,11 @@ mod tests {
         let plan = built(
             AggressiveItems::Keep,
             vec![
-                found("/w/app/target/debug/build", "rosie/x", Twin::Normal),
-                found("/w/app/target", "rosie/cargo", Twin::Normal),
-                found("/w/app/target/debug", "rosie/y", Twin::Normal),
-                found("/w/app/targets", "rosie/z", Twin::Normal),
-                found("/w/app 2/target", "rosie/cargo", Twin::Normal),
+                found("/w/app/target/debug/build", "rosie/x", Tier::Normal),
+                found("/w/app/target", "rosie/cargo", Tier::Normal),
+                found("/w/app/target/debug", "rosie/y", Tier::Normal),
+                found("/w/app/targets", "rosie/z", Tier::Normal),
+                found("/w/app 2/target", "rosie/cargo", Tier::Normal),
             ],
         );
 
@@ -415,11 +390,11 @@ mod tests {
         let plan = built(
             AggressiveItems::Keep,
             vec![
-                found("/w/app/.venv", "rosie/venv", Twin::Aggressive),
+                found("/w/app/.venv", "rosie/venv", Tier::Aggressive),
                 found(
                     "/w/app/.venv/lib/__pycache__",
                     "rosie/pycache",
-                    Twin::Normal,
+                    Tier::Normal,
                 ),
             ],
         );
@@ -436,8 +411,8 @@ mod tests {
         let plan = built(
             AggressiveItems::Keep,
             vec![
-                found("/w/app/.venv", "rosie/venv", Twin::Aggressive),
-                found("/w/app/.venv/lib", "alice/venv", Twin::Aggressive),
+                found("/w/app/.venv", "rosie/venv", Tier::Aggressive),
+                found("/w/app/.venv/lib", "alice/venv", Tier::Aggressive),
             ],
         );
 
@@ -449,12 +424,12 @@ mod tests {
         let plan = built(
             AggressiveItems::Keep,
             vec![
-                found("/w/app/build", "rosie/build", Twin::Normal),
+                found("/w/app/build", "rosie/build", Tier::Normal),
                 PathMatch {
                     run_as: RunAs::Sudo,
-                    ..found("/w/app/build/root-owned", "rosie/x", Twin::Normal)
+                    ..found("/w/app/build/root-owned", "rosie/x", Tier::Normal)
                 },
-                found("/w/other", "rosie/build", Twin::Normal),
+                found("/w/other", "rosie/build", Tier::Normal),
             ],
         );
 
@@ -466,8 +441,8 @@ mod tests {
     fn aggressive_items_are_keep_unless_aggressive() {
         let matches = || {
             vec![
-                found("/w/a", "rosie/a", Twin::Aggressive),
-                found("/w/b", "rosie/b", Twin::Normal),
+                found("/w/a", "rosie/a", Tier::Aggressive),
+                found("/w/b", "rosie/b", Tier::Normal),
             ]
         };
         let statuses = |plan: Plan| -> Vec<Status> {
@@ -490,8 +465,8 @@ mod tests {
             let plan = built(
                 aggressive,
                 vec![
-                    found("/w/a", "rosie/strict", Twin::Aggressive),
-                    found("/w/a", "rosie/plain", Twin::Normal),
+                    found("/w/a", "rosie/strict", Tier::Aggressive),
+                    found("/w/a", "rosie/plain", Tier::Normal),
                 ],
             );
 
@@ -507,8 +482,8 @@ mod tests {
         let plan = built(
             AggressiveItems::Keep,
             vec![
-                found("/w/a", "rosie/a", Twin::Aggressive),
-                found("/w/a", "rosie/a", Twin::Normal),
+                found("/w/a", "rosie/a", Tier::Aggressive),
+                found("/w/a", "rosie/a", Tier::Normal),
             ],
         );
 
@@ -517,16 +492,16 @@ mod tests {
 
     #[test]
     fn an_outside_roots_path_stays_outside_roots_whatever_its_rules_say() {
-        let outside = |rule, twin| PathMatch {
+        let outside = |rule, tier| PathMatch {
             reach: Reach::OutsideRoots,
-            ..found("/elsewhere/cache", rule, twin)
+            ..found("/elsewhere/cache", rule, tier)
         };
 
         let plan = built(
             AggressiveItems::Keep,
             vec![
-                outside("rosie/a", Twin::Normal),
-                outside("alice/b", Twin::Aggressive),
+                outside("rosie/a", Tier::Normal),
+                outside("alice/b", Tier::Aggressive),
             ],
         );
 
@@ -535,14 +510,14 @@ mod tests {
 
     #[test]
     fn items_outside_roots_are_outside_roots_even_when_aggressive() {
-        let outside = |twin| PathMatch {
+        let outside = |tier| PathMatch {
             reach: Reach::OutsideRoots,
-            ..found("/elsewhere/cache", "rosie/c", twin)
+            ..found("/elsewhere/cache", "rosie/c", tier)
         };
 
         let plan = built(
             AggressiveItems::Clean,
-            vec![outside(Twin::Normal), outside(Twin::Aggressive)],
+            vec![outside(Tier::Normal), outside(Tier::Aggressive)],
         );
 
         assert_eq!(plan.deletes()[0].status, Status::OutsideRoots);
@@ -552,7 +527,7 @@ mod tests {
     fn refuses_relative_paths() {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
-        let refused = builder.add_path(found("w/app/target", "rosie/cargo", Twin::Normal));
+        let refused = builder.add_path(found("w/app/target", "rosie/cargo", Tier::Normal));
 
         assert!(matches!(refused, Err(Error::RelativePath { .. })));
     }
@@ -566,8 +541,8 @@ mod tests {
             let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
             let refusals = [
-                builder.add_path(found(path, "rosie/x", Twin::Normal)),
-                builder.add_launch_job(plist(path, Twin::Normal), LaunchDomain::System),
+                builder.add_path(found(path, "rosie/x", Tier::Normal)),
+                builder.add_launch_job(plist(path, Tier::Normal), LaunchDomain::System),
             ];
 
             for refused in refusals {
@@ -586,7 +561,7 @@ mod tests {
     fn refuses_an_empty_receipt_package_or_report_subject() {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
-        let package = builder.add_receipt("", Twin::Normal);
+        let package = builder.add_receipt("", Tier::Normal);
         let report = Report::new(String::new(), vec!["Remove X".to_owned()]);
 
         assert!(matches!(package, Err(Error::EmptyPackage)), "{package:?}");
@@ -601,12 +576,12 @@ mod tests {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
         let refusals = [
-            builder.add_path(found("/w/a\0b", "rosie/cargo", Twin::Normal)),
+            builder.add_path(found("/w/a\0b", "rosie/cargo", Tier::Normal)),
             builder.add_launch_job(
-                found("/w/x\0.plist", "rosie/launch", Twin::Normal),
+                found("/w/x\0.plist", "rosie/launch", Tier::Normal),
                 LaunchDomain::System,
             ),
-            builder.add_receipt("com.x\0.pkg", Twin::Normal),
+            builder.add_receipt("com.x\0.pkg", Tier::Normal),
         ];
 
         for refused in refusals {
@@ -623,13 +598,13 @@ mod tests {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
             .add_launch_job(
-                plist("/L/LaunchAgents/com.x.plist", Twin::Aggressive),
+                plist("/L/LaunchAgents/com.x.plist", Tier::Aggressive),
                 LaunchDomain::Gui(501),
             )
             .expect("valid plist");
         builder
             .add_launch_job(
-                plist("/L/LaunchDaemons/com.y.plist", Twin::Normal),
+                plist("/L/LaunchDaemons/com.y.plist", Tier::Normal),
                 LaunchDomain::System,
             )
             .expect("valid plist");
@@ -653,17 +628,17 @@ mod tests {
     fn a_user_runnable_never_carries_a_system_bootout() {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
-            .add_path(found("/U/app", "app/x", Twin::Normal))
+            .add_path(found("/U/app", "app/x", Tier::Normal))
             .expect("valid match");
         builder
             .add_launch_job(
-                plist("/U/app/com.y.plist", Twin::Normal),
+                plist("/U/app/com.y.plist", Tier::Normal),
                 LaunchDomain::System,
             )
             .expect("valid plist");
         builder
             .add_launch_job(
-                plist("/U/agents/com.x.plist", Twin::Normal),
+                plist("/U/agents/com.x.plist", Tier::Normal),
                 LaunchDomain::Gui(501),
             )
             .expect("valid plist");
@@ -689,10 +664,10 @@ mod tests {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
-            .add_launch_job(plist(path, Twin::Aggressive), LaunchDomain::Gui(501))
+            .add_launch_job(plist(path, Tier::Aggressive), LaunchDomain::Gui(501))
             .expect("valid plist");
         builder
-            .add_launch_job(plist(path, Twin::Normal), LaunchDomain::Gui(501))
+            .add_launch_job(plist(path, Tier::Normal), LaunchDomain::Gui(501))
             .expect("valid plist");
 
         let plan = builder.build().plan;
@@ -706,10 +681,10 @@ mod tests {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
-            .add_launch_job(plist(path, Twin::Aggressive), LaunchDomain::Gui(501))
+            .add_launch_job(plist(path, Tier::Aggressive), LaunchDomain::Gui(501))
             .expect("valid plist");
         builder
-            .add_path(plist(path, Twin::Normal))
+            .add_path(plist(path, Tier::Normal))
             .expect("valid path");
 
         let plan = builder.build().plan;
@@ -722,10 +697,10 @@ mod tests {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/w/app/support/com.x.plist";
         builder
-            .add_launch_job(plist(path, Twin::Aggressive), LaunchDomain::Gui(501))
+            .add_launch_job(plist(path, Tier::Aggressive), LaunchDomain::Gui(501))
             .expect("valid plist");
         builder
-            .add_path(found("/w/app", "app/x", Twin::Normal))
+            .add_path(found("/w/app", "app/x", Tier::Normal))
             .expect("valid path");
 
         let plan = builder.build().plan;
@@ -739,10 +714,10 @@ mod tests {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
-            .add_launch_job(plist(path, Twin::Normal), LaunchDomain::Gui(501))
+            .add_launch_job(plist(path, Tier::Normal), LaunchDomain::Gui(501))
             .expect("valid plist");
 
-        let refused = builder.add_launch_job(plist(path, Twin::Normal), LaunchDomain::System);
+        let refused = builder.add_launch_job(plist(path, Tier::Normal), LaunchDomain::System);
 
         assert!(
             matches!(refused, Err(Error::ConflictingLaunchDomain { .. })),
@@ -763,16 +738,16 @@ mod tests {
         let adds = [
             (
                 "rosie/docker",
-                ToolCmds::Twins {
-                    cmd: &prune,
-                    cmd_aggressive: &prune_all,
+                Twin::Both {
+                    normal: prune.clone(),
+                    aggressive: prune_all,
                 },
             ),
-            ("alice/docker", ToolCmds::Aggressive(&prune)),
-            ("rosie/brew", ToolCmds::Normal(&cleanup)),
+            ("alice/docker", Twin::Aggressive(prune)),
+            ("rosie/brew", Twin::Normal(cleanup)),
         ];
         for (rule, cmds) in adds {
-            builder.add_tool(rule, cmds);
+            builder.add_tool(rule, &cmds);
         }
 
         let plan = builder.build().plan;
@@ -806,12 +781,12 @@ mod tests {
         let prune = tool_command("docker system prune --force");
         let prune_all = tool_command("docker system prune --all --force");
         let cleanup = tool_command("brew cleanup");
-        let twins = ToolCmds::Twins {
-            cmd: &prune,
-            cmd_aggressive: &prune_all,
+        let twins = Twin::Both {
+            normal: prune,
+            aggressive: prune_all,
         };
-        builder.add_tool("rosie/docker", twins);
-        builder.add_tool("rosie/brew", ToolCmds::Normal(&cleanup));
+        builder.add_tool("rosie/docker", &twins);
+        builder.add_tool("rosie/brew", &Twin::Normal(cleanup));
 
         let plan = builder.build().plan;
 

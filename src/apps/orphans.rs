@@ -8,8 +8,9 @@ use super::locations::leftover_locations;
 use super::matching::reads_as_bundle_id;
 use super::search::Search;
 use crate::fs::{Backend, FsContext, Paths};
-use crate::plan::{AggressiveItems, Twin};
+use crate::plan::AggressiveItems;
 use crate::scan::{Mounts, Scan};
+use crate::tier::Tier;
 
 const RULE: &str = "orphans";
 
@@ -45,7 +46,7 @@ where
         for candidate in search.candidates(&location)? {
             let reads_as_id = reads_as_bundle_id(&candidate.name, location.holds);
             if reads_as_id && !claims.claim(&candidate.name) {
-                search.add(candidate, location.holds, RULE, Twin::Aggressive)?;
+                search.add(candidate, location.holds, RULE, Tier::Aggressive)?;
             }
         }
     }

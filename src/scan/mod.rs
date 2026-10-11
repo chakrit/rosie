@@ -195,7 +195,8 @@ impl<B: Backend + Sync> Scanner<B> {
 
     /// Walks from `start`, whose own `lstat` gave `start_meta`, down toward `target`, at
     /// or below it, judging each folder on the way as a `tree` walk would, and takes
-    /// `target` as any other entry; a `tree` walk is the one whose target is its start.
+    /// `target` as any other entry, unless `target` is `start`: then the walk starts
+    /// there as a `tree` walk does, and `start` itself is never a target.
     /// Only the fixed rule paths under `start`, on the way to `target` or at or below it,
     /// are looked at.
     fn walk_toward<P: Progress>(
@@ -221,6 +222,7 @@ impl<B: Backend + Sync> Scanner<B> {
             log: &log,
             walked: Walked::starting_at(start, links),
         };
+
         let start = start.to_path_buf();
         rayon::scope(|scope| match start == target {
             true => walk.start(scope, start, start_meta),

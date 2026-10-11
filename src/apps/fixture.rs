@@ -27,7 +27,7 @@ pub(super) fn ctx<'a>(fake: &'a FakeBackend, roots: &[&str]) -> FsContext<&'a Fa
     ctx_at_home(fake, roots, HOME)
 }
 
-/// A context for the user whose home is `home`, spelled as given.
+/// A context for the user whose home is `home`.
 pub(super) fn ctx_at_home<'a>(
     fake: &'a FakeBackend,
     roots: &[&str],

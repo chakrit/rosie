@@ -53,8 +53,13 @@ and only when that process runs it.
 | `/usr/sbin/pkgutil` | macOS, `sw_vers -productVersion` | macOS 26.6.2 |
 | `/usr/bin/id`       | macOS, `sw_vers -productVersion` | macOS 26.6.2 |
 
-- A version that cannot be read draws a warning too.
+- A version that cannot be read draws a warning too. *(agent-inferred)*
 - A tool rule's `shell` other than `/bin/bash` is not version-checked.
+- `/usr/bin/id` is checked by the macOS version. *(agent-inferred)*
+- A version matches only when equal to the tested one; newer or older warns.
+  *(agent-inferred)*
+- Warnings print when the command finishes, in the elevated child too.
+  *(agent-inferred)*
 
 ### Cleanup targets
 
@@ -75,6 +80,8 @@ and only when that process runs it.
   pack install, replace, and remove.
 - They are confined to the injected `~/.config/rosie` and `~/.local/share/rosie`, not
   checked against `roots`. These folders get the same symlink ban as every other path.
+- Creating an entry in rosie's own data refuses a case clash with an existing entry
+  before the write. *(agent-inferred)*
 - Pack tarballs are unpacked with the `tar` and `flate2` crates. Only regular files and
   folders are accepted; absolute paths, `..`, symlinks, and hardlinks are rejected.
   Entries are written through the metadata methods.
@@ -96,8 +103,6 @@ carries or widens roots.
   `~/Applications`, the app-leftover folders under `~/Library` and `/Library` listed in
   [macos-filesystem-layout.md](../vendor/macos-filesystem-layout.md), and the tool cache
   folders named by the built-in pack. All are written as real, non-symlink paths (for
-- Creating an entry in rosie's own data refuses a case clash with an existing entry
-  before the write. *(agent-inferred)*
   example `/private/var/...`). No development roots are seeded.
 
 ## Symlinks
@@ -143,6 +148,13 @@ keeps the `roots` entry as written.
 |                    | the walk never follows a link                                     |
 | `"all"`            | as `"roots"`, and the walk also follows links                     |
 
+- `roots` entries are checked at the `enter_links` level set in `config.toml`, never at
+  the CLI flag's. *(agent-inferred)*
+- A path given through a link takes its real spelling; a misspelling elsewhere in it is
+  not refused separately. *(agent-inferred)*
+- At `"roots"`, a fixed rule path that is itself a link resolves to its target, and the
+  target is planned. *(agent-inferred)*
+
 At `"all"`:
 
 - The walk follows a link only when its target is inside the roots. A link whose target
@@ -153,6 +165,9 @@ At `"all"`:
 - Two links reaching one target plan it once.
 - Links inside a folder being deleted are still removed as links; their targets are
   untouched.
+- A followed link's target is matched by its own real name, never the link's name. A
+  link to a file is not followed. *(agent-inferred)*
+- Skipped links are counted as links in the summary. *(agent-inferred)*
 
 ## Walk skips
 
@@ -164,13 +179,6 @@ off:
 |------------------------|---------------------------|
 | `enter_bundles`        | `--enter-bundles`         |
 | `enter_mounts`         | `--enter-mounts`          |
-- `roots` entries are checked at the `enter_links` level set in `config.toml`, never at
-  the CLI flag's. *(agent-inferred)*
-- A path given through a link takes its real spelling; a misspelling elsewhere in it is
-  not refused separately. *(agent-inferred)*
-- At `"roots"`, a fixed rule path that is itself a link resolves to its target, and the
-  target is planned. *(agent-inferred)*
-
 | `enter_placeholders`   | `--enter-placeholders`    |
 | `enter_links`          | `--enter-links=<level>`   |
 
@@ -179,11 +187,10 @@ off:
 - The walk checks each entry in this order: symlink, placeholder, bundle, volume, then
   rules. A matched placeholder is never entered.
 - A mount point is never planned, even with `--enter-mounts`.
+- A mount point a scan matches is a mount walk skip, never a scan problem.
+  *(agent-inferred)*
 - Bundles are folders with these extensions: `.app`, `.framework`, `.bundle`, `.plugin`,
   `.xcarchive`, `.photoslibrary`, `.sparsebundle`, `.dSYM`.
-- A followed link's target is matched by its own real name, never the link's name. A
-  link to a file is not followed. *(agent-inferred)*
-- Skipped links are counted as links in the summary. *(agent-inferred)*
 - The walk `lstat`s an entry before any `readdir`. A dataless placeholder is detected by
   `SF_DATALESS` in `st_flags`, read via std `MetadataExt`.
 - `EPERM` during the walk is logged as a walk skip.
@@ -196,6 +203,9 @@ off:
   path. The check is one of the FS layer's delete checks.
 - Detection takes one snapshot per scan or run with `lsof -nP -d txt -F pn`. Each
   reported path is matched against item paths, component by component.
+- The snapshot is taken once per context. A context is made per scan and per run, so a
+  run's user part and its after-elevation part share one snapshot; the elevated child
+  takes its own as root. *(agent-inferred)*
 - Decision record:
   [running-process check in the FS layer](../decisions/2026-10-04-running-check-in-fs-layer.md).
 
@@ -203,8 +213,6 @@ off:
 
 - Rosie deletes. There is no Trash mode, no run log, no stash directory, and no
   `rosie restore`.
-- A mount point a scan matches is a mount walk skip, never a scan problem.
-  *(agent-inferred)*
 - Rosie's delete never follows symlinks and makes user-owned read-only folders writable
   as it goes.
 - Decision record: [no Trash mode](../decisions/2026-09-29-no-trash-mode.md).
@@ -219,9 +227,6 @@ Rosie elevates only root items, once per run.
   file.
 - The elevated process gets the invoking user's home from the stdin header, loads that
   user's config and roots, never `$HOME`, and runs through the same safety layer.
-- The snapshot is taken once per context. A context is made per scan and per run, so a
-  run's user part and its after-elevation part share one snapshot; the elevated child
-  takes its own as root. *(agent-inferred)*
 - If sudo is refused or fails, those items are reported as skipped.
 - The elevated child deletes root-owned items anywhere inside the roots. On the root side
   it never follows symlinks, never crosses mounts, and never chmods.

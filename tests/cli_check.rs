@@ -5,9 +5,11 @@ mod cli_fixture;
 mod pack_fixture;
 mod tarball;
 
+use std::io::ErrorKind;
+
 use cli_fixture::{CWD, HOME, Ran, Sandbox};
 use rosie::cli::ExitStatus;
-use rosie::fs::Argv;
+use rosie::fs::{Argv, Op};
 
 /// A rule that calls a Python project's `.venv` aggressive.
 const VENV_RULE: &str = "[rules.python-venv]\nstrategy = \"marker\"\n\
@@ -400,6 +402,62 @@ fn a_path_no_rule_reaches_is_no_rule_and_a_missing_one_does_not_exist() {
     );
 }
 
+/// The walk never reached a path below a folder it could not list, so the path reads
+/// `skipped` with the listing's error, never `no rule`.
+#[test]
+fn a_path_below_a_folder_that_cannot_be_listed_is_skipped_with_the_error() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/locked/app"));
+    sandbox
+        .fake
+        .fail_on(format!("{CWD}/locked"), Op::ReadDir, ErrorKind::Other);
+
+    let ran = check(&sandbox, &["locked/app/node_modules", "locked"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert_eq!(
+        line_for(&ran, "~/src/locked/app/node_modules"),
+        line(
+            "skipped",
+            "~/src/locked/app/node_modules",
+            "cannot list /Users/me/src/locked: other error"
+        )
+    );
+    assert_eq!(
+        line_for(&ran, "~/src/locked"),
+        line(
+            "skipped",
+            "~/src/locked",
+            "cannot list /Users/me/src/locked: other error"
+        )
+    );
+}
+
+/// A folder that cannot be listed inside a typed folder with no plan entry counts as
+/// skipped there, so the typed folder is never `no rule`.
+#[test]
+fn a_folder_holding_one_that_cannot_be_listed_counts_it_as_skipped() {
+    let sandbox = Sandbox::new();
+    sandbox
+        .fake
+        .add_file(format!("{CWD}/locked/notes.txt"), "x");
+    sandbox
+        .fake
+        .fail_on(format!("{CWD}/locked"), Op::ReadDir, ErrorKind::Other);
+
+    let ran = check(&sandbox, &[CWD]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert_eq!(
+        line_for(&ran, "~/src"),
+        line(
+            "skipped",
+            "~/src",
+            "contains 1 skipped; see rosie scan tree ~/src"
+        )
+    );
+}
+
 // an app bundle is judged as `rosie scan app` plans it
 
 const SLACK: &str = "/Users/me/Applications/Slack.app";
@@ -479,6 +537,52 @@ fn an_app_inside_a_plan_entry_takes_the_entry_s_status() {
     assert_eq!(
         line_for(&ran, "~/src/app/node_modules/Tool.app").reason,
         "inside ~/src/app/node_modules (rosie/node-modules)"
+    );
+}
+
+/// App mode refusing the bundle is a refusal of the typed path: `skipped` with the
+/// refusal's own text, and the other paths still print.
+#[test]
+fn an_app_outside_the_roots_is_skipped_with_the_refusal() {
+    let sandbox = Sandbox::with_roots(&[CWD]);
+    sandbox.node_project(&format!("{CWD}/app"));
+    install_slack(&sandbox);
+
+    let ran = check(&sandbox, &["app/node_modules", SLACK]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(line_for(&ran, "~/src/app/node_modules").status, "clean");
+    assert_eq!(
+        line_for(&ran, "~/Applications/Slack.app"),
+        line(
+            "skipped",
+            "~/Applications/Slack.app",
+            "cannot clean /Users/me/Applications/Slack.app: \
+             /Users/me/Applications/Slack.app is outside the allowed roots"
+        )
+    );
+}
+
+/// A folder merely named `.app` that app mode cannot read is `skipped` with the error,
+/// and the other paths still print.
+#[test]
+fn an_app_without_an_info_plist_is_skipped_with_the_error() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+    sandbox.fake.add_dir(format!("{CWD}/apps/Foo.app"));
+
+    let ran = check(&sandbox, &["app/node_modules", "apps/Foo.app"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(line_for(&ran, "~/src/app/node_modules").status, "clean");
+    assert_eq!(
+        line_for(&ran, "~/src/apps/Foo.app"),
+        line(
+            "skipped",
+            "~/src/apps/Foo.app",
+            "/Users/me/src/apps/Foo.app has no Info.plist: neither Contents/Info.plist \
+             nor a single Wrapper/<name>.app/Info.plist"
+        )
     );
 }
 

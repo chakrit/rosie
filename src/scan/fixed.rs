@@ -170,7 +170,10 @@ impl<B: Backend + Sync, P: Progress> FixedClaim<'_, B, P> {
         match closed {
             Ok(false) => self.targets.claim(scope, entry, rules),
             Ok(true) => self.log.skip(path, WalkSkip::Closed(Needs::MOUNTS)),
-            Err(error) => self.log.problem(Problem::Path(error)),
+            Err(error) => self.log.problem(Problem::Path {
+                met_at: path,
+                error,
+            }),
         }
     }
 }

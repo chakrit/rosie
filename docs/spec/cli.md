@@ -92,8 +92,11 @@ no rule        ~/Downloads/missing                    does not exist
   on the way down as a `tree` walk would, and walks the given path's subtree whole.
   *(agent-inferred)*
 - A line's verdict, first match wins: an item a process runs from at or above the path,
-  a plan entry at or above it, a walk skip at or above it, plan entries inside it, items
-  refused or skipped inside it, then `no rule`. *(agent-inferred)*
+  a plan entry at or above it, a walk skip at or above it, a folder at or above it that
+  cannot be read, plan entries inside it, items refused or skipped inside it, then `no
+  rule`. *(agent-inferred)*
+- A folder on the way down that cannot be read makes the path `skipped` with the
+  error's text. *(agent-inferred)*
 - A path inside a plan entry takes the entry's status: `inside <entry> (<rules>)`.
   *(agent-inferred)*
 - A `keep`, `outside-roots`, or `conflict` line carries its hint inside an entry too.
@@ -109,7 +112,8 @@ no rule        ~/Downloads/missing                    does not exist
   `clean`, `keep`, and `outside-roots`, in that order. *(agent-inferred)*
 - A folder with no plan entry inside but items refused or skipped inside is `in use`
   when any item runs, else `skipped`: `contains N in use, M skipped; see rosie scan tree
-  <path>`. It is never `no rule`. *(agent-inferred)*
+  <path>`. It is never `no rule`. A path inside it that cannot be read counts as
+  skipped. *(agent-inferred)*
 - A link out of the roots that the walk skips sits where the link is, not where it
   leads. *(agent-inferred)*
 - A path inside an item a process runs from reads `inside <item> (<rules>); running:
@@ -122,7 +126,8 @@ no rule        ~/Downloads/missing                    does not exist
   *(agent-inferred)*
 - An `.app` path is judged as `rosie scan app` would plan it, when nothing at or above
   it is claimed or skipped other than as a closed bundle; only the bundle's own line is
-  printed. `orphans` is not consulted. *(agent-inferred)*
+  printed. `orphans` is not consulted. An `.app` refused other than for a running
+  process, or unreadable, reads `skipped` with the error's text. *(agent-inferred)*
 
 ## Management commands
 

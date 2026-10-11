@@ -3,7 +3,7 @@
 
 use super::args::Mode;
 use crate::plan::{Plan, PlanStats, Report, WalkSkip, WalkSkips};
-use crate::scan::{Refused, Scan, Skipped};
+use crate::scan::{Problem, Refused, Scan, Skipped};
 
 /// Every skip and problem of `scan`, one per line. `mode` decides whether a walk-skip
 /// line may point to a flag: only the flags the mode that produced it actually accepts.
@@ -14,10 +14,7 @@ pub(super) fn findings_lines(scan: &Scan, mode: &Mode) -> Vec<String> {
         .map(|skipped| walk_skip_line(skipped, mode));
     let refused = scan.refused.iter().map(refused_line);
     let reports = scan.plan.reports().iter().map(report_line);
-    let problems = scan
-        .problems
-        .iter()
-        .map(|problem| format!("problem: {problem}"));
+    let problems = scan.problems.iter().map(problem_line);
 
     skipped
         .chain(refused)
@@ -64,6 +61,10 @@ fn report_line(report: &Report) -> String {
         report.subject(),
         report.steps().join("; ")
     )
+}
+
+pub(super) fn problem_line(problem: &Problem) -> String {
+    format!("problem: {problem}")
 }
 
 #[cfg(test)]

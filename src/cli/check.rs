@@ -8,12 +8,14 @@
 //!
 //! An `.app` bundle the walk claims nothing at or above, and skips only as a closed
 //! bundle, is judged instead from the plan [`apps::scan_app`] makes for it, as `rosie
-//! scan app` would plan it; a process running from it makes it `in use`.
+//! scan app` would plan it; a process running from it makes it `in use`, and any other
+//! refusal or error of that scan makes it `skipped` with the error's text.
 
 use std::path::Path;
 
 use super::args::{CheckArgs, flag};
 use super::console::{Console, Finish};
+use super::findings::problem_line;
 use super::scan::{walk_with_rule_flags, walk_with_scan_flags};
 use super::session::Session;
 use super::{Error, ExitStatus};
@@ -25,7 +27,7 @@ use crate::plan::{
     AggressiveItems, Delete, Disagreement, Needs, PlanStats, RunAs, Status, StatusKind, Tally,
     Twin, WalkSkip,
 };
-use crate::scan::{self, PathScan, Refused, Scan, Scanner, Skipped};
+use crate::scan::{self, PathScan, Problem, Refused, Scan, Scanner, Skipped};
 use crate::shell;
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
@@ -85,7 +87,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         app_mode: AppMode,
     ) -> Result<Line, Error> {
         for problem in &scanned.scan.problems {
-            self.note(&format!("problem: {problem}"))?;
+            self.note(&problem_line(problem))?;
         }
         let path = &scanned.path;
         let verdict = judge(path, &scanned.scan);
@@ -94,38 +96,34 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             return Ok(verdict.line(path, &shown));
         }
 
-        match self.app_line(scanner.ctx(), path, app_mode) {
-            Ok(line) => Ok(line),
-            Err(apps::Error::NotAnApp { .. }) => Ok(verdict.line(path, &shown)),
-            Err(error) => Err(error.into()),
-        }
+        let app_line = self.app_line(scanner.ctx(), path, app_mode);
+        Ok(app_line.unwrap_or_else(|| verdict.line(path, &shown)))
     }
 
-    /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it, or
-    /// `in use` when that scan refuses the bundle for a process running from it.
-    fn app_line(
-        &self,
-        ctx: &FsContext<&'a B>,
-        path: &Path,
-        app_mode: AppMode,
-    ) -> Result<Line, apps::Error> {
+    /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it:
+    /// `in use` when that scan refuses the bundle for a process running from it, and
+    /// `skipped` with the error's text when it refuses or cannot read the bundle for any
+    /// other reason. `None` when the path is not an app after all.
+    fn app_line(&self, ctx: &FsContext<&'a B>, path: &Path, app_mode: AppMode) -> Option<Line> {
         let paths = &self.env.paths;
         let shown = self.tilde();
 
         let scanned = apps::scan_app(ctx, path, paths, app_mode.aggressive, app_mode.walk);
 
-        match scanned {
-            Ok(scan) => Ok(judge(path, &scan).line(path, &shown)),
+        let (word, reason) = match scanned {
+            Ok(scan) => return Some(judge(path, &scan).line(path, &shown)),
+            Err(apps::Error::NotAnApp { .. }) => return None,
             Err(apps::Error::Refused {
                 source: fs::Error::Running { pid, program, .. },
                 ..
-            }) => Ok(Line {
-                word: Word::InUse,
-                path: shown.path(path),
-                reason: running(&program, pid),
-            }),
-            Err(error) => Err(error),
-        }
+            }) => (Word::InUse, running(&program, pid)),
+            Err(error) => (Word::Skipped, error.to_string()),
+        };
+        Some(Line {
+            word,
+            path: shown.path(path),
+            reason,
+        })
     }
 
     /// Why a typed path was refused. A path through a symlink names the link and where
@@ -249,9 +247,12 @@ enum Verdict<'s> {
     },
     /// A walk skip at the path or above it.
     Skipped(&'s Skipped),
+    /// A failed read at the path or above it, so the walk never judged the path.
+    Unread(&'s Problem),
     /// Plan entries strictly inside the path.
     Holds(PlanStats),
-    /// No plan entry inside the path, but items refused or skipped inside it.
+    /// No plan entry inside the path, but items refused, skipped, or unread inside it;
+    /// `skipped` counts the walk skips and the failed reads.
     HoldsUnplanned {
         in_use: usize,
         skipped: usize,
@@ -277,8 +278,8 @@ enum Place {
 
 /// The verdict for `path`, a real path, from its scan, most telling first: an item a
 /// process runs from at or above it, a plan entry at or above it, a walk skip at or
-/// above it, the plan entries inside it, the refused and skipped items inside it, and
-/// otherwise no rule.
+/// above it, a failed read at or above it, the plan entries inside it, the refused,
+/// skipped, and unread items inside it, and otherwise no rule.
 fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
     let place = |at: &Path| match at == path {
         true => Place::At,
@@ -308,6 +309,13 @@ fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
     if let Some(skipped) = scan.skipped.iter().find(|skip| holds_path(&skip.met_at)) {
         return Verdict::Skipped(skipped);
     }
+    let unread = scan
+        .problems
+        .iter()
+        .find(|problem| problem.met_at().is_some_and(holds_path));
+    if let Some(problem) = unread {
+        return Verdict::Unread(problem);
+    }
 
     let inside: Vec<&Delete> = deletes
         .iter()
@@ -321,11 +329,17 @@ fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
         .iter()
         .filter(|refused| inside_path(&refused.path))
         .count();
-    let skipped = scan
+    let walk_skips = scan
         .skipped
         .iter()
         .filter(|skip| inside_path(&skip.met_at))
         .count();
+    let unread_inside = scan
+        .problems
+        .iter()
+        .filter(|problem| problem.met_at().is_some_and(inside_path))
+        .count();
+    let skipped = walk_skips + unread_inside;
     match (in_use, skipped) {
         (0, 0) => Verdict::NoRule,
         _ => Verdict::HoldsUnplanned { in_use, skipped },
@@ -333,11 +347,11 @@ fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
 }
 
 /// Whether the walk leaves `path` to app mode: it is named as an `.app`, nothing at or
-/// above it is a plan entry or in use, and the walk skipped nothing above it, nor it for
-/// any reason but that it is a closed bundle.
+/// above it is a plan entry, in use, or unread, and the walk skipped nothing above it,
+/// nor it for any reason but that it is a closed bundle.
 fn leaves_to_app_mode(verdict: &Verdict, path: &Path) -> bool {
     let unclaimed = match verdict {
-        Verdict::Entry { .. } | Verdict::InUse { .. } => false,
+        Verdict::Entry { .. } | Verdict::InUse { .. } | Verdict::Unread(_) => false,
         Verdict::Skipped(skipped) => {
             skipped.met_at == path && skipped.reason == WalkSkip::Closed(Needs::BUNDLES)
         }
@@ -375,6 +389,7 @@ impl Verdict<'_> {
                 (Word::InUse, in_use_reason(refused, *place, shown))
             }
             Verdict::Skipped(skipped) => (Word::Skipped, skip_reason(skipped)),
+            Verdict::Unread(problem) => (Word::Skipped, problem.to_string()),
             Verdict::Holds(stats) => holds(stats, path, shown),
             Verdict::HoldsUnplanned { in_use, skipped } => {
                 holds_unplanned(*in_use, *skipped, path, shown)

@@ -81,7 +81,10 @@ impl<'a, B: Backend + Sync, P: Progress> Targets<'a, B, P> {
                     .refuse(scope, entry, names.collect(), pid, program);
             }
             Verdict::Skipped(reason) => return self.log.skip(entry.path().to_path_buf(), reason),
-            Verdict::Problem(error) => return self.log.problem(Problem::Path(error)),
+            Verdict::Problem(error) => {
+                let met_at = entry.path().to_path_buf();
+                return self.log.problem(Problem::Path { met_at, error });
+            }
         };
         let path = entry.path().to_path_buf();
         let Some(kind) = entry.item_kind() else {

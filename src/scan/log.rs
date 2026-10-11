@@ -1,7 +1,7 @@
 //! What a scan tells the user besides the plan: the paths it did not enter and the
 //! errors that cost it an item or a rule check (`docs/spec/safety.md#walk-skips`).
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use thiserror::Error;
@@ -28,9 +28,9 @@ pub enum Problem {
     Rule(rules::Error),
 
     /// A path could not be read, or was refused, such as a fixed rule path through a
-    /// symlink.
-    #[error(transparent)]
-    Path(fs::Error),
+    /// symlink. `met_at` is where the walk met the failure.
+    #[error("{error}")]
+    Path { met_at: PathBuf, error: fs::Error },
 
     /// A found item the plan cannot hold.
     #[error(transparent)]
@@ -38,6 +38,16 @@ pub enum Problem {
 
     #[error("{path} is neither a file nor a folder; rosie does not delete it", path = path.display())]
     Special { path: PathBuf },
+}
+
+impl Problem {
+    /// Where the walk met the problem, for a path that could not be read or was refused.
+    pub fn met_at(&self) -> Option<&Path> {
+        match self {
+            Problem::Path { met_at, .. } => Some(met_at),
+            Problem::Rule(_) | Problem::Plan(_) | Problem::Special { .. } => None,
+        }
+    }
 }
 
 /// Collects skips and problems from every worker of one scan.
@@ -71,7 +81,7 @@ impl Log {
     /// skip; a path that is absent, or vanished since its folder was listed, has
     /// nothing to scan.
     pub fn entry_failed(&self, path: PathBuf, error: fs::Error) {
-        match classify(error) {
+        match classify(&path, error) {
             Failure::Denied => self.skip(path, WalkSkip::Denied),
             Failure::Absent => {}
             Failure::Problem(problem) => self.problem(problem),
@@ -124,7 +134,7 @@ impl<'a> SizingLog<'a> {
         match self.0 {
             Sink::Walked(log) => log.entry_failed(path, error),
             Sink::Refused(log) => {
-                if let Failure::Problem(problem) = classify(error) {
+                if let Failure::Problem(problem) = classify(&path, error) {
                     log.problem(problem);
                 }
             }
@@ -142,13 +152,16 @@ enum Failure {
     Problem(Problem),
 }
 
-fn classify(error: fs::Error) -> Failure {
+fn classify(path: &Path, error: fs::Error) -> Failure {
     let denied = error.is_permission_denied();
     let absent = error.has_vanished();
     match (denied, absent) {
         (true, _) => Failure::Denied,
         (false, true) => Failure::Absent,
-        (false, false) => Failure::Problem(Problem::Path(error)),
+        (false, false) => Failure::Problem(Problem::Path {
+            met_at: path.to_path_buf(),
+            error,
+        }),
     }
 }
 

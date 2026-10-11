@@ -107,10 +107,13 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     let fails = |result: Result<Scan, Error>| {
         matches!(
             result,
-            Err(Error::Item(crate::scan::Problem::Path(fs::Error::Io {
-                op: Op::ReadDir,
+            Err(Error::Item(crate::scan::Problem::Path {
+                error: fs::Error::Io {
+                    op: Op::ReadDir,
+                    ..
+                },
                 ..
-            })))
+            }))
         )
     };
     let app_scan = |fake: &FakeBackend| {

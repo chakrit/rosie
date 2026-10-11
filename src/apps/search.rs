@@ -218,7 +218,8 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                             None
                         }
                         Verdict::Problem(error) => {
-                            log.problem(Problem::Path(error));
+                            let met_at = entry.path().to_path_buf();
+                            log.problem(Problem::Path { met_at, error });
                             None
                         }
                     }

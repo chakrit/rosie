@@ -40,7 +40,7 @@ impl RemovePack {
         let matching: Vec<Source> = settled
             .sources()?
             .into_iter()
-            .filter(|source| source.pack().as_str() == self.pack)
+            .filter(|source| source.pack().matches_ignoring_case(&self.pack))
             .collect();
 
         match matching.as_slice() {

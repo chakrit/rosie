@@ -58,15 +58,18 @@ pub struct Seed {
 }
 
 /// `rosie rules pull [<source>]`: downloads the source's pack and installs it, replacing
-/// any installed copy wholesale.
+/// any installed copy wholesale. A source already installed under another case is
+/// pulled under its installed spelling.
 pub fn pull<B: Backend, N: Network>(
     store: &Store<B>,
     network: &N,
-    source: &Source,
+    requested: &Source,
     now: SystemTime,
 ) -> Result<Pulled, Error> {
     let settled = SettlePacks.run(store)?;
-    refuse_name_taken(&settled, source)?;
+    let installed = settled.sources()?;
+    let source = installed_spelling(&installed, requested);
+    refuse_name_taken(&installed, source)?;
 
     let archive = DownloadArchive { source }.run(network)?;
     install(&settled, source, &archive, now)
@@ -134,18 +137,28 @@ fn install<B: Backend>(
 
 /// Two packs with one name would give their rules the same `pack/rule` identities, so a
 /// source is refused when another installed source has its pack name.
-fn refuse_name_taken<B: Backend>(settled: &Settled<B>, source: &Source) -> Result<(), Error> {
-    let installed = settled.sources()?;
-    let taken = installed
-        .into_iter()
-        .find(|other| other.pack() == source.pack() && other != source);
+fn refuse_name_taken(installed: &[Source], source: &Source) -> Result<(), Error> {
+    let taken = installed.iter().find(|other| {
+        let same_name = other.pack().matches_ignoring_case(source.pack().as_str());
+        same_name && *other != source
+    });
 
     match taken {
         Some(other) => Err(Error::PackNameTaken {
             pack: source.pack().to_string(),
-            installed: other,
+            installed: other.clone(),
         }),
         None => Ok(()),
+    }
+}
+
+/// The installed source naming the same repository as `requested`, or `requested` when
+/// none does.
+fn installed_spelling<'a>(installed: &'a [Source], requested: &'a Source) -> &'a Source {
+    let same_repo = installed.iter().find(|other| other.is_same_repo(requested));
+    match same_repo {
+        Some(installed) => installed,
+        None => requested,
     }
 }
 

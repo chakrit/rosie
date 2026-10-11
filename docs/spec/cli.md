@@ -94,7 +94,7 @@ Flags for `scan`, `plan`, and `clean`:
 | Flag                     | Effect                                                         |
 |--------------------------|----------------------------------------------------------------|
 | `--only <rule>`          | limits the run to that rule name in any pack; repeatable       |
-| `--aggressive`           | ticks aggressive items; `cmd_aggressive` replaces `cmd`        |
+| `--aggressive`           | aggressive items are `clean`; `cmd_aggressive` replaces `cmd`  |
 | `--enter-bundles`        | walk into bundles (overrides `[walk] enter_bundles`)           |
 | `--enter-mounts`         | walk across volumes (overrides `[walk] enter_mounts`)          |
 | `--enter-placeholders`   | open dataless cloud placeholders (`[walk] enter_placeholders`) |

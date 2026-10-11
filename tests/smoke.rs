@@ -37,7 +37,7 @@ fn scan_tree_prints_a_plan_and_deletes_nothing() {
     assert!(scanned.status.success(), "{}", stderr(&scanned));
     let plan = stdout(&scanned);
     assert!(plan.contains("version = 1"), "{plan}");
-    assert!(plan.contains("status = \"ticked\""), "{plan}");
+    assert!(plan.contains("status = \"clean\""), "{plan}");
     assert!(home.path("project/app/node_modules").exists());
 }
 
@@ -71,10 +71,10 @@ fn scan_piped_to_run_deletes_exactly_the_planned_targets() {
     assert!(target.exists(), "the symlink's target");
 }
 
-// out-of-roots: blocked by scan, and refused by run even when ticked by hand
+// out-of-roots: outside-roots by scan, and refused by run even when made clean by hand
 
 #[test]
-fn an_out_of_roots_target_is_blocked_and_survives_a_hand_ticked_run() {
+fn an_out_of_roots_target_is_outside_roots_and_survives_a_hand_cleaned_run() {
     let home = SmokeHome::with_roots(&["allowed"]);
     let outside = home.path("elsewhere/app");
     node_project(&outside);
@@ -89,13 +89,14 @@ fn an_out_of_roots_target_is_blocked_and_survives_a_hand_ticked_run() {
     );
     assert!(scanned.status.success(), "{}", stderr(&scanned));
     let plan = stdout(&scanned);
-    assert!(plan.contains("status = \"blocked\""), "{plan}");
+    assert!(plan.contains("status = \"outside-roots\""), "{plan}");
     assert!(plan.contains("rosie roots add"), "{plan}");
 
-    // Ticking the entry by hand takes it past the plan's own status, to the roots gate.
-    let ticked = plan.replace("status = \"blocked\"", "status = \"ticked\"");
+    // Marking the entry clean by hand takes it past the plan's own status, to the roots
+    // gate.
+    let cleaned = plan.replace("status = \"outside-roots\"", "status = \"clean\"");
 
-    let ran = home.run(&["run", "-"], Some(&ticked));
+    let ran = home.run(&["run", "-"], Some(&cleaned));
 
     assert_eq!(ran.status.code(), Some(1), "{}", stderr(&ran));
     assert!(outside.join("node_modules").exists());

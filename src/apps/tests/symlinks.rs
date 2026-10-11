@@ -7,9 +7,9 @@ fn symlinks_in_a_location_never_match() {
     fake.add_dir("/Users/me/elsewhere");
     fake.add_symlink(lib("Caches/com.foo.Bar"), "/Users/me/elsewhere");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
 
-    assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Ticked)]);
+    assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Clean)]);
 }
 
 #[test]
@@ -22,7 +22,7 @@ fn refuses_an_app_argument_through_a_symlink() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new("/Users/me/Bar.app"),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     );
 
@@ -55,13 +55,13 @@ fn a_symlinked_info_plist_is_refused_by_app_and_orphan_scans() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     );
     let orphans = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Mounts::Skip,
     );
 
@@ -86,7 +86,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
         &ctx(fake, &ALL_ROOTS),
         Path::new(app),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     )
 }
@@ -95,7 +95,7 @@ fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {
     scan_orphans(
         &ctx(fake, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Mounts::Skip,
     )
 }

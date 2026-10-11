@@ -12,22 +12,22 @@ confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or pipe
 
 The plan file is `version = 1` followed by one table per entry, grouped by action;
 deletes are in path order. Each entry except `[[report]]` is preceded by a comment with
-its size (`size unknown` for `[[tool]]` and `[[forget]]`) and, when blocked, the
-`rosie roots add <path>` hint; report entries have no comment. A launch job's bootout
+its size (`size unknown` for `[[tool]]` and `[[forget]]`) and, when `outside-roots`,
+the `rosie roots add <path>` hint; report entries have no comment. A launch job's bootout
 sits inside the delete that holds its plist:
 
 ```toml
-# rosie plan. Only entries with status = "ticked" run.
+# rosie plan. Only entries with status = "clean" run.
 # Delete any entry you do not want, then: rosie run <this file>
 version = 1
 
-# 4.1 KB; blocked, outside roots. To allow it: rosie roots add /Library/LaunchDaemons/com.x.plist
+# 4.1 KB; outside roots. To allow it: rosie roots add /Library/LaunchDaemons/com.x.plist
 [[delete]]
 path = "/Library/LaunchDaemons/com.x.plist"
 type = "file"
 size = 4096
 rules = ["app/com.x"]
-status = "blocked"
+status = "outside-roots"
 sudo = true
 
 [[delete.bootout]]
@@ -40,21 +40,21 @@ path = "/Users/me/src/app/node_modules"
 type = "folder"
 size = 1234567890
 rules = ["rosie/node"]
-status = "ticked"
+status = "clean"
 
 # size unknown
 [[tool]]
 rule = "rosie/docker"
 shell = "/bin/bash"
 cmd = "docker system prune --force"
-status = "ticked"
+status = "clean"
 
 # size unknown
 [[tool]]
 rule = "user/homebrew"
 shell = "/bin/zsh"
 cmd = "brew cleanup"
-status = "ticked"
+status = "clean"
 
 [tool.env]
 HOMEBREW_NO_ENV_HINTS = "1"
@@ -62,7 +62,7 @@ HOMEBREW_NO_ENV_HINTS = "1"
 # size unknown
 [[forget]]
 package = "com.x.pkg"
-status = "ticked"
+status = "clean"
 
 [[report]]
 subject = "login item X"
@@ -82,8 +82,9 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 | `[[forget]]`          | `package` for `pkgutil --forget`, `status`                         |
 | `[[report]]`          | `subject`, `steps`; report-only, never run                         |
 
-- `status` is `ticked`, `unticked`, `blocked`, or `conflict`; `[[tool]]` and
-  `[[forget]]` are never `blocked` or `conflict`.
+- Plan status words are user-facing: `clean`, `keep`, `outside-roots`, `conflict`.
+- `status` is `clean`, `keep`, `outside-roots`, or `conflict`; `[[tool]]` and
+  `[[forget]]` are never `outside-roots` or `conflict`.
 - Unknown keys are refused.
 
 - A plan carries a format version.
@@ -95,16 +96,16 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 - A plan always writes a `[[tool]]` entry's `shell`; a plan read back without it is
   refused. *(agent-inferred)*
 - A `[[tool]]` entry's `rule` is not validated when a plan is read. *(agent-inferred)*
-- Every found item goes through all delete checks: outside `roots` is blocked, a running
-  process leaves it out of the plan (sized and reported), a mount point is a walk skip,
-  and any other refusal is a scan problem. *(agent-inferred)*
+- Every found item goes through all delete checks: an item outside `roots` is
+  `outside-roots`, a running process leaves it out of the plan (sized and reported), a
+  mount point is a walk skip, and any other refusal is a scan problem. *(agent-inferred)*
 - Nested matches collapse into the outer one. The outer entry is `sudo` if any inner one
   was.
-- Aggressive items appear unticked unless `--aggressive` is given
+- Aggressive items appear as `keep` unless `--aggressive` is given
   ([rules.md](rules.md#aggressive-twins)).
-- Items outside `roots` appear as blocked, with a `rosie roots add <path>` hint
+- Items outside `roots` appear as `outside-roots`, with a `rosie roots add <path>` hint
   ([safety.md](safety.md#roots)).
-- Unticked, blocked, and conflict entries are kept in the plan but not executed.
+- `keep`, `outside-roots`, and `conflict` entries are kept in the plan but not executed.
 - A plan never carries roots; run checks against the `roots` in `config.toml`.
 - Scan marks an item `sudo` when it is not owned by the user
   ([safety.md](safety.md#elevation)).
@@ -118,7 +119,7 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
   one nested in another) and the rules disagree on tier. No rule's tier wins.
 - The entry's comment names the rules and their tiers.
 - `rosie run` and the interactive `y` refuse while any `conflict` entry remains.
-- The user resolves each conflict to `ticked` or `unticked`, by editing the plan or
+- The user resolves each conflict to `clean` or `keep`, by editing the plan or
   through `e`.
 - `rosie scan … --sh` refuses while any `conflict` entry remains.
 - A rule never conflicts with itself: a rule whose normal and aggressive values match the
@@ -133,8 +134,8 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 Plans and clean runs report saved space. Simple stats suffice. Stats are printed to
 stderr, never written into the plan TOML.
 
-- Scan and confirmation show the item count and total size of ticked items, unticked
-  aggressive items, blocked items, and conflicts.
+- Scan and confirmation show the item count and total size of `clean` items, `keep`
+  aggressive items, `outside-roots` items, and conflicts.
 - The end of a run shows the total freed and the items done, plus skipped and failed
   items (stale, running process, sudo refused, errors) with their sizes, and walk-skip
   counts per reason.
@@ -151,8 +152,8 @@ Users may delete entries from a plan before `rosie run`. Run never adds anything
 ## Interactive confirmation
 
 The interactive prompt is `[y/N/e]`. `e` first asks, for each `conflict` entry, whether
-to tick or untick it; the user must choose one. It then opens a pre-ticked checklist;
-after the user edits it, rosie re-shows the trimmed plan and re-prompts.
+to clean or keep it; the user must choose one. It then opens a checklist with every
+entry checked; after the user edits it, rosie re-shows the trimmed plan and re-prompts.
 
 - A conflict pick has no default; cancelling any pick cancels the whole edit.
   *(agent-inferred)*

@@ -30,11 +30,11 @@ use crate::scan::{Entry, Mounts, Scan};
 /// mount point, refuses the whole operation, naming the reason, so nothing of an app
 /// that cannot be deleted is cleaned (`docs/spec/app.md`). A leftover a process runs
 /// from is refused alone. An installed app rosie cannot identify is reported, since
-/// leftovers the two apps share may be ticked.
+/// leftovers the two apps share may be `clean`.
 ///
 /// The app itself may have no bundle-ID key: it is the app the user asked to remove, not
 /// one rosie must first identify among others, so this is not refused. Its own bundle is
-/// still ticked and its `CFBundleName` still matches leftovers by name (aggressively,
+/// still `clean` and its `CFBundleName` still matches leftovers by name (aggressively,
 /// like any name-only match); it simply has no bundle ID to match leftovers by.
 pub fn scan_app<B>(
     ctx: &FsContext<B>,
@@ -114,10 +114,10 @@ where
     search.finish()
 }
 
-/// A bundle-ID match is ticked, unless it also belongs to another installed app, `others`:
-/// a second copy with the same ID, or an app with a longer ID that also matches it
-/// (`com.foo.Bar.canary.plist` while `com.foo.Bar.canary` is installed and `com.foo.Bar`
-/// is being removed). Then it is aggressive.
+/// A bundle-ID match is `clean`, unless it also belongs to another installed app,
+/// `others`: a second copy with the same ID, or an app with a longer ID that also
+/// matches it (`com.foo.Bar.canary.plist` while `com.foo.Bar.canary` is installed and
+/// `com.foo.Bar` is being removed). Then it is aggressive.
 fn id_match_twin(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -> Twin {
     let shared = others
         .iter()
@@ -244,8 +244,10 @@ fn unidentified_report(unidentified: &Unidentified, bundle: &Bundle) -> Result<R
     };
     let app = bundle.display_name();
     let steps = vec![
-        format!("Leftovers {app} shares with {other} are not told apart, so they may be ticked"),
-        "Untick any item such an app still uses before running the plan".to_owned(),
+        format!(
+            "Leftovers {app} shares with {other} are not told apart, so they may be marked clean"
+        ),
+        "Set any item such an app still uses to keep before running the plan".to_owned(),
     ];
     Ok(Report::new(subject, steps)?)
 }

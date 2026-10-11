@@ -4,8 +4,9 @@
 //! - Nested matches collapse into the outer one, which takes over their launch-job
 //!   bootouts and runs elevated when any of them would.
 //! - Each tool rule's command is its own entry: tool commands are never compared.
-//! - Aggressive items are unticked unless `--aggressive` is given, which also makes a
-//!   rule's `cmd_aggressive` replace its `cmd`; items outside the roots are blocked.
+//! - Aggressive items are `keep` unless `--aggressive` is given, which also makes a
+//!   rule's `cmd_aggressive` replace its `cmd`; items outside the roots are
+//!   `outside-roots`.
 //! - Rules that disagree on the tier of a path, or of paths nested in it, make the entry
 //!   a conflict (`docs/spec/plan.md#rule-conflicts`).
 
@@ -23,8 +24,8 @@ use crate::fs::ShellCommand;
 /// Whether `--aggressive` was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AggressiveItems {
-    Unticked,
-    Ticked,
+    Keep,
+    Clean,
 }
 
 /// Which of a rule's twin fields matched (`docs/spec/rules.md#aggressive-twins`).
@@ -115,13 +116,13 @@ impl PlanBuilder {
     }
 
     /// Adds a tool rule's commands, each its own entry keyed by the rule. Without
-    /// `--aggressive` its `cmd` is ticked and its `cmd_aggressive` listed unticked; with
+    /// `--aggressive` its `cmd` is `clean` and its `cmd_aggressive` listed `keep`; with
     /// it, `cmd_aggressive` replaces `cmd`.
     pub fn add_tool(&mut self, rule: &str, cmds: ToolCmds<'_>) {
         let fields = match (cmds, self.aggressive) {
             (ToolCmds::Normal(cmd), _) => vec![(cmd, Twin::Normal)],
             (ToolCmds::Aggressive(cmd), _) => vec![(cmd, Twin::Aggressive)],
-            (ToolCmds::Twins { cmd_aggressive, .. }, AggressiveItems::Ticked) => {
+            (ToolCmds::Twins { cmd_aggressive, .. }, AggressiveItems::Clean) => {
                 vec![(cmd_aggressive, Twin::Aggressive)]
             }
             (
@@ -129,7 +130,7 @@ impl PlanBuilder {
                     cmd,
                     cmd_aggressive,
                 },
-                AggressiveItems::Unticked,
+                AggressiveItems::Keep,
             ) => vec![(cmd, Twin::Normal), (cmd_aggressive, Twin::Aggressive)],
         };
 
@@ -193,7 +194,7 @@ impl PlanBuilder {
         Ok(entry)
     }
 
-    // ticking
+    // selection
 
     fn selection(&self, twin: Twin) -> Selection {
         self.aggressive.selection(twin)
@@ -203,9 +204,9 @@ impl PlanBuilder {
 impl AggressiveItems {
     fn selection(self, twin: Twin) -> Selection {
         match (twin, self) {
-            (Twin::Normal, _) => Selection::Ticked,
-            (Twin::Aggressive, AggressiveItems::Ticked) => Selection::Ticked,
-            (Twin::Aggressive, AggressiveItems::Unticked) => Selection::Unticked,
+            (Twin::Normal, _) => Selection::Clean,
+            (Twin::Aggressive, AggressiveItems::Clean) => Selection::Clean,
+            (Twin::Aggressive, AggressiveItems::Keep) => Selection::Keep,
         }
     }
 }
@@ -225,10 +226,11 @@ struct FoundPath {
 }
 
 impl FoundPath {
-    /// Blocked outside the roots; otherwise the tier its rules agree on, or a conflict.
+    /// `outside-roots` outside the roots; otherwise the tier its rules agree on, or a
+    /// conflict.
     fn into_delete(self, aggressive: AggressiveItems) -> Delete {
         let status = match (self.reach, self.tiers.verdict()) {
-            (Reach::OutsideRoots, _) => Status::Blocked,
+            (Reach::OutsideRoots, _) => Status::OutsideRoots,
             (Reach::InRoots, Verdict::Agreed(twin)) => aggressive.selection(twin).into(),
             (Reach::InRoots, Verdict::Disagreed(disagreement)) => Status::Conflict(disagreement),
         };
@@ -330,7 +332,7 @@ mod tests {
     #[test]
     fn keys_paths_and_lists_every_rule_that_matched() {
         let plan = built(
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             vec![
                 found("/w/app/node_modules", "rosie/node", Twin::Normal),
                 found("/w/app/node_modules", "user/js", Twin::Normal),
@@ -347,7 +349,7 @@ mod tests {
     #[test]
     fn nested_matches_collapse_into_the_outer_one() {
         let plan = built(
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             vec![
                 found("/w/app/target/debug/build", "rosie/x", Twin::Normal),
                 found("/w/app/target", "rosie/cargo", Twin::Normal),
@@ -381,7 +383,7 @@ mod tests {
     #[test]
     fn rules_disagreeing_across_nested_paths_make_the_outer_entry_a_conflict() {
         let plan = built(
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             vec![
                 found("/w/app/.venv", "rosie/venv", Twin::Aggressive),
                 found(
@@ -402,20 +404,20 @@ mod tests {
     #[test]
     fn rules_agreeing_across_nested_paths_keep_their_tier() {
         let plan = built(
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             vec![
                 found("/w/app/.venv", "rosie/venv", Twin::Aggressive),
                 found("/w/app/.venv/lib", "alice/venv", Twin::Aggressive),
             ],
         );
 
-        assert_eq!(plan.deletes()[0].status, Status::Unticked);
+        assert_eq!(plan.deletes()[0].status, Status::Keep);
     }
 
     #[test]
     fn an_outer_entry_runs_elevated_when_a_collapsed_one_would() {
         let plan = built(
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             vec![
                 found("/w/app/build", "rosie/build", Twin::Normal),
                 PathMatch {
@@ -431,7 +433,7 @@ mod tests {
     }
 
     #[test]
-    fn aggressive_items_are_unticked_unless_aggressive() {
+    fn aggressive_items_are_keep_unless_aggressive() {
         let matches = || {
             vec![
                 found("/w/a", "rosie/a", Twin::Aggressive),
@@ -445,16 +447,16 @@ mod tests {
                 .collect()
         };
 
-        let default = built(AggressiveItems::Unticked, matches());
-        let aggressive = built(AggressiveItems::Ticked, matches());
+        let default = built(AggressiveItems::Keep, matches());
+        let aggressive = built(AggressiveItems::Clean, matches());
 
-        assert_eq!(statuses(default), [Status::Unticked, Status::Ticked]);
-        assert_eq!(statuses(aggressive), [Status::Ticked, Status::Ticked]);
+        assert_eq!(statuses(default), [Status::Keep, Status::Clean]);
+        assert_eq!(statuses(aggressive), [Status::Clean, Status::Clean]);
     }
 
     #[test]
     fn rules_disagreeing_on_one_path_make_it_a_conflict_even_with_aggressive() {
-        for aggressive in [AggressiveItems::Unticked, AggressiveItems::Ticked] {
+        for aggressive in [AggressiveItems::Keep, AggressiveItems::Clean] {
             let plan = built(
                 aggressive,
                 vec![
@@ -473,52 +475,52 @@ mod tests {
     #[test]
     fn one_rule_matching_a_path_at_both_tiers_is_not_a_conflict() {
         let plan = built(
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             vec![
                 found("/w/a", "rosie/a", Twin::Aggressive),
                 found("/w/a", "rosie/a", Twin::Normal),
             ],
         );
 
-        assert_eq!(plan.deletes()[0].status, Status::Ticked);
+        assert_eq!(plan.deletes()[0].status, Status::Clean);
     }
 
     #[test]
-    fn a_blocked_path_stays_blocked_whatever_its_rules_say() {
+    fn an_outside_roots_path_stays_outside_roots_whatever_its_rules_say() {
         let outside = |rule, twin| PathMatch {
             reach: Reach::OutsideRoots,
             ..found("/elsewhere/cache", rule, twin)
         };
 
         let plan = built(
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             vec![
                 outside("rosie/a", Twin::Normal),
                 outside("alice/b", Twin::Aggressive),
             ],
         );
 
-        assert_eq!(plan.deletes()[0].status, Status::Blocked);
+        assert_eq!(plan.deletes()[0].status, Status::OutsideRoots);
     }
 
     #[test]
-    fn items_outside_roots_are_blocked_even_when_aggressive() {
+    fn items_outside_roots_are_outside_roots_even_when_aggressive() {
         let outside = |twin| PathMatch {
             reach: Reach::OutsideRoots,
             ..found("/elsewhere/cache", "rosie/c", twin)
         };
 
         let plan = built(
-            AggressiveItems::Ticked,
+            AggressiveItems::Clean,
             vec![outside(Twin::Normal), outside(Twin::Aggressive)],
         );
 
-        assert_eq!(plan.deletes()[0].status, Status::Blocked);
+        assert_eq!(plan.deletes()[0].status, Status::OutsideRoots);
     }
 
     #[test]
     fn refuses_relative_paths() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
         let refused = builder.add_path(found("w/app/target", "rosie/cargo", Twin::Normal));
 
@@ -531,7 +533,7 @@ mod tests {
         let dotted = ["/w/app/../../etc", "/w/./app", "/w/app/.", "/w/.."];
 
         for path in dotted {
-            let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+            let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
             let refusals = [
                 builder.add_path(found(path, "rosie/x", Twin::Normal)),
@@ -552,7 +554,7 @@ mod tests {
     /// refuses an empty package or subject.
     #[test]
     fn refuses_an_empty_receipt_package_or_report_subject() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
         let package = builder.add_receipt("", Twin::Normal);
         let report = Report::new(String::new(), vec!["Remove X".to_owned()]);
@@ -566,7 +568,7 @@ mod tests {
     /// would not be the item listed.
     #[test]
     fn refuses_a_nul_byte_in_any_path_or_argument() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
 
         let refusals = [
             builder.add_path(found("/w/a\0b", "rosie/cargo", Twin::Normal)),
@@ -588,7 +590,7 @@ mod tests {
 
     #[test]
     fn a_launch_job_boots_out_with_its_plists_status() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
             .add_launch_job(
                 plist("/L/LaunchAgents/com.x.plist", Twin::Aggressive),
@@ -619,7 +621,7 @@ mod tests {
     // folder before the elevated part has.
     #[test]
     fn a_user_runnable_never_carries_a_system_bootout() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
             .add_path(found("/U/app", "app/x", Twin::Normal))
             .expect("valid match");
@@ -654,7 +656,7 @@ mod tests {
 
     #[test]
     fn a_plist_matched_twice_is_booted_out_once_with_its_final_status() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
             .add_launch_job(plist(path, Twin::Aggressive), LaunchDomain::Gui(501))
@@ -670,8 +672,8 @@ mod tests {
     }
 
     #[test]
-    fn a_plist_ticked_by_a_plain_path_match_is_still_booted_out() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+    fn a_plist_marked_clean_by_a_plain_path_match_is_still_booted_out() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
             .add_launch_job(plist(path, Twin::Aggressive), LaunchDomain::Gui(501))
@@ -686,8 +688,8 @@ mod tests {
     }
 
     #[test]
-    fn a_plist_inside_a_ticked_folder_is_booted_out_before_the_folder_goes() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+    fn a_plist_inside_a_clean_folder_is_booted_out_before_the_folder_goes() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/w/app/support/com.x.plist";
         builder
             .add_launch_job(plist(path, Twin::Aggressive), LaunchDomain::Gui(501))
@@ -704,7 +706,7 @@ mod tests {
 
     #[test]
     fn refuses_a_plist_booted_out_of_two_domains() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
             .add_launch_job(plist(path, Twin::Normal), LaunchDomain::Gui(501))
@@ -721,10 +723,10 @@ mod tests {
     // tools
 
     /// Rosie never compares tool commands (`docs/spec/plan.md#plan-file`): two rules
-    /// with byte-identical commands are two actions, each with its own tick.
+    /// with byte-identical commands are two actions, each with its own status.
     #[test]
     fn each_rules_command_is_its_own_entry_even_when_identical() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let prune = tool_command("docker system prune --force");
         let prune_all = tool_command("docker system prune --all --force");
         let cleanup = tool_command("brew cleanup");
@@ -751,26 +753,26 @@ mod tests {
                 (
                     "rosie/docker",
                     "docker system prune --force",
-                    Selection::Ticked
+                    Selection::Clean
                 ),
                 (
                     "rosie/docker",
                     "docker system prune --all --force",
-                    Selection::Unticked,
+                    Selection::Keep,
                 ),
                 (
                     "alice/docker",
                     "docker system prune --force",
-                    Selection::Unticked
+                    Selection::Keep
                 ),
-                ("rosie/brew", "brew cleanup", Selection::Ticked),
+                ("rosie/brew", "brew cleanup", Selection::Clean),
             ]
         );
     }
 
     #[test]
     fn with_aggressive_cmd_aggressive_replaces_cmd() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Ticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Clean);
         let prune = tool_command("docker system prune --force");
         let prune_all = tool_command("docker system prune --all --force");
         let cleanup = tool_command("brew cleanup");
@@ -789,9 +791,9 @@ mod tests {
                 (
                     "rosie/docker",
                     "docker system prune --all --force",
-                    Selection::Ticked,
+                    Selection::Clean,
                 ),
-                ("rosie/brew", "brew cleanup", Selection::Ticked),
+                ("rosie/brew", "brew cleanup", Selection::Clean),
             ]
         );
     }

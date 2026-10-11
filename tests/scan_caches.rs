@@ -21,7 +21,7 @@ fn npm_home() -> rosie::fs::fake::FakeBackend {
 
 fn aggressive() -> Options {
     Options {
-        aggressive: AggressiveItems::Ticked,
+        aggressive: AggressiveItems::Clean,
         ..Options::default()
     }
 }
@@ -49,7 +49,7 @@ fn plans_fixed_paths_with_home_expanded_and_leaves_absent_ones_out() {
 
     assert_eq!(
         entries(&scan),
-        [("/Users/me/.npm", vec!["rosie/npm-cache"], Status::Ticked)]
+        [("/Users/me/.npm", vec!["rosie/npm-cache"], Status::Clean)]
     );
     assert_eq!(size_of(&scan, "/Users/me/.npm"), 4096);
     assert!(scan.problems.is_empty(), "{:?}", problems(&scan));
@@ -72,7 +72,7 @@ fn two_spellings_of_one_path_are_one_entry_listing_both_rules() {
         [(
             "/Users/me/.npm",
             vec!["rosie/npm-absolute", "rosie/npm-cache"],
-            Status::Ticked
+            Status::Clean
         )]
     );
     assert_eq!(size_of(&scan, "/Users/me/.npm"), 4096);
@@ -100,7 +100,7 @@ fn a_fixed_path_inside_another_collapses_into_it() {
         [(
             "/Users/me/Library/Caches",
             vec!["rosie/all-caches"],
-            Status::Ticked
+            Status::Clean
         )]
     );
     assert_eq!(size_of(&scan, "/Users/me/Library/Caches"), 3000);
@@ -150,7 +150,7 @@ fn a_fixed_path_through_a_symlink_is_planned_at_its_real_location_when_links_are
 }
 
 #[test]
-fn aggressive_fixed_paths_are_unticked_without_the_flag() {
+fn aggressive_fixed_paths_are_keep_without_the_flag() {
     let fake = fake_home();
     add_rules(
         &fake,
@@ -165,11 +165,11 @@ fn aggressive_fixed_paths_are_unticked_without_the_flag() {
     let path = "/Users/me/Library/Caches/JetBrains";
     assert_eq!(
         entries(&plain),
-        [(path, vec!["rosie/jetbrains"], Status::Unticked)]
+        [(path, vec!["rosie/jetbrains"], Status::Keep)]
     );
     assert_eq!(
         entries(&flagged),
-        [(path, vec!["rosie/jetbrains"], Status::Ticked)]
+        [(path, vec!["rosie/jetbrains"], Status::Clean)]
     );
 }
 
@@ -207,15 +207,15 @@ fn tool_rules_list_their_commands() {
             (
                 docker.clone(),
                 "docker system prune --force".into(),
-                Selection::Ticked
+                Selection::Clean
             ),
             (
                 docker.clone(),
                 "docker system prune --all --volumes --force".into(),
-                Selection::Unticked
+                Selection::Keep
             ),
-            (gradle.clone(), "gradle --stop".into(), Selection::Unticked),
-            (homebrew.clone(), "brew cleanup".into(), Selection::Ticked),
+            (gradle.clone(), "gradle --stop".into(), Selection::Keep),
+            (homebrew.clone(), "brew cleanup".into(), Selection::Clean),
         ]
     );
     assert_eq!(
@@ -224,10 +224,10 @@ fn tool_rules_list_their_commands() {
             (
                 docker,
                 "docker system prune --all --volumes --force".into(),
-                Selection::Ticked
+                Selection::Clean
             ),
-            (gradle, "gradle --stop".into(), Selection::Ticked),
-            (homebrew, "brew cleanup".into(), Selection::Ticked),
+            (gradle, "gradle --stop".into(), Selection::Clean),
+            (homebrew, "brew cleanup".into(), Selection::Clean),
         ]
     );
 }
@@ -309,10 +309,10 @@ fn fixed_paths_get_the_same_marks_as_walked_ones() {
     assert_eq!(
         marks,
         [
-            ("/Library/Caches/tool", Status::Blocked, RunAs::User),
+            ("/Library/Caches/tool", Status::OutsideRoots, RunAs::User),
             (
                 "/Users/me/Library/Caches/rooted",
-                Status::Ticked,
+                Status::Clean,
                 RunAs::Sudo
             ),
         ]

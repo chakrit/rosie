@@ -77,7 +77,7 @@ fn an_installed_app_whose_id_cannot_be_read_fails_the_orphan_scan_naming_it() {
         let result = scan_orphans(
             &ctx(&fake, &ALL_ROOTS),
             &paths(),
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             Mounts::Skip,
         );
 
@@ -105,7 +105,7 @@ fn an_installed_app_with_no_bundle_id_is_a_note_not_a_failure() {
     let scanned = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Mounts::Skip,
     )
     .expect("scan");
@@ -118,7 +118,7 @@ fn an_installed_app_with_no_bundle_id_is_a_note_not_a_failure() {
     );
     assert_eq!(
         deletes(&scanned),
-        [(lib("Caches/com.gone.App"), Status::Unticked)]
+        [(lib("Caches/com.gone.App"), Status::Keep)]
     );
 }
 
@@ -135,7 +135,7 @@ fn an_installed_app_whose_id_cannot_be_read_is_reported_by_app_scans() {
         .collect();
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     for path in paths {
@@ -153,7 +153,7 @@ fn an_installed_app_whose_id_cannot_be_read_is_reported_by_app_scans() {
     assert!(scanned.plan.reports().iter().all(|r| !r.steps().is_empty()));
     assert_eq!(
         entry(&scanned, &lib("Preferences/com.foo.Bar.plist")).status,
-        Status::Ticked
+        Status::Clean
     );
 }
 
@@ -165,7 +165,7 @@ fn another_installed_apps_missing_bundle_id_is_not_reported_by_app_scans() {
     bar_app(&fake);
     let path = Unreadable::MissingKey.set_up(&fake);
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     assert!(
@@ -184,11 +184,11 @@ fn a_wrapped_ios_app_is_installed_so_its_data_is_not_an_orphan() {
     fake.add_dir(lib("Group Containers/group.com.newin.nplayer"));
     fake.add_dir(lib("Caches/com.gone.App"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Clean);
 
     assert_eq!(
         deletes(&scanned),
-        [(lib("Caches/com.gone.App"), Status::Ticked)]
+        [(lib("Caches/com.gone.App"), Status::Clean)]
     );
 }
 
@@ -204,7 +204,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     )
     .expect("app scan");
@@ -212,7 +212,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
     assert_eq!(entry(&scanned, NPLAYER).rules, ["app/com.newin.nplayer"]);
     assert_eq!(
         entry(&scanned, &lib("Containers/com.newin.nplayer")).status,
-        Status::Ticked
+        Status::Clean
     );
 }
 
@@ -230,7 +230,7 @@ fn a_wrapper_holding_several_apps_has_no_info_plist() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     );
 
@@ -271,7 +271,7 @@ fn an_install_folder_rosie_may_not_list_fails_the_orphan_scan_and_the_picker() {
     let orphans = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Mounts::Skip,
     );
     let picker = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths());
@@ -310,7 +310,7 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
     let orphans = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Mounts::Skip,
     );
     let picker = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths()).expect("listing");
@@ -318,7 +318,7 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
     let orphans = orphans.expect("orphan scan");
     assert_eq!(
         deletes(&orphans),
-        [(lib("Caches/com.gone.App"), Status::Unticked)]
+        [(lib("Caches/com.gone.App"), Status::Keep)]
     );
     assert_eq!(
         picker,
@@ -336,7 +336,7 @@ fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scan, Error> {
         &ctx(fake, &ALL_ROOTS),
         Path::new(NPLAYER),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     )
 }
@@ -436,7 +436,7 @@ fn an_app_folder_entry_rosie_cannot_lstat_fails_the_orphan_scan() {
         let result = scan_orphans(
             &ctx(&fake, &ALL_ROOTS),
             &paths(),
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             Mounts::Skip,
         );
 

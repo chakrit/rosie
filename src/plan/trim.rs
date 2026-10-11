@@ -1,8 +1,8 @@
 //! Trimming a plan in the `clean` checklist (`docs/spec/plan.md#interactive-confirmation`).
 //!
-//! The checklist lists the plan's ticked entries, all pre-ticked. An entry the user
-//! unticks is removed from the plan, as if deleted from a plan file before `rosie run`;
-//! nothing can be added or ticked (`docs/spec/plan.md#editing-a-plan`).
+//! The checklist lists the plan's `clean` entries, all checked. An entry the user
+//! unchecks is removed from the plan, as if deleted from a plan file before `rosie run`;
+//! nothing can be added or made `clean` (`docs/spec/plan.md#editing-a-plan`).
 
 use std::collections::BTreeSet;
 use std::fmt;
@@ -10,53 +10,54 @@ use std::ptr;
 
 use super::{Delete, Plan, Receipt, Tool};
 
-/// A ticked entry, as the checklist lists it.
+/// A `clean` entry, as the checklist lists it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Ticked<'a> {
+pub enum CleanEntry<'a> {
     Delete(&'a Delete),
     Tool(&'a Tool),
     Receipt(&'a Receipt),
 }
 
 /// `delete /path (1.2 GB)`, `run docker system prune --force`, `forget com.x.pkg`.
-impl fmt::Display for Ticked<'_> {
+impl fmt::Display for CleanEntry<'_> {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Ticked::Delete(delete) => {
+            CleanEntry::Delete(delete) => {
                 write!(f, "delete {} ({})", delete.path.display(), delete.size)
             }
-            Ticked::Tool(tool) => write!(f, "run {}", tool.command),
-            Ticked::Receipt(receipt) => write!(f, "forget {}", receipt.package.as_str()),
+            CleanEntry::Tool(tool) => write!(f, "run {}", tool.command),
+            CleanEntry::Receipt(receipt) => write!(f, "forget {}", receipt.package.as_str()),
         }
     }
 }
 
 impl Plan {
-    /// The ticked entries: deletes, then tools, then receipts, each in plan order.
-    pub fn ticked(&self) -> Vec<Ticked<'_>> {
+    /// The `clean` entries: deletes, then tools, then receipts, each in plan order.
+    pub fn clean_entries(&self) -> Vec<CleanEntry<'_>> {
         let deletes = self
             .deletes
             .iter()
-            .filter(|delete| delete.status.is_ticked())
-            .map(Ticked::Delete);
+            .filter(|delete| delete.status.is_clean())
+            .map(CleanEntry::Delete);
         let tools = self
             .tools
             .iter()
-            .filter(|tool| tool.selection.is_ticked())
-            .map(Ticked::Tool);
+            .filter(|tool| tool.selection.is_clean())
+            .map(CleanEntry::Tool);
         let receipts = self
             .receipts
             .iter()
-            .filter(|receipt| receipt.selection.is_ticked())
-            .map(Ticked::Receipt);
+            .filter(|receipt| receipt.selection.is_clean())
+            .map(CleanEntry::Receipt);
 
         deletes.chain(tools).chain(receipts).collect()
     }
 
-    /// The plan without the ticked entries missing from `kept`, entries taken from
-    /// [`Plan::ticked`] and told apart by identity, not by value. An entry of another
-    /// plan keeps nothing. Unticked, blocked, and report entries stay as they are.
-    pub fn keeping_ticked(&self, kept: &[Ticked<'_>]) -> Plan {
+    /// The plan without the `clean` entries missing from `kept`, entries taken from
+    /// [`Plan::clean_entries`] and told apart by identity, not by value. An entry of
+    /// another plan keeps nothing. `keep`, `outside-roots`, and report entries stay as
+    /// they are.
+    pub fn keeping_clean_entries(&self, kept: &[CleanEntry<'_>]) -> Plan {
         let kept = Kept::from(kept);
 
         let deletes = self.deletes.retaining(|delete| kept.keeps_delete(delete));
@@ -90,14 +91,14 @@ struct Kept {
     receipts: BTreeSet<*const Receipt>,
 }
 
-impl From<&[Ticked<'_>]> for Kept {
-    fn from(entries: &[Ticked<'_>]) -> Self {
+impl From<&[CleanEntry<'_>]> for Kept {
+    fn from(entries: &[CleanEntry<'_>]) -> Self {
         let mut kept = Kept::default();
         for entry in entries {
             match *entry {
-                Ticked::Delete(delete) => kept.deletes.insert(ptr::from_ref(delete)),
-                Ticked::Tool(tool) => kept.tools.insert(ptr::from_ref(tool)),
-                Ticked::Receipt(receipt) => kept.receipts.insert(ptr::from_ref(receipt)),
+                CleanEntry::Delete(delete) => kept.deletes.insert(ptr::from_ref(delete)),
+                CleanEntry::Tool(tool) => kept.tools.insert(ptr::from_ref(tool)),
+                CleanEntry::Receipt(receipt) => kept.receipts.insert(ptr::from_ref(receipt)),
             };
         }
         kept
@@ -105,18 +106,18 @@ impl From<&[Ticked<'_>]> for Kept {
 }
 
 /// Whether an entry stays in the trimmed plan: every entry the checklist did not list,
-/// and each listed one the user left ticked.
+/// and each listed one the user left checked.
 impl Kept {
     fn keeps_delete(&self, delete: &Delete) -> bool {
-        !delete.status.is_ticked() || self.deletes.contains(&ptr::from_ref(delete))
+        !delete.status.is_clean() || self.deletes.contains(&ptr::from_ref(delete))
     }
 
     fn keeps_tool(&self, tool: &Tool) -> bool {
-        !tool.selection.is_ticked() || self.tools.contains(&ptr::from_ref(tool))
+        !tool.selection.is_clean() || self.tools.contains(&ptr::from_ref(tool))
     }
 
     fn keeps_receipt(&self, receipt: &Receipt) -> bool {
-        !receipt.selection.is_ticked() || self.receipts.contains(&ptr::from_ref(receipt))
+        !receipt.selection.is_clean() || self.receipts.contains(&ptr::from_ref(receipt))
     }
 }
 
@@ -131,34 +132,34 @@ path = "/Users/me/a/node_modules"
 type = "folder"
 size = 4096
 rules = ["rosie/node"]
-status = "ticked"
+status = "clean"
 
 [[delete]]
 path = "/Users/me/b/node_modules"
 type = "folder"
 size = 8192
 rules = ["rosie/node"]
-status = "unticked"
+status = "keep"
 
 [[delete]]
 path = "/Library/Caches/x"
 type = "folder"
 size = 4096
 rules = ["rosie/x"]
-status = "blocked"
+status = "outside-roots"
 
 [[delete]]
 path = "/Users/me/c/target"
 type = "folder"
 size = 4096
 rules = ["rosie/cargo"]
-status = "ticked"
+status = "clean"
 
 [[tool]]
 rule = "rosie/docker"
 shell = "/bin/bash"
 cmd = "docker system prune --force"
-status = "ticked"
+status = "clean"
 
 [[report]]
 subject = "login item X"
@@ -170,11 +171,14 @@ steps = ["Remove X"]
     }
 
     fn labels(plan: &Plan) -> Vec<String> {
-        plan.ticked().iter().map(ToString::to_string).collect()
+        plan.clean_entries()
+            .iter()
+            .map(ToString::to_string)
+            .collect()
     }
 
     #[test]
-    fn lists_only_ticked_entries() {
+    fn lists_only_clean_entries() {
         assert_eq!(
             labels(&plan()),
             [
@@ -186,11 +190,11 @@ steps = ["Remove X"]
     }
 
     #[test]
-    fn unticked_checklist_entries_are_removed_and_the_rest_is_kept() {
+    fn unchecked_checklist_entries_are_removed_and_the_rest_is_kept() {
         let plan = plan();
-        let kept = [plan.ticked()[1]];
+        let kept = [plan.clean_entries()[1]];
 
-        let trimmed = plan.keeping_ticked(&kept);
+        let trimmed = plan.keeping_clean_entries(&kept);
 
         assert_eq!(labels(&trimmed), ["delete /Users/me/c/target (4.1 KB)"]);
         let paths: Vec<_> = trimmed
@@ -214,10 +218,10 @@ steps = ["Remove X"]
     fn an_equal_entry_of_another_plan_keeps_nothing() {
         let shown = plan();
         let other = plan();
-        let kept = other.ticked();
+        let kept = other.clean_entries();
 
-        let trimmed = shown.keeping_ticked(&kept);
+        let trimmed = shown.keeping_clean_entries(&kept);
 
-        assert!(trimmed.ticked().is_empty());
+        assert!(trimmed.clean_entries().is_empty());
     }
 }

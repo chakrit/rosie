@@ -356,7 +356,7 @@ impl Console for ScriptedConsole {
         self.script.picks.pop_front().ok_or(PromptError::Cancelled)
     }
 
-    /// Leaves ticked the items at the scripted positions.
+    /// Leaves checked the items at the scripted positions.
     fn checklist<T: Display>(
         &mut self,
         prompt: &str,

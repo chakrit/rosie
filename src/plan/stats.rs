@@ -63,11 +63,11 @@ impl fmt::Display for Tally {
 /// What scan and confirmation show about a plan.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PlanStats {
-    pub ticked: Tally,
+    pub clean: Tally,
     /// Aggressive items listed without `--aggressive`.
-    pub unticked: Tally,
+    pub keep: Tally,
     /// Items outside the roots.
-    pub blocked: Tally,
+    pub outside_roots: Tally,
     /// Items whose rules disagree on their tier, awaiting the user's choice.
     pub conflicts: Tally,
 }
@@ -98,9 +98,9 @@ impl PlanStats {
 
     fn bucket(&mut self, status: &Status) -> &mut Tally {
         match status {
-            Status::Ticked => &mut self.ticked,
-            Status::Unticked => &mut self.unticked,
-            Status::Blocked => &mut self.blocked,
+            Status::Clean => &mut self.clean,
+            Status::Keep => &mut self.keep,
+            Status::OutsideRoots => &mut self.outside_roots,
             Status::Conflict(_) => &mut self.conflicts,
         }
     }
@@ -108,12 +108,12 @@ impl PlanStats {
 
 impl fmt::Display for PlanStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "ticked: {}", self.ticked)?;
-        if !self.unticked.is_empty() {
-            writeln!(f, "unticked (aggressive, not run): {}", self.unticked)?;
+        writeln!(f, "clean: {}", self.clean)?;
+        if !self.keep.is_empty() {
+            writeln!(f, "keep (aggressive, not run): {}", self.keep)?;
         }
-        if !self.blocked.is_empty() {
-            writeln!(f, "blocked (outside roots, not run): {}", self.blocked)?;
+        if !self.outside_roots.is_empty() {
+            writeln!(f, "outside-roots (not run): {}", self.outside_roots)?;
         }
         if !self.conflicts.is_empty() {
             writeln!(
@@ -523,8 +523,8 @@ mod tests {
     }
 
     #[test]
-    fn plan_stats_total_ticked_unticked_and_blocked_items() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+    fn plan_stats_total_clean_keep_and_outside_roots_items() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let matches = [
             found("/w/a", 1_000, Reach::InRoots, Twin::Normal),
             found("/w/b", 2_500, Reach::InRoots, Twin::Normal),
@@ -557,9 +557,9 @@ mod tests {
         assert_eq!(
             stats,
             PlanStats {
-                ticked: tally(5, 3_800, 2),
-                unticked: tally(2, 40_000, 1),
-                blocked: tally(1, 7, 0),
+                clean: tally(5, 3_800, 2),
+                keep: tally(2, 40_000, 1),
+                outside_roots: tally(1, 7, 0),
                 conflicts: Tally::default(),
             }
         );

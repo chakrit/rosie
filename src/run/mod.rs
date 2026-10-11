@@ -1,6 +1,6 @@
 //! Executing a plan (`docs/spec/plan.md#run`, `docs/spec/safety.md#elevation`).
 //!
-//! A run does the user's ticked entries first, then pipes the remaining `sudo` entries
+//! A run does the user's `clean` entries first, then pipes the remaining `sudo` entries
 //! to one elevated child, which runs them through the same code. Within each part:
 //!
 //! 1. every delete is verified or refused before anything runs, and a refused delete
@@ -65,7 +65,7 @@ impl<B: Backend + Sync> Runner<B> {
         }
     }
 
-    /// Runs the plan's ticked entries: the user's part here, then the `sudo` part in
+    /// Runs the plan's `clean` entries: the user's part here, then the `sudo` part in
     /// one elevated child, then here the user's deletes whose jobs the child booted out.
     pub fn run<R: Reporter>(
         &self,
@@ -73,8 +73,8 @@ impl<B: Backend + Sync> Runner<B> {
         elevation: &Elevation,
         reporter: &mut R,
     ) -> RunStats {
-        let user_part = plan.ticked_for(RunAs::User);
-        let sudo_part = plan.ticked_for(RunAs::Sudo);
+        let user_part = plan.clean_entries_for(RunAs::User);
+        let sudo_part = plan.clean_entries_for(RunAs::Sudo);
 
         let mut results = self.execute(&user_part, reporter);
         if !sudo_part.is_empty() {

@@ -2,8 +2,8 @@
 //! (`docs/spec/plan.md#plan-file`).
 //!
 //! Each entry is written as its own table. Every entry but a report sits under a comment
-//! with its size and, when it is blocked, the `rosie roots add` hint, or, when it is a
-//! conflict, the rules on each side. A file is checked for its format version before
+//! with its size and, when it is `outside-roots`, the `rosie roots add` hint, or, when it
+//! is a conflict, the rules on each side. A file is checked for its format version before
 //! anything else in it is read, and unknown keys are refused: a plan never carries roots.
 //! A `conflict` entry is refused too, so a plan read back always has every conflict
 //! resolved (`docs/spec/plan.md#rule-conflicts`).
@@ -16,14 +16,14 @@ use serde::{Deserialize, Serialize};
 use super::conflict::conflict_hint;
 use super::{
     Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, Status, Tool, blocked_hint, check_path,
+    Selection, Size, Status, Tool, check_path, outside_roots_hint,
 };
 use crate::fs::ShellCommand;
 
 const FORMAT_VERSION: u32 = 1;
 
 const PREAMBLE: &str = "\
-# rosie plan. Only entries with status = \"ticked\" run.
+# rosie plan. Only entries with status = \"clean\" run.
 # Delete any entry you do not want, then: rosie run <this file>
 ";
 
@@ -34,11 +34,13 @@ impl Plan {
 
         for delete in self.deletes.iter() {
             let note = match &delete.status {
-                Status::Blocked => format!("{}; {}", delete.size, blocked_hint(&delete.path)),
+                Status::OutsideRoots => {
+                    format!("{}; {}", delete.size, outside_roots_hint(&delete.path))
+                }
                 Status::Conflict(disagreement) => {
                     format!("{}; {}", delete.size, conflict_hint(disagreement))
                 }
-                Status::Ticked | Status::Unticked => delete.size.to_string(),
+                Status::Clean | Status::Keep => delete.size.to_string(),
             };
             push_entry(&mut text, Some(note), PlanFile::delete(delete))?;
         }
@@ -376,24 +378,24 @@ fn absolute_path(field: &str, text: String) -> Result<PathBuf, String> {
 
 fn status(text: &str) -> Result<Status, String> {
     match text {
-        "ticked" => Ok(Status::Ticked),
-        "unticked" => Ok(Status::Unticked),
-        "blocked" => Ok(Status::Blocked),
-        "conflict" => Err(
-            "status \"conflict\" is a rule conflict; resolve it to ticked or unticked".to_owned(),
-        ),
+        "clean" => Ok(Status::Clean),
+        "keep" => Ok(Status::Keep),
+        "outside-roots" => Ok(Status::OutsideRoots),
+        "conflict" => {
+            Err("status \"conflict\" is a rule conflict; resolve it to clean or keep".to_owned())
+        }
         other => Err(format!(
-            "status {other:?} is not one of ticked, unticked, blocked, conflict"
+            "status {other:?} is not one of clean, keep, outside-roots, conflict"
         )),
     }
 }
 
-/// Commands are outside the roots gate, so they are never blocked.
+/// Commands are outside the roots gate, so they are never `outside-roots`.
 fn selection(text: &str) -> Result<Selection, String> {
     match text {
-        "ticked" => Ok(Selection::Ticked),
-        "unticked" => Ok(Selection::Unticked),
-        other => Err(format!("status {other:?} is not one of ticked, unticked")),
+        "clean" => Ok(Selection::Clean),
+        "keep" => Ok(Selection::Keep),
+        other => Err(format!("status {other:?} is not one of clean, keep")),
     }
 }
 
@@ -417,7 +419,7 @@ mod tests {
 
     /// A plan with one entry of every kind and status.
     fn every_kind() -> Plan {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
             .add_path(found("/w/app/node_modules", Reach::InRoots, Twin::Normal))
             .expect("valid");
@@ -529,7 +531,7 @@ mod tests {
         assert!(
             text.contains(
                 "path = \"/w/app/support\"\ntype = \"folder\"\nsize = 1234567\n\
-                 rules = [\"rosie/node\"]\nstatus = \"unticked\"\n\n\
+                 rules = [\"rosie/node\"]\nstatus = \"keep\"\n\n\
                  [[delete.bootout]]\nplist = \"/w/app/support/com.x.inner.plist\"\n\
                  domain = \"gui/501\"\n"
             ),
@@ -540,7 +542,7 @@ mod tests {
     #[test]
     fn refuses_a_bootout_outside_its_delete() {
         let text = "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"folder\"\nsize = 1\n\
-                    status = \"ticked\"\n[[delete.bootout]]\nplist = \"/w/b/x.plist\"\n\
+                    status = \"clean\"\n[[delete.bootout]]\nplist = \"/w/b/x.plist\"\n\
                     domain = \"system\"\n";
 
         let refused = parse_error(text);
@@ -556,7 +558,7 @@ mod tests {
         for second_domain in ["system", "gui/501"] {
             let text = format!(
                 "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"folder\"\nsize = 1\n\
-                 status = \"ticked\"\n[[delete.bootout]]\nplist = \"/w/a/x.plist\"\n\
+                 status = \"clean\"\n[[delete.bootout]]\nplist = \"/w/a/x.plist\"\n\
                  domain = \"system\"\n[[delete.bootout]]\nplist = \"/w/a/x.plist\"\n\
                  domain = \"{second_domain}\"\n"
             );
@@ -575,9 +577,9 @@ mod tests {
     fn refuses_a_hand_written_plan_with_one_delete_inside_another() {
         let text = "version = 1\n\
                     [[delete]]\npath = \"/Users/me/Library/LaunchAgents\"\ntype = \"folder\"\n\
-                    size = 1\nstatus = \"ticked\"\n\n\
+                    size = 1\nstatus = \"clean\"\n\n\
                     [[delete]]\npath = \"/Users/me/Library/LaunchAgents/com.x.plist\"\n\
-                    type = \"file\"\nsize = 1\nstatus = \"ticked\"\nsudo = true\n";
+                    type = \"file\"\nsize = 1\nstatus = \"clean\"\nsudo = true\n";
 
         let refused = parse_error(text);
 
@@ -591,7 +593,7 @@ mod tests {
 
     fn delete_table(path: &str) -> String {
         format!(
-            "[[delete]]\npath = \"{path}\"\ntype = \"folder\"\nsize = 1\nstatus = \"ticked\"\n\n"
+            "[[delete]]\npath = \"{path}\"\ntype = \"folder\"\nsize = 1\nstatus = \"clean\"\n\n"
         )
     }
 
@@ -645,7 +647,7 @@ mod tests {
         assert!(
             text.contains(
                 "[[tool]]\nrule = \"rosie/docker\"\nshell = \"/bin/bash\"\n\
-                 cmd = \"docker system prune --force\"\nstatus = \"ticked\"\n"
+                 cmd = \"docker system prune --force\"\nstatus = \"clean\"\n"
             ),
             "{text}"
         );
@@ -669,7 +671,7 @@ mod tests {
         assert!(text.contains("# size unknown\n[[forget]]"), "{text}");
         assert!(
             text.contains(
-                "# 1.2 MB; blocked, outside roots. To allow it: \
+                "# 1.2 MB; outside roots. To allow it: \
                  rosie roots add '/elsewhere/it'\\''s \"odd\"'$'\\012''$x'\n"
             ),
             "{text}"
@@ -678,7 +680,7 @@ mod tests {
 
     /// A plan with `/w/a` matched by two rules that disagree on its tier.
     fn conflicted() -> Plan {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         for (rule, twin) in [("rosie/a", Twin::Normal), ("alice/b", Twin::Aggressive)] {
             let found = PathMatch {
                 rule: rule.to_owned(),
@@ -696,7 +698,7 @@ mod tests {
         assert!(
             text.contains(
                 "# 1.2 MB; conflict, rules disagree (normal: rosie/a; aggressive: alice/b). \
-                 Set status to ticked or unticked\n[[delete]]\npath = \"/w/a\""
+                 Set status to clean or keep\n[[delete]]\npath = \"/w/a\""
             ),
             "{text}"
         );
@@ -706,7 +708,7 @@ mod tests {
     #[test]
     fn a_written_conflict_cannot_be_read_back_until_it_is_resolved() {
         let text = conflicted().to_toml().expect("serializable");
-        let resolved = text.replace("status = \"conflict\"", "status = \"unticked\"");
+        let resolved = text.replace("status = \"conflict\"", "status = \"keep\"");
 
         let refused = Plan::parse(&text);
         let parsed = Plan::parse(&resolved).expect("resolved plan parses");
@@ -715,14 +717,14 @@ mod tests {
             matches!(&refused, Err(Error::InvalidEntry { problem, .. }) if problem.contains("rule conflict")),
             "{refused:?}"
         );
-        assert_eq!(parsed.deletes()[0].status, Status::Unticked);
+        assert_eq!(parsed.deletes()[0].status, Status::Keep);
     }
 
     #[test]
     fn users_may_delete_entries() {
         let text = every_kind().to_toml().expect("serializable");
         let without_receipt = text.replace(
-            "[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"ticked\"\n",
+            "[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"clean\"\n",
             "",
         );
 
@@ -752,7 +754,7 @@ mod tests {
 
     #[test]
     fn refuses_a_plan_without_a_version() {
-        let refused = parse_error("[[forget]]\npackage = \"com.x\"\nstatus = \"ticked\"\n");
+        let refused = parse_error("[[forget]]\npackage = \"com.x\"\nstatus = \"clean\"\n");
 
         assert!(matches!(refused, Error::MissingVersion), "{refused:?}");
     }
@@ -791,67 +793,67 @@ mod tests {
     fn refuses_invalid_entries_naming_them() {
         let cases = [
             (
-                "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"folder\"\nstatus = \"ticked\"\n",
+                "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"folder\"\nstatus = \"clean\"\n",
                 "[[delete]] entry 1: size is missing",
             ),
             (
-                "version = 1\n[[delete]]\npath = \"w/a\"\ntype = \"folder\"\nsize = 1\nstatus = \"ticked\"\n",
+                "version = 1\n[[delete]]\npath = \"w/a\"\ntype = \"folder\"\nsize = 1\nstatus = \"clean\"\n",
                 "[[delete]] entry 1: path \"w/a\" is not absolute",
             ),
             (
-                "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"symlink\"\nsize = 1\nstatus = \"ticked\"\n",
+                "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"symlink\"\nsize = 1\nstatus = \"clean\"\n",
                 "[[delete]] entry 1: type \"symlink\" is not one of file, folder",
             ),
             (
                 "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\n",
-                "[[delete]] entry 1: status \"\" is not one of ticked, unticked, blocked, conflict",
+                "[[delete]] entry 1: status \"\" is not one of clean, keep, outside-roots, conflict",
             ),
             (
                 "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\nstatus = \"conflict\"\n",
-                "[[delete]] entry 1: status \"conflict\" is a rule conflict; resolve it to ticked or unticked",
+                "[[delete]] entry 1: status \"conflict\" is a rule conflict; resolve it to clean or keep",
             ),
             (
-                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"ticked\"\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \" \"\nstatus = \"ticked\"\n",
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"clean\"\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \" \"\nstatus = \"clean\"\n",
                 "[[tool]] entry 2: cmd is empty",
             ),
             (
-                "version = 1\n[[tool]]\ncmd = \"a\"\nstatus = \"ticked\"\n",
+                "version = 1\n[[tool]]\ncmd = \"a\"\nstatus = \"clean\"\n",
                 "[[tool]] entry 1: shell is missing",
             ),
             (
-                "version = 1\n[[tool]]\nshell = \"bash\"\ncmd = \"a\"\nstatus = \"ticked\"\n",
+                "version = 1\n[[tool]]\nshell = \"bash\"\ncmd = \"a\"\nstatus = \"clean\"\n",
                 "[[tool]] entry 1: shell \"bash\" is not an absolute path",
             ),
             (
-                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"ticked\"\n[tool.env]\n\"-i\" = \"1\"\n",
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"clean\"\n[tool.env]\n\"-i\" = \"1\"\n",
                 "[[tool]] entry 1: env name \"-i\" is not letters, digits, and `_`, starting with no digit",
             ),
             (
-                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"blocked\"\n",
-                "[[tool]] entry 1: status \"blocked\" is not one of ticked, unticked",
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"outside-roots\"\n",
+                "[[tool]] entry 1: status \"outside-roots\" is not one of clean, keep",
             ),
             (
-                "version = 1\n[[delete]]\npath = \"/L/x.plist\"\ntype = \"file\"\nsize = 1\nstatus = \"ticked\"\n[[delete.bootout]]\nplist = \"/L/x.plist\"\ndomain = \"gui/me\"\n",
+                "version = 1\n[[delete]]\npath = \"/L/x.plist\"\ntype = \"file\"\nsize = 1\nstatus = \"clean\"\n[[delete.bootout]]\nplist = \"/L/x.plist\"\ndomain = \"gui/me\"\n",
                 "[[delete]] entry 1: bootout domain \"gui/me\" is not system or gui/<uid>",
             ),
             (
-                "version = 1\n[[forget]]\nstatus = \"ticked\"\n",
+                "version = 1\n[[forget]]\nstatus = \"clean\"\n",
                 "[[forget]] entry 1: package is missing",
             ),
             (
-                "version = 1\n[[delete]]\npath = \"/w/a\\u0000b\"\ntype = \"file\"\nsize = 1\nstatus = \"ticked\"\n",
+                "version = 1\n[[delete]]\npath = \"/w/a\\u0000b\"\ntype = \"file\"\nsize = 1\nstatus = \"clean\"\n",
                 "[[delete]] entry 1: path \"/w/a\\0b\" holds a NUL byte, which no path or argument can carry",
             ),
             (
-                "version = 1\n[[delete]]\npath = \"/L\"\ntype = \"folder\"\nsize = 1\nstatus = \"ticked\"\n[[delete.bootout]]\nplist = \"/L/x\\u0000.plist\"\ndomain = \"system\"\n",
+                "version = 1\n[[delete]]\npath = \"/L\"\ntype = \"folder\"\nsize = 1\nstatus = \"clean\"\n[[delete.bootout]]\nplist = \"/L/x\\u0000.plist\"\ndomain = \"system\"\n",
                 "[[delete]] entry 1: bootout plist \"/L/x\\0.plist\" holds a NUL byte, which no path or argument can carry",
             ),
             (
-                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"tool a\\u0000b\"\nstatus = \"ticked\"\n",
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"tool a\\u0000b\"\nstatus = \"clean\"\n",
                 "[[tool]] entry 1: \"tool a\\0b\" holds a NUL byte, which no command can carry",
             ),
             (
-                "version = 1\n[[forget]]\npackage = \"com.x\\u0000\"\nstatus = \"ticked\"\n",
+                "version = 1\n[[forget]]\npackage = \"com.x\\u0000\"\nstatus = \"clean\"\n",
                 "[[forget]] entry 1: \"com.x\\0\" holds a NUL byte, which no path or argument can carry",
             ),
             (
@@ -859,11 +861,11 @@ mod tests {
                 "[[report]] entry 1: subject is missing",
             ),
             (
-                "version = 1\n[[delete]]\npath = \"/w/app/../../etc\"\ntype = \"folder\"\nsize = 1\nstatus = \"ticked\"\n",
+                "version = 1\n[[delete]]\npath = \"/w/app/../../etc\"\ntype = \"folder\"\nsize = 1\nstatus = \"clean\"\n",
                 "[[delete]] entry 1: path \"/w/app/../../etc\" holds a . or .. component, which a plan path never holds",
             ),
             (
-                "version = 1\n[[delete]]\npath = \"/L\"\ntype = \"folder\"\nsize = 1\nstatus = \"ticked\"\n[[delete.bootout]]\nplist = \"/L/./x.plist\"\ndomain = \"system\"\n",
+                "version = 1\n[[delete]]\npath = \"/L\"\ntype = \"folder\"\nsize = 1\nstatus = \"clean\"\n[[delete.bootout]]\nplist = \"/L/./x.plist\"\ndomain = \"system\"\n",
                 "[[delete]] entry 1: bootout plist \"/L/./x.plist\" holds a . or .. component, which a plan path never holds",
             ),
         ];

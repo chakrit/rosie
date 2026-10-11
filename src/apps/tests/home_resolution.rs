@@ -18,7 +18,7 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     )
     .expect("plain paths");
@@ -26,7 +26,7 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &dotted_home(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     )
     .expect("dotted paths");
@@ -44,14 +44,14 @@ fn a_dotted_home_plans_the_same_orphan_scan_as_the_plain_home() {
     let plain = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Mounts::Skip,
     )
     .expect("plain paths");
     let dotted = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
         &dotted_home(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Mounts::Skip,
     )
     .expect("dotted paths");

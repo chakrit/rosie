@@ -98,7 +98,8 @@ carries or widens roots.
   exceptions.
 - Rules and packs cannot add roots.
 - A `roots` entry absent on disk is valid.
-- Out-of-roots plan items show as blocked with a `rosie roots add <path>` hint.
+- Out-of-roots plan items show as `outside-roots` with a `rosie roots add <path>`
+  hint.
 - A fresh `config.toml` is seeded with ordinary, editable `roots` entries: `/Applications`,
   `~/Applications`, the app-leftover folders under `~/Library` and `/Library` listed in
   [macos-filesystem-layout.md](../vendor/macos-filesystem-layout.md), and the tool cache

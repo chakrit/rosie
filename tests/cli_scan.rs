@@ -218,7 +218,7 @@ fn delete_entry(path: &str, sudo: bool) -> String {
         false => "",
     };
     format!(
-        "\n[[delete]]\npath = \"{path}\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"ticked\"\n{sudo}"
+        "\n[[delete]]\npath = \"{path}\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"clean\"\n{sudo}"
     )
 }
 
@@ -379,8 +379,8 @@ fn scan_prints_the_plan_on_stdout_and_the_stats_on_stderr() {
         ran.stdout
             .contains(&format!("path = \"{CWD}/app/node_modules\""))
     );
-    assert!(ran.stderr.contains("ticked: 1 item"), "{}", ran.stderr);
-    assert!(!ran.stdout.contains("ticked: 1 item"));
+    assert!(ran.stderr.contains("clean: 1 item"), "{}", ran.stderr);
+    assert!(!ran.stdout.contains("clean: 1 item"));
     assert!(sandbox.removals().is_empty());
 }
 
@@ -435,7 +435,7 @@ fn only_limits_the_scan_to_the_named_rules() {
 }
 
 #[test]
-fn aggressive_ticks_the_aggressive_command_in_place_of_the_normal_one() {
+fn aggressive_cleans_the_aggressive_command_in_place_of_the_normal_one() {
     let sandbox = Sandbox::new();
     let docker = "[rules.docker]\nstrategy = \"tool\"\ncmd = \"docker system prune --force\"\ncmd_aggressive = \"docker system prune --all --force\"\n";
     sandbox.add_rules("docker.toml", docker);
@@ -443,16 +443,8 @@ fn aggressive_ticks_the_aggressive_command_in_place_of_the_normal_one() {
     let normal = sandbox.run(&["scan", "caches"]);
     let aggressive = sandbox.run(&["scan", "caches", "--aggressive"]);
 
-    assert!(
-        normal.stderr.contains("ticked: 1 item"),
-        "{}",
-        normal.stderr
-    );
-    assert!(
-        normal
-            .stderr
-            .contains("unticked (aggressive, not run): 1 item")
-    );
+    assert!(normal.stderr.contains("clean: 1 item"), "{}", normal.stderr);
+    assert!(normal.stderr.contains("keep (aggressive, not run): 1 item"));
     assert!(
         aggressive
             .stdout
@@ -461,12 +453,12 @@ fn aggressive_ticks_the_aggressive_command_in_place_of_the_normal_one() {
         aggressive.stdout
     );
     assert!(
-        aggressive.stderr.contains("ticked: 1 item"),
+        aggressive.stderr.contains("clean: 1 item"),
         "{}",
         aggressive.stderr
     );
     assert!(
-        !aggressive.stderr.contains("unticked"),
+        !aggressive.stderr.contains("keep (aggressive"),
         "{}",
         aggressive.stderr
     );

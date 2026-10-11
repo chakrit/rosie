@@ -96,7 +96,7 @@ pub struct CleanArgs {
 
 #[derive(Debug, Clone, Default, Args)]
 pub struct ScanFlags {
-    /// Tick aggressive items; `cmd_aggressive` replaces `cmd`.
+    /// Mark aggressive items `clean`; `cmd_aggressive` replaces `cmd`.
     #[arg(long, global = true)]
     pub aggressive: bool,
 

@@ -57,7 +57,7 @@ fn folder(path: &str, size: u64, status: &str) -> String {
 }
 
 fn sudo_folder(path: &str, size: u64) -> String {
-    format!("{}sudo = true\n", folder(path, size, "ticked"))
+    format!("{}sudo = true\n", folder(path, size, "clean"))
 }
 
 /// Records every result it is handed.
@@ -123,12 +123,12 @@ fn sudo_call(fake: &FakeBackend) -> (Argv, Vec<u8>) {
 // deleting
 
 #[test]
-fn deletes_only_ticked_entries() {
+fn deletes_only_clean_entries() {
     let fake = FakeBackend::new();
     fake.add_file("/w/a/node_modules/x.js", "x");
     fake.add_file("/w/b/node_modules/x.js", "x");
     let plan = plan(
-        &(folder("/w/a/node_modules", 10, "ticked") + &folder("/w/b/node_modules", 20, "unticked")),
+        &(folder("/w/a/node_modules", 10, "clean") + &folder("/w/b/node_modules", 20, "keep")),
     );
 
     let (stats, _) = run(&fake, &["/w"], &plan);
@@ -143,7 +143,7 @@ fn deletes_only_ticked_entries() {
 fn skips_a_missing_entry_as_stale() {
     let fake = FakeBackend::new();
     fake.add_dir("/w");
-    let plan = plan(&folder("/w/gone", 30, "ticked"));
+    let plan = plan(&folder("/w/gone", 30, "clean"));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
 
@@ -158,7 +158,7 @@ fn skips_a_missing_entry_as_stale() {
 fn skips_an_entry_below_a_folder_that_became_a_file_as_stale() {
     let fake = FakeBackend::new();
     fake.add_file("/w/a", "was a folder");
-    let plan = plan(&folder("/w/a/target", 30, "ticked"));
+    let plan = plan(&folder("/w/a/target", 30, "clean"));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
 
@@ -174,7 +174,7 @@ fn skips_an_entry_below_a_folder_that_became_a_file_as_stale() {
 fn skips_an_entry_whose_type_changed_as_stale() {
     let fake = FakeBackend::new();
     fake.add_file("/w/target", "now a file");
-    let plan = plan(&folder("/w/target", 40, "ticked"));
+    let plan = plan(&folder("/w/target", 40, "clean"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
 
@@ -187,7 +187,7 @@ fn refuses_an_item_a_process_executes_from() {
     let fake = FakeBackend::new();
     fake.add_file("/w/app/target/debug/server", "bin");
     fake.respond_running(&[(77, "/w/app/target/debug/server")]);
-    let plan = plan(&folder("/w/app/target", 50, "ticked"));
+    let plan = plan(&folder("/w/app/target", 50, "clean"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
 
@@ -213,7 +213,7 @@ fn refuses_a_delete_and_skips_its_bootout_when_a_process_runs_from_it() {
     fake.respond(bootout.clone(), output(0, "", ""));
     let plan = plan(&format!(
         "{}[[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"gui/501\"\n",
-        folder(support, 1, "ticked")
+        folder(support, 1, "clean")
     ));
 
     let (stats, recorder) = run(&fake, &["/Users/me/Library"], &plan);
@@ -246,7 +246,7 @@ fn withholds_every_delete_and_its_bootout_when_the_running_programs_cannot_be_re
     fake.respond(bootout.clone(), output(0, "", ""));
     let plan = plan(&format!(
         "{}[[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"gui/501\"\n",
-        folder(support, 50, "ticked")
+        folder(support, 50, "clean")
     ));
 
     let (stats, _) = run(&fake, &["/Users/me/Library"], &plan);
@@ -266,7 +266,7 @@ fn reports_a_failed_item_and_goes_on_with_the_rest() {
     fake.add_file("/w/a/target/busy", "x");
     fake.add_file("/w/b/target/free", "x");
     fake.fail_on("/w/a/target/busy", Op::RemoveFile, ErrorKind::ResourceBusy);
-    let plan = plan(&(folder("/w/a/target", 1, "ticked") + &folder("/w/b/target", 2, "ticked")));
+    let plan = plan(&(folder("/w/a/target", 1, "clean") + &folder("/w/b/target", 2, "clean")));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
 
@@ -285,7 +285,7 @@ fn reports_a_failed_item_and_goes_on_with_the_rest() {
 fn checks_roots_against_the_config_never_the_plan() {
     let fake = FakeBackend::new();
     fake.add_file("/Users/me/Documents/thesis.tex", "x");
-    let plan = plan(&folder("/Users/me/Documents", 5, "ticked"));
+    let plan = plan(&folder("/Users/me/Documents", 5, "clean"));
 
     let (stats, _) = run(&fake, &["/Users/me/code"], &plan);
 
@@ -298,7 +298,7 @@ fn removes_a_symlink_inside_a_target_as_a_link() {
     let fake = FakeBackend::new();
     fake.add_file("/src/lib/keep.js", "x");
     fake.add_symlink("/w/app/node_modules/lib", "/src/lib");
-    let plan = plan(&folder("/w/app/node_modules", 1, "ticked"));
+    let plan = plan(&folder("/w/app/node_modules", 1, "clean"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
 
@@ -313,7 +313,7 @@ fn makes_user_owned_read_only_folders_writable_as_it_goes() {
     fake.add_file("/Users/me/go/pkg/mod/x@v1/sub/go.mod", "module x");
     fake.chmod("/Users/me/go/pkg/mod/x@v1/sub", 0o555);
     fake.chmod("/Users/me/go/pkg/mod/x@v1", 0o555);
-    let plan = plan(&folder("/Users/me/go/pkg/mod/x@v1", 1, "ticked"));
+    let plan = plan(&folder("/Users/me/go/pkg/mod/x@v1", 1, "clean"));
 
     let (stats, _) = run(&fake, &["/Users/me/go/pkg/mod"], &plan);
 
@@ -326,7 +326,7 @@ fn refuses_a_dataless_placeholder_without_opening_it() {
     let fake = FakeBackend::new();
     fake.add_file("/w/docs/cloud/paper.pdf", "x");
     fake.make_dataless("/w/docs/cloud");
-    let plan = plan(&folder("/w/docs", 1, "ticked"));
+    let plan = plan(&folder("/w/docs", 1, "clean"));
 
     let (stats, recorder) = run(&fake, &["/w"], &plan);
 
@@ -352,7 +352,7 @@ fn deletes_a_large_tree_completely() {
             fake.add_file(format!("/w/big/d{dir}/f{file}"), "x");
         }
     }
-    let plan = plan(&folder("/w/big", 1, "ticked"));
+    let plan = plan(&folder("/w/big", 1, "clean"));
 
     let (stats, _) = run(&fake, &["/w"], &plan);
 
@@ -363,9 +363,9 @@ fn deletes_a_large_tree_completely() {
 
 // commands
 
-/// A ticked `[[tool]]` entry running `cmd` through `/bin/bash`.
+/// A `clean` `[[tool]]` entry running `cmd` through `/bin/bash`.
 fn bash_tool(cmd: &str) -> String {
-    format!("[[tool]]\nrule = \"r\"\nshell = \"/bin/bash\"\ncmd = \"{cmd}\"\nstatus = \"ticked\"\n")
+    format!("[[tool]]\nrule = \"r\"\nshell = \"/bin/bash\"\ncmd = \"{cmd}\"\nstatus = \"clean\"\n")
 }
 
 fn bash(cmd: &str) -> Argv {
@@ -382,7 +382,7 @@ fn runs_tool_cmd_through_its_shell_with_its_env_keeping_the_last_three_lines() {
     fake.respond(docker.clone(), output(0, "one\ntwo\nthree\n", "four\n"));
     let plan = plan(
         "[[tool]]\nrule = \"r\"\nshell = \"/bin/zsh\"\ncmd = \"docker system prune --force\"\n\
-         status = \"ticked\"\n[tool.env]\nDOCKER_CLI_HINTS = \"false\"\n",
+         status = \"clean\"\n[tool.env]\nDOCKER_CLI_HINTS = \"false\"\n",
     );
 
     let (stats, recorder) = run(&fake, &[], &plan);
@@ -441,7 +441,7 @@ fn boots_a_job_out_before_deleting_its_plist() {
         .arg(plist);
     fake.respond(bootout.clone(), output(0, "", ""));
     let plan = plan(&format!(
-        "[[delete]]\npath = \"{plist}\"\ntype = \"file\"\nsize = 4096\nrules = [\"app/x\"]\nstatus = \"ticked\"\n\
+        "[[delete]]\npath = \"{plist}\"\ntype = \"file\"\nsize = 4096\nrules = [\"app/x\"]\nstatus = \"clean\"\n\
          [[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"gui/501\"\n"
     ));
 
@@ -464,9 +464,9 @@ fn does_the_users_items_before_elevating_once_for_the_rest() {
     fake.chown("/Library/Caches/root", ROOT_UID);
     fake.respond_to_sudo(output(1, "", ""));
     let plan = plan(
-        &(folder("/w/mine", 1, "ticked")
+        &(folder("/w/mine", 1, "clean")
             + &sudo_folder("/Library/Caches/root", 2)
-            + "[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"ticked\"\n"),
+            + "[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"clean\"\n"),
     );
 
     let (stats, _) = run(&fake, &["/w", "/Library/Caches"], &plan);
@@ -492,15 +492,15 @@ fn does_the_users_items_before_elevating_once_for_the_rest() {
 }
 
 #[test]
-fn does_not_elevate_for_sudo_items_that_are_not_ticked() {
+fn does_not_elevate_for_sudo_items_that_are_not_clean() {
     let fake = FakeBackend::new();
     fake.respond_to_sudo(output(1, "", ""));
-    let blocked = format!("{}sudo = true\n", folder("/Library/Caches/b", 2, "blocked"));
+    let outside_roots = format!(
+        "{}sudo = true\n",
+        folder("/Library/Caches/b", 2, "outside-roots")
+    );
     let plan = plan(
-        &(format!(
-            "{}sudo = true\n",
-            folder("/Library/Caches/u", 1, "unticked")
-        ) + &blocked),
+        &(format!("{}sudo = true\n", folder("/Library/Caches/u", 1, "keep")) + &outside_roots),
     );
 
     let (stats, _) = run(&fake, &["/Library/Caches"], &plan);
@@ -514,7 +514,7 @@ fn pipes_the_sudo_items_behind_a_header_matching_the_argument() {
     let fake = FakeBackend::new();
     fake.add_file("/w/mine/x", "x");
     fake.respond_to_sudo(output(1, "", ""));
-    let plan = plan(&(folder("/w/mine", 1, "ticked") + &sudo_folder("/Library/Caches/root", 2)));
+    let plan = plan(&(folder("/w/mine", 1, "clean") + &sudo_folder("/Library/Caches/root", 2)));
 
     run(&fake, &["/w"], &plan);
 
@@ -539,7 +539,7 @@ fn skips_the_sudo_items_as_sudo_refused_when_sudo_fails() {
     let plan = plan(
         &(sudo_folder("/Library/Caches/a", 5)
             + &sudo_folder("/Library/Caches/b", 6)
-            + "[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"ticked\"\n"),
+            + "[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"clean\"\n"),
     );
 
     let (stats, recorder) = run(&fake, &["/Library/Caches"], &plan);
@@ -617,7 +617,7 @@ fn user_folder_with_system_plist() -> (FakeBackend, Plan) {
     fake.add_file(HELPER_PLIST, "<plist/>");
     let plan = plan(&format!(
         "{}[[delete.bootout]]\nplist = \"{HELPER_PLIST}\"\ndomain = \"system\"\n",
-        folder(HELPER, 1, "ticked")
+        folder(HELPER, 1, "clean")
     ));
     (fake, plan)
 }

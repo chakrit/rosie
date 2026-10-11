@@ -9,14 +9,14 @@ fn webkit_and_http_storages_are_searched() {
     fake.add_dir(lib("WebKit/com.foo.Bar"));
     fake.add_dir(lib("HTTPStorages/com.foo.Bar"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
 
     assert_eq!(
         deletes(&scanned),
         [
-            (BAR.to_owned(), Status::Ticked),
-            (lib("HTTPStorages/com.foo.Bar"), Status::Ticked),
-            (lib("WebKit/com.foo.Bar"), Status::Ticked),
+            (BAR.to_owned(), Status::Clean),
+            (lib("HTTPStorages/com.foo.Bar"), Status::Clean),
+            (lib("WebKit/com.foo.Bar"), Status::Clean),
         ]
     );
 }
@@ -28,13 +28,13 @@ fn a_leftover_location_that_is_a_file_holds_nothing() {
     fake.add_file(lib("Caches"), "x");
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
 
     assert_eq!(
         deletes(&scanned),
         [
-            (BAR.to_owned(), Status::Ticked),
-            (lib("Preferences/com.foo.Bar.plist"), Status::Ticked),
+            (BAR.to_owned(), Status::Clean),
+            (lib("Preferences/com.foo.Bar.plist"), Status::Clean),
         ]
     );
     assert_eq!(scanned.skip_counts().total(), 0);
@@ -51,7 +51,7 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     );
 
@@ -82,7 +82,7 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
         &paths(),
-        AggressiveItems::Unticked,
+        AggressiveItems::Keep,
         Walk::default(),
     );
 
@@ -118,7 +118,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
             &ctx(fake, &ALL_ROOTS),
             Path::new(BAR),
             &paths(),
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             Walk::default(),
         )
     };
@@ -133,7 +133,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
         fails(scan_orphans(
             &ctx(&orphan, &ALL_ROOTS),
             &paths(),
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             Mounts::Skip
         )),
         "an orphan"
@@ -154,13 +154,13 @@ fn no_leftover_is_planned_or_sized_across_a_volume() {
     fake.add_sized_file(lib("Application Support/Bar/disk/big"), 1 << 30);
     fake.mount(lib("Application Support/Bar/disk"), 8);
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
 
     assert_eq!(
         deletes(&scanned),
         [
-            (BAR.to_owned(), Status::Ticked),
-            (lib("Application Support/Bar"), Status::Unticked),
+            (BAR.to_owned(), Status::Clean),
+            (lib("Application Support/Bar"), Status::Keep),
         ]
     );
     let support = entry(&scanned, &lib("Application Support/Bar"));
@@ -176,9 +176,9 @@ fn a_matched_placeholder_is_skipped_not_planned() {
     fake.add_sized_file(lib("Containers/com.foo.Bar/data"), 4096);
     fake.make_dataless(lib("Containers/com.foo.Bar"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Unticked);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
 
-    assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Ticked)]);
+    assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Clean)]);
     assert_eq!(scanned.skip_counts().placeholders, 1);
 }
 
@@ -201,7 +201,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
             &ctx(fake, &ALL_ROOTS),
             Path::new(BAR),
             &paths(),
-            AggressiveItems::Unticked,
+            AggressiveItems::Keep,
             Walk {
                 enter_mounts,
                 ..Walk::default()
@@ -220,7 +220,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
     let closed = scan(&closed_fake, false);
     let crossed = scan(&scenario(), true);
 
-    assert_eq!(deletes(&closed), [(BAR.to_owned(), Status::Ticked)]);
+    assert_eq!(deletes(&closed), [(BAR.to_owned(), Status::Clean)]);
     assert_eq!(
         skips(&closed),
         [
@@ -239,12 +239,12 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
     assert_eq!(
         deletes(&crossed),
         [
-            (BAR.to_owned(), Status::Ticked),
+            (BAR.to_owned(), Status::Clean),
             (
                 "/Library/LaunchDaemons/com.foo.Bar.helper.plist".to_owned(),
-                Status::Ticked
+                Status::Clean
             ),
-            (lib("Caches/com.foo.Bar"), Status::Ticked),
+            (lib("Caches/com.foo.Bar"), Status::Clean),
         ]
     );
     assert!(skips(&crossed).is_empty());

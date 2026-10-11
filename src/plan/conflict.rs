@@ -2,7 +2,7 @@
 //! (`docs/spec/plan.md#rule-conflicts`).
 //!
 //! No rule's tier wins over another's. A scan marks the entry `conflict`; a run and the
-//! shell export refuse a plan that still holds one; the user picks ticked or unticked.
+//! shell export refuse a plan that still holds one; the user picks `clean` or `keep`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -41,9 +41,9 @@ impl fmt::Display for Disagreement {
 }
 
 /// What a conflict entry shows: `conflict, rules disagree (normal: a; aggressive: b).
-/// Set status to ticked or unticked`.
+/// Set status to clean or keep`.
 pub(super) fn conflict_hint(disagreement: &Disagreement) -> String {
-    format!("conflict, rules disagree ({disagreement}). Set status to ticked or unticked")
+    format!("conflict, rules disagree ({disagreement}). Set status to clean or keep")
 }
 
 /// Each rule that matched a path, or a path nested in it, with its tier. One rule never
@@ -103,7 +103,7 @@ impl Plan {
             .iter()
             .filter_map(|delete| match &delete.status {
                 Status::Conflict(disagreement) => Some((delete, disagreement)),
-                Status::Ticked | Status::Unticked | Status::Blocked => None,
+                Status::Clean | Status::Keep | Status::OutsideRoots => None,
             })
             .collect()
     }

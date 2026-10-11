@@ -62,7 +62,7 @@ pub trait Console {
     /// Lets the user pick one of `options`; returns its position.
     fn pick(&mut self, prompt: &str, options: &[String]) -> Result<usize, PromptError>;
 
-    /// Shows `items`, all ticked; returns the items the user left ticked.
+    /// Shows `items`, all checked; returns the items the user left checked.
     fn checklist<T: Display>(&mut self, prompt: &str, items: Vec<T>)
     -> Result<Vec<T>, PromptError>;
 

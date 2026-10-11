@@ -136,7 +136,7 @@ mod tests {
             kind: ItemKind::Folder,
             size: Size::bytes(1),
             rules: vec!["rosie/node".to_owned()],
-            status: Status::Ticked,
+            status: Status::Clean,
             run_as: RunAs::User,
             bootouts: Vec::new(),
         }

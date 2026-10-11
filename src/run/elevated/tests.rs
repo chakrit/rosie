@@ -88,16 +88,16 @@ fn forget() -> Argv {
 fn items() -> String {
     format!(
         "version = 1\n\
-         [[delete]]\npath = \"{PLIST}\"\ntype = \"file\"\nsize = 4096\nrules = [\"app/x\"]\nstatus = \"ticked\"\nsudo = true\n\
+         [[delete]]\npath = \"{PLIST}\"\ntype = \"file\"\nsize = 4096\nrules = [\"app/x\"]\nstatus = \"clean\"\nsudo = true\n\
          [[delete.bootout]]\nplist = \"{PLIST}\"\ndomain = \"system\"\n\
-         [[delete]]\npath = \"/Library/Caches/other\"\ntype = \"folder\"\nsize = 7\nrules = [\"r\"]\nstatus = \"ticked\"\nsudo = true\n"
+         [[delete]]\npath = \"/Library/Caches/other\"\ntype = \"folder\"\nsize = 7\nrules = [\"r\"]\nstatus = \"clean\"\nsudo = true\n"
     )
 }
 
 /// A `sudo` delete of a file, for the child.
 fn root_file(path: &str) -> String {
     format!(
-        "[[delete]]\npath = \"{path}\"\ntype = \"file\"\nsize = 4096\nrules = [\"r\"]\nstatus = \"ticked\"\nsudo = true\n"
+        "[[delete]]\npath = \"{path}\"\ntype = \"file\"\nsize = 4096\nrules = [\"r\"]\nstatus = \"clean\"\nsudo = true\n"
     )
 }
 
@@ -176,7 +176,7 @@ fn runs_the_piped_items_as_root_within_the_users_roots() {
 fn runs_system_tools_by_absolute_path() {
     let fake = machine("0", SUDO_CHAIN);
     let plan = format!(
-        "{}[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"ticked\"\n",
+        "{}[[forget]]\npackage = \"com.x.pkg\"\nstatus = \"clean\"\n",
         items()
     );
 
@@ -307,7 +307,7 @@ fn deletes_the_users_read_only_folders_as_root_without_changing_permissions() {
     fake.chown("/Library/LaunchDaemons/mine", ROOT_UID);
     fake.chmod("/Library/LaunchDaemons/mine/sub", 0o555);
     let plan = format!(
-        "{}[[delete]]\npath = \"/Library/LaunchDaemons/mine\"\ntype = \"folder\"\nsize = 1\nrules = [\"r\"]\nstatus = \"ticked\"\nsudo = true\n",
+        "{}[[delete]]\npath = \"/Library/LaunchDaemons/mine\"\ntype = \"folder\"\nsize = 1\nrules = [\"r\"]\nstatus = \"clean\"\nsudo = true\n",
         items()
     );
     let header = Header {
@@ -363,7 +363,7 @@ fn refuses_piped_tool_commands_outright() {
     let docker = Argv::new("/bin/bash").arg("-c").arg("docker system prune");
     fake.respond(docker.clone(), output(""));
     let plan = format!(
-        "{}[[tool]]\nrule = \"r\"\nshell = \"/bin/bash\"\ncmd = \"docker system prune\"\nstatus = \"ticked\"\n",
+        "{}[[tool]]\nrule = \"r\"\nshell = \"/bin/bash\"\ncmd = \"docker system prune\"\nstatus = \"clean\"\n",
         items()
     );
 

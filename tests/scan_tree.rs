@@ -45,7 +45,7 @@ fn matches_marker_rules_and_stops_descending_at_a_match() {
         [(
             "/Users/me/code/app/node_modules",
             vec!["rosie/node-modules"],
-            Status::Ticked
+            Status::Clean
         )]
     );
     assert!(scan.problems.is_empty(), "{:?}", problems(&scan));
@@ -58,25 +58,19 @@ fn a_normal_match_inside_an_aggressive_match_is_not_offered() {
     fake.add_file("/Users/me/code/py/.venv/pyvenv.cfg", "home = /usr");
     fake.add_file("/Users/me/code/py/.venv/lib/__pycache__/m.pyc", "x");
 
-    let unticked = tree(&fake, CODE);
-    let ticked = tree_with(
+    let keep = tree(&fake, CODE);
+    let clean = tree_with(
         &fake,
         CODE,
         Options {
-            aggressive: AggressiveItems::Ticked,
+            aggressive: AggressiveItems::Clean,
             ..Options::default()
         },
     );
 
     let venv = "/Users/me/code/py/.venv";
-    assert_eq!(
-        entries(&unticked),
-        [(venv, vec!["rosie/venv"], Status::Unticked)]
-    );
-    assert_eq!(
-        entries(&ticked),
-        [(venv, vec!["rosie/venv"], Status::Ticked)]
-    );
+    assert_eq!(entries(&keep), [(venv, vec!["rosie/venv"], Status::Keep)]);
+    assert_eq!(entries(&clean), [(venv, vec!["rosie/venv"], Status::Clean)]);
 }
 
 #[test]
@@ -632,7 +626,7 @@ fn sizing_reports_progress_once_per_folder_not_per_entry() {
 // marks
 
 #[test]
-fn targets_outside_the_roots_are_blocked() {
+fn targets_outside_the_roots_are_outside_roots() {
     let fake = node_home();
     node_project(&fake, "/Users/me/code/app");
     node_project(&fake, "/Users/me/code/lib");
@@ -650,8 +644,8 @@ fn targets_outside_the_roots_are_blocked() {
     assert_eq!(
         statuses,
         [
-            ("/Users/me/code/app/node_modules", Status::Ticked),
-            ("/Users/me/code/lib/node_modules", Status::Blocked),
+            ("/Users/me/code/app/node_modules", Status::Clean),
+            ("/Users/me/code/lib/node_modules", Status::OutsideRoots),
         ]
     );
 }
@@ -687,7 +681,7 @@ fn includes_fixed_rule_paths_under_the_folder_only() {
 
     assert_eq!(
         entries(&scan),
-        [("/Users/me/.npm", vec!["rosie/npm-cache"], Status::Ticked)]
+        [("/Users/me/.npm", vec!["rosie/npm-cache"], Status::Clean)]
     );
     assert_eq!(size_of(&scan, "/Users/me/.npm"), 4096);
     assert!(scan.plan.tools().is_empty());
@@ -829,7 +823,7 @@ fn a_fixed_path_and_a_folder_rule_on_one_folder_list_both_rules() {
         [(
             "/Users/me/code/app/node_modules",
             vec!["rosie/node-modules", "rosie/pinned"],
-            Status::Ticked
+            Status::Clean
         )]
     );
 }

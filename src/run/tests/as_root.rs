@@ -104,7 +104,7 @@ fn the_users_own_run_deletes_below_folders_others_can_write() {
     let (stats, _) = run(
         &fake,
         &["/Users/me/Library/Caches"],
-        &plan(&folder(item, 3, "ticked")),
+        &plan(&folder(item, 3, "clean")),
     );
 
     assert_eq!(stats.done, tally(1, 3, 0));
@@ -169,7 +169,7 @@ fn elevated_boots_a_user_items_job_out_and_leaves_the_delete_to_the_user() {
     fake.respond(bootout.clone(), output(0, "", ""));
     let plan = plan(&format!(
         "{}[[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"system\"\n",
-        folder(item, 1, "ticked")
+        folder(item, 1, "clean")
     ));
 
     let recorder = run_as_root(&fake, &["/Users/me/Library"], &plan);
@@ -197,7 +197,7 @@ fn elevated_keeps_the_job_loaded_when_its_plist_is_outside_the_roots() {
     fake.respond(bootout.clone(), output(0, "", ""));
     let plan = plan(&format!(
         "[[delete]]\npath = \"{plist}\"\ntype = \"file\"\nsize = 4096\nrules = [\"app/x\"]\n\
-         status = \"ticked\"\nsudo = true\n\
+         status = \"clean\"\nsudo = true\n\
          [[delete.bootout]]\nplist = \"{plist}\"\ndomain = \"system\"\n"
     ));
 

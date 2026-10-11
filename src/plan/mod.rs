@@ -4,9 +4,10 @@
 //! A plan is built by [`PlanBuilder`] during a scan or parsed back from its TOML file
 //! ([`Plan::parse`]); nothing can add entries to a parsed plan. A run executes only a
 //! [`Runnable`], whose fields are private: the only ways to get one are
-//! [`Plan::runnable_as`] and [`Plan::after_elevation`], which yield only the ticked
+//! [`Plan::runnable_as`] and [`Plan::after_elevation`], which yield only the `clean`
 //! entries of one part of a run, and a `Runnable` can only be narrowed from there.
-//! Unticked, blocked, and conflict entries are kept for the user to see, never executed.
+//! `keep`, `outside-roots`, and `conflict` entries are kept for the user to see, never
+//! executed.
 
 mod builder;
 mod conflict;
@@ -34,7 +35,7 @@ pub use stats::{
     ItemSize, Needs, Outcome, PlanStats, RunStats, SkipReason, Tally, WalkSetting, WalkSkip,
     WalkSkips,
 };
-pub use trim::Ticked;
+pub use trim::CleanEntry;
 
 /// Everything one scan proposes, grouped by what each entry does.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
@@ -62,9 +63,9 @@ impl Plan {
         &self.reports
     }
 
-    /// What the part of a run acting as `run_as` executes: the ticked entries of that
-    /// part (see [`Plan::ticked_for`]). A bootout runs with the part that carries its
-    /// delete, and every bootout must finish before the deletes start, so a launch job
+    /// What the part of a run acting as `run_as` executes: the `clean` entries of that
+    /// part (see [`Plan::clean_entries_for`]). A bootout runs with the part that carries
+    /// its delete, and every bootout must finish before the deletes start, so a launch job
     /// is unloaded before its plist is gone (`docs/spec/app.md`). A user's delete that
     /// holds a `system` job's plist is in the elevated part for its bootouts only; it
     /// is deleted by [`Plan::after_elevation`] (see [`Delete::phase`]).
@@ -86,7 +87,7 @@ impl Plan {
         }
     }
 
-    /// The user's ticked deletes of the elevated part, which the user's own process
+    /// The user's `clean` deletes of the elevated part, which the user's own process
     /// deletes once the elevated child has booted their `system` jobs out. They carry
     /// no bootout, tool, or receipt.
     pub fn after_elevation(&self) -> Runnable<'_> {
@@ -102,10 +103,10 @@ impl Plan {
         }
     }
 
-    /// The ticked entries a run executes as `run_as`, as a plan of their own: a run
+    /// The `clean` entries a run executes as `run_as`, as a plan of their own: a run
     /// does the user's part itself and pipes the `sudo` part to the elevated child
     /// (`docs/spec/safety.md#elevation`). Tools run as the user; receipts as root.
-    pub fn ticked_for(&self, run_as: RunAs) -> Plan {
+    pub fn clean_entries_for(&self, run_as: RunAs) -> Plan {
         let deletes = self.deletes.retaining(|delete| delete.runs_in(run_as));
         let tools = self.tools.iter().filter(|tool| tool.runs_in(run_as));
         let receipts = self
@@ -127,11 +128,11 @@ impl Plan {
     }
 }
 
-/// What a blocked entry shows: `blocked, outside roots. To allow it: rosie roots add
+/// What an `outside-roots` entry shows: `outside roots. To allow it: rosie roots add
 /// <path>`, with the path quoted to paste into a shell.
-fn blocked_hint(path: &Path) -> String {
+fn outside_roots_hint(path: &Path) -> String {
     let path = shell::quote_word(&path.to_string_lossy());
-    format!("blocked, outside roots. To allow it: rosie roots add {path}")
+    format!("outside roots. To allow it: rosie roots add {path}")
 }
 
 /// A NUL byte ends a path or an argument at the operating system, so the item a run
@@ -166,14 +167,14 @@ fn check_path(path: &Path) -> Result<(), Error> {
     }
 }
 
-/// The ticked entries of a plan that one process of a run executes, which are the only
+/// The `clean` entries of a plan that one process of a run executes, which are the only
 /// ones a run may execute. Only [`Plan::runnable_as`] and [`Plan::after_elevation`]
 /// build one; [`Runnable::without`] can only leave entries out.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Runnable<'a> {
-    /// The ticked deletes whose launch jobs this process boots out.
+    /// The `clean` deletes whose launch jobs this process boots out.
     holders: Vec<&'a Delete>,
-    /// The ticked deletes this process deletes.
+    /// The `clean` deletes this process deletes.
     deletes: Vec<&'a Delete>,
     tools: Vec<&'a Tool>,
     receipts: Vec<&'a Receipt>,
@@ -258,9 +259,9 @@ impl Delete {
         }
     }
 
-    /// Whether this delete is ticked and belongs to the part of a run acting as `run_as`.
+    /// Whether this delete is `clean` and belongs to the part of a run acting as `run_as`.
     fn runs_in(&self, run_as: RunAs) -> bool {
-        self.status.is_ticked() && self.phase() == run_as
+        self.status.is_clean() && self.phase() == run_as
     }
 }
 
@@ -314,10 +315,10 @@ pub struct Tool {
 }
 
 impl Tool {
-    /// Whether this tool is ticked and belongs to the part acting as `run_as`: tools run
+    /// Whether this tool is `clean` and belongs to the part acting as `run_as`: tools run
     /// as the user.
     fn runs_in(&self, run_as: RunAs) -> bool {
-        self.selection.is_ticked() && run_as == RunAs::User
+        self.selection.is_clean() && run_as == RunAs::User
     }
 }
 
@@ -354,9 +355,9 @@ impl Receipt {
         RunAs::Sudo
     }
 
-    /// Whether this receipt is ticked and belongs to the part acting as `run_as`.
+    /// Whether this receipt is `clean` and belongs to the part acting as `run_as`.
     fn runs_in(&self, run_as: RunAs) -> bool {
-        self.selection.is_ticked() && self.run_as() == run_as
+        self.selection.is_clean() && self.run_as() == run_as
     }
 }
 
@@ -434,11 +435,11 @@ impl ItemKind {
 /// Whether a filesystem entry runs.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
-    Ticked,
+    Clean,
     /// An aggressive item listed without `--aggressive`.
-    Unticked,
+    Keep,
     /// Outside the `roots` allowlist; shown with a `rosie roots add <path>` hint.
-    Blocked,
+    OutsideRoots,
     /// Rules disagree on its tier; only a scan produces one, and the user must resolve
     /// it before anything runs (`docs/spec/plan.md#rule-conflicts`).
     Conflict(Disagreement),
@@ -447,38 +448,38 @@ pub enum Status {
 impl Status {
     pub fn label(&self) -> &'static str {
         match self {
-            Status::Ticked => "ticked",
-            Status::Unticked => "unticked",
-            Status::Blocked => "blocked",
+            Status::Clean => "clean",
+            Status::Keep => "keep",
+            Status::OutsideRoots => "outside-roots",
             Status::Conflict(_) => "conflict",
         }
     }
 
-    pub fn is_ticked(&self) -> bool {
-        *self == Status::Ticked
+    pub fn is_clean(&self) -> bool {
+        *self == Status::Clean
     }
 }
 
 impl From<Selection> for Status {
     fn from(selection: Selection) -> Self {
         match selection {
-            Selection::Ticked => Status::Ticked,
-            Selection::Unticked => Status::Unticked,
+            Selection::Clean => Status::Clean,
+            Selection::Keep => Status::Keep,
         }
     }
 }
 
 /// Whether a command entry runs. Commands are outside the roots gate, so they are never
-/// blocked.
+/// `outside-roots`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Selection {
-    Ticked,
-    Unticked,
+    Clean,
+    Keep,
 }
 
 impl Selection {
-    pub fn is_ticked(self) -> bool {
-        self == Selection::Ticked
+    pub fn is_clean(self) -> bool {
+        self == Selection::Clean
     }
 }
 

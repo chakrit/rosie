@@ -8,14 +8,15 @@
 //!   whole script before running any of it, so a script piped to bash and cut short runs
 //!   nothing, and a command that reads its input cannot consume the rest of the script
 //!   and make bash resume inside a commented-out line. No command reads bash's input.
-//! - Unticked and blocked entries are commented out; report-only entries are comments.
+//! - `keep` and `outside-roots` entries are commented out; report-only entries are
+//!   comments.
 //! - A plan with an unresolved rule conflict is refused: only a TOML plan can be
 //!   resolved (`docs/spec/plan.md#rule-conflicts`).
 
 use std::path::Path;
 
 use super::conflict::conflict_hint;
-use super::{Error, Plan, Status, blocked_hint};
+use super::{Error, Plan, Status, outside_roots_hint};
 use crate::fs::Argv;
 use crate::shell;
 
@@ -28,7 +29,7 @@ const HEADER: &str = "\
 #!/bin/bash
 # rosie plan, exported as a shell script. rosie cannot run this file.
 # Inspect every line, then run it yourself: sudo bash path/to/this-file.sh
-# Unticked and blocked entries are commented out.
+# keep and outside-roots entries are commented out.
 
 main() {
 :
@@ -66,12 +67,12 @@ impl Plan {
         }
         for tool in &self.tools {
             let note = format!("size unknown · {}", shell::comment_text(&tool.rule));
-            let line = Line::unblocked(tool.selection.into(), note);
+            let line = Line::pathless(tool.selection.into(), note);
             script.push_str(&line.render(&command_line(&tool.command.argv())));
         }
         for receipt in &self.receipts {
             let note = "size unknown · forget receipt".to_owned();
-            let line = Line::unblocked(receipt.selection.into(), note);
+            let line = Line::pathless(receipt.selection.into(), note);
             script.push_str(&line.render(&command_line(&receipt.argv())));
         }
         for report in &self.reports {
@@ -89,33 +90,36 @@ impl Plan {
     }
 }
 
-/// One entry's comment and command, commented out unless the entry is ticked.
+/// One entry's comment and command, commented out unless the entry is `clean`.
 struct Line {
     status: Status,
     note: String,
 }
 
 impl Line {
-    /// An entry with a path, whose blocked note carries the `rosie roots add` hint.
+    /// An entry with a path, whose `outside-roots` note carries the `rosie roots add`
+    /// hint.
     fn of(status: Status, path: &Path, note: String) -> Self {
         let note = match &status {
-            Status::Blocked => format!("{note}; {}", blocked_hint(path)),
+            Status::OutsideRoots => format!("{note}; {}", outside_roots_hint(path)),
             Status::Conflict(disagreement) => format!("{note}; {}", conflict_hint(disagreement)),
-            Status::Ticked | Status::Unticked => note,
+            Status::Clean | Status::Keep => note,
         };
         Line { status, note }
     }
 
     /// A command entry, which the roots gate does not cover.
-    fn unblocked(status: Status, note: String) -> Self {
+    fn pathless(status: Status, note: String) -> Self {
         Line { status, note }
     }
 
     fn render(&self, command: &str) -> String {
         match &self.status {
-            Status::Ticked => format!("\n# {}\n{command}\n", self.note),
-            Status::Unticked => format!("\n# unticked: {}\n# {command}\n", self.note),
-            Status::Blocked | Status::Conflict(_) => format!("\n# {}\n# {command}\n", self.note),
+            Status::Clean => format!("\n# {}\n{command}\n", self.note),
+            Status::Keep => format!("\n# keep: {}\n# {command}\n", self.note),
+            Status::OutsideRoots | Status::Conflict(_) => {
+                format!("\n# {}\n# {command}\n", self.note)
+            }
         }
     }
 }
@@ -192,7 +196,7 @@ mod tests {
     }
 
     fn plan() -> Plan {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let paths = [
             found(HOSTILE, Reach::InRoots, Twin::Normal),
             found(&format!("/x{HOSTILE}"), Reach::OutsideRoots, Twin::Normal),
@@ -247,7 +251,7 @@ mod tests {
     /// A `PATH` folder of stub programs, one per program the export of [`plan`] runs.
     /// Each appends its name to the file `$LOG`. The `docker` stub also reads its input a
     /// line at a time, logging each line as `read <line>`, and stops two bytes into the
-    /// line after `# unticked:`, just past the `# ` that comments out the next command.
+    /// line after `# keep:`, just past the `# ` that comments out the next command.
     ///
     /// Tests running at the same time share one folder: macOS pays a first-execution cost
     /// per fresh binary, so writing this folder anew in every test dominated their
@@ -270,7 +274,7 @@ mod tests {
         let logs_name = "#!/bin/bash\nprintf '%s\\n' \"${0##*/}\" >>\"$LOG\"\n";
         let reads_input = "while IFS= read -r line; do\n\
                            \x20 printf 'read %s\\n' \"$line\" >>\"$LOG\"\n\
-                           \x20 case $line in '# unticked:'*) read -r -n 2 _; exit ;; esac\n\
+                           \x20 case $line in '# keep:'*) read -r -n 2 _; exit ;; esac\n\
                            done\n";
         for program in ["launchctl", "rm", "docker", "tool", "pkgutil"] {
             let body = match program {
@@ -317,13 +321,13 @@ mod tests {
         std::fs::read_to_string(&log).expect("read log")
     }
 
-    const TICKED_PROGRAMS: &str = "launchctl\nrm\nrm\ndocker\npkgutil\n";
+    const CLEAN_PROGRAMS: &str = "launchctl\nrm\nrm\ndocker\npkgutil\n";
 
-    /// `rosie scan --sh | sudo bash` feeds the script on stdin. A ticked tool that reads
+    /// `rosie scan --sh | sudo bash` feeds the script on stdin. A `clean` tool that reads
     /// its input must not consume the script and make bash resume inside a commented-out
     /// line.
     #[test]
-    fn piped_to_bash_only_ticked_entries_run() {
+    fn piped_to_bash_only_clean_entries_run() {
         let bin = stubs();
 
         let log = run_bash(
@@ -332,7 +336,7 @@ mod tests {
             bin.path(),
         );
 
-        assert_eq!(log, TICKED_PROGRAMS);
+        assert_eq!(log, CLEAN_PROGRAMS);
     }
 
     /// No exported command reads the input of the bash that runs the script.
@@ -344,7 +348,7 @@ mod tests {
 
         let log = run_bash(&[&script], b"y\ny\n", bin.path());
 
-        assert_eq!(log, TICKED_PROGRAMS);
+        assert_eq!(log, CLEAN_PROGRAMS);
     }
 
     /// A script cut short, as when rosie is killed while printing it into a pipe, runs
@@ -362,7 +366,7 @@ mod tests {
     }
 
     #[test]
-    fn only_ticked_entries_are_executable_in_run_order() {
+    fn only_clean_entries_are_executable_in_run_order() {
         let script = plan().to_sh().expect("no conflicts");
 
         assert_eq!(
@@ -380,7 +384,7 @@ mod tests {
     }
 
     #[test]
-    fn unticked_and_blocked_entries_are_commented_out() {
+    fn keep_and_outside_roots_entries_are_commented_out() {
         let script = plan().to_sh().expect("no conflicts");
 
         assert!(
@@ -425,7 +429,7 @@ mod tests {
 
     #[test]
     fn refuses_a_plan_with_an_unresolved_conflict() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Ticked);
+        let mut builder = PlanBuilder::new(AggressiveItems::Clean);
         for (rule, twin) in [("rosie/a", Twin::Normal), ("alice/b", Twin::Aggressive)] {
             let found = PathMatch {
                 rule: rule.to_owned(),
@@ -443,8 +447,8 @@ mod tests {
     }
 
     #[test]
-    fn a_plist_inside_a_ticked_folder_is_booted_out_before_the_folder_goes() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+    fn a_plist_inside_a_clean_folder_is_booted_out_before_the_folder_goes() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         builder
             .add_launch_job(
                 found("/w/app/com.x.plist", Reach::InRoots, Twin::Aggressive),

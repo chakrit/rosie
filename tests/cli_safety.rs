@@ -59,7 +59,7 @@ fn the_elevated_entry_is_not_the_sudo_refusal_and_refuses_on_its_own_gates() {
 // clean deletes only the confirmed plan, inside the roots
 
 #[test]
-fn clean_answered_yes_deletes_ticked_items_inside_the_roots_only() {
+fn clean_answered_yes_deletes_clean_items_inside_the_roots_only() {
     let sandbox = Sandbox::with_roots(&["/Users/me/src/inside"]);
     sandbox.node_project(&format!("{CWD}/inside"));
     sandbox.node_project(&format!("{CWD}/outside"));
@@ -76,7 +76,7 @@ fn clean_answered_yes_deletes_ticked_items_inside_the_roots_only() {
         "{}",
         ran.stdout
     );
-    assert_eq!(ran.asked, ["Clean the ticked items? [y/N/e]"]);
+    assert_eq!(ran.asked, ["Clean the items marked clean? [y/N/e]"]);
 }
 
 #[test]
@@ -178,7 +178,7 @@ fn scan_sh_refuses_a_plan_with_a_conflict() {
 }
 
 #[test]
-fn clean_edit_removes_unticked_entries_reshows_the_plan_and_asks_again() {
+fn clean_edit_removes_unchecked_entries_reshows_the_plan_and_asks_again() {
     let sandbox = Sandbox::new();
     sandbox.node_project(&format!("{CWD}/a"));
     sandbox.node_project(&format!("{CWD}/b"));
@@ -242,10 +242,10 @@ fn bare_rosie_cleans_the_current_folder_after_confirmation() {
 // run
 
 #[test]
-fn run_refuses_a_hand_written_ticked_entry_outside_the_roots() {
+fn run_refuses_a_hand_written_clean_entry_outside_the_roots() {
     let sandbox = Sandbox::with_roots(&[CWD]);
     sandbox.fake.add_file("/Users/me/keep/data.txt", "x");
-    let plan = "version = 1\n\n[[delete]]\npath = \"/Users/me/keep\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"ticked\"\n";
+    let plan = "version = 1\n\n[[delete]]\npath = \"/Users/me/keep\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"clean\"\n";
 
     let ran = sandbox.run_with(Script::piped().stdin(plan), &["run", "-"]);
 
@@ -260,14 +260,14 @@ fn run_refuses_a_hand_written_ticked_entry_outside_the_roots() {
 }
 
 #[test]
-fn run_never_prompts_and_runs_only_ticked_entries() {
+fn run_never_prompts_and_runs_only_clean_entries() {
     let sandbox = Sandbox::new();
     sandbox.fake.add_file(format!("{CWD}/a/gone.txt"), "x");
     sandbox.fake.add_file(format!("{CWD}/b/kept.txt"), "x");
     let plan = format!(
         "version = 1\n\n\
-         [[delete]]\npath = \"{CWD}/a\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"ticked\"\n\n\
-         [[delete]]\npath = \"{CWD}/b\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"unticked\"\n"
+         [[delete]]\npath = \"{CWD}/a\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"clean\"\n\n\
+         [[delete]]\npath = \"{CWD}/b\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"keep\"\n"
     );
     sandbox.fake.add_file(format!("{HOME}/plan.toml"), plan);
 

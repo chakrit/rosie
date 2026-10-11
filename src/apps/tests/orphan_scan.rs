@@ -12,13 +12,13 @@ fn orphans_are_leftovers_no_installed_app_accounts_for() {
     fake.add_file(lib("Preferences/com.gone.App.plist"), "x");
     fake.add_dir(lib("Caches/com.gone.App"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Unticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
 
     assert_eq!(
         deletes(&scanned),
         [
-            (lib("Caches/com.gone.App"), Status::Unticked),
-            (lib("Preferences/com.gone.App.plist"), Status::Unticked),
+            (lib("Caches/com.gone.App"), Status::Keep),
+            (lib("Preferences/com.gone.App.plist"), Status::Keep),
         ]
     );
     assert!(entry(&scanned, &lib("Caches/com.gone.App")).rules == ["orphans"]);
@@ -33,26 +33,26 @@ fn orphans_exclude_apple_and_names_that_are_not_bundle_ids() {
     fake.add_dir(lib("Application Support/Slack"));
     fake.add_file(lib("Logs/install.log"), "x");
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Unticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
 
     assert_eq!(deletes(&scanned), []);
 }
 
 #[test]
-fn orphan_launch_jobs_are_booted_out_and_aggressive_ticks_orphans() {
+fn orphan_launch_jobs_are_booted_out_and_aggressive_cleans_orphans() {
     let fake = FakeBackend::new();
     installed_suite(&fake);
     fake.add_file(lib("LaunchAgents/com.gone.App.agent.plist"), "x");
     fake.add_dir(lib("Group Containers/ABCDE12345.com.gone.App"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Clean);
 
     let agent = entry(&scanned, &lib("LaunchAgents/com.gone.App.agent.plist"));
-    assert_eq!(agent.status, Status::Ticked);
+    assert_eq!(agent.status, Status::Clean);
     assert_eq!(agent.bootouts[0].domain, LaunchDomain::Gui(USER_UID));
     assert_eq!(
         entry(&scanned, &lib("Group Containers/ABCDE12345.com.gone.App")).status,
-        Status::Ticked
+        Status::Clean
     );
 }
 
@@ -68,9 +68,9 @@ fn refuses_an_orphan_a_process_executes_from() {
     fake.add_file(plist, "<plist/>");
     fake.respond_running(&[(1, "/sbin/launchd"), (321, helper)]);
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Clean);
 
-    assert_eq!(deletes(&scanned), [(plist.to_owned(), Status::Ticked)]);
+    assert_eq!(deletes(&scanned), [(plist.to_owned(), Status::Clean)]);
     let [refused] = scanned.refused.as_slice() else {
         panic!("one refused item expected: {:?}", scanned.refused);
     };
@@ -91,11 +91,11 @@ fn an_entry_that_vanishes_after_listing_is_passed_over() {
     fake.add_dir("/Applications/Removed.app");
     fake.fail_on("/Applications/Removed.app", Op::Lstat, ErrorKind::NotFound);
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Unticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
 
     assert_eq!(
         deletes(&scanned),
-        [(lib("Caches/com.gone.App"), Status::Unticked)]
+        [(lib("Caches/com.gone.App"), Status::Keep)]
     );
 }
 
@@ -106,13 +106,13 @@ fn a_case_variant_of_an_installed_id_is_not_an_orphan() {
     fake.add_file(lib("Preferences/com.foo.bar.plist"), "x");
     fake.add_dir(lib("Caches/com.BAZ.Baz"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Unticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
 
     assert_eq!(deletes(&scanned), []);
 }
 
 // claimed IDs (`docs/spec/app.md#rosie-clean-orphans`): an ID something still claims is
-// never an orphan, ticked or not
+// never an orphan, `clean` or not
 
 #[test]
 fn an_id_sharing_an_installed_apps_vendor_prefix_is_not_an_orphan() {
@@ -122,11 +122,11 @@ fn an_id_sharing_an_installed_apps_vendor_prefix_is_not_an_orphan() {
     fake.add_dir(lib("Group Containers/ABCDE12345.com.foo.helper"));
     fake.add_dir(lib("Caches/com.food.App"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Clean);
 
     assert_eq!(
         deletes(&scanned),
-        [(lib("Caches/com.food.App"), Status::Ticked)]
+        [(lib("Caches/com.food.App"), Status::Clean)]
     );
 }
 
@@ -142,11 +142,11 @@ fn an_id_of_a_loaded_launch_job_is_not_an_orphan() {
     fake.add_dir(lib("Caches/org.swift.swiftpm"));
     fake.add_dir(lib("Caches/com.gone.Agent"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Clean);
 
     assert_eq!(
         deletes(&scanned),
-        [(lib("Caches/com.gone.Agent"), Status::Ticked)]
+        [(lib("Caches/com.gone.Agent"), Status::Clean)]
     );
 }
 
@@ -165,13 +165,13 @@ fn an_id_of_a_job_loaded_in_the_system_domain_is_not_an_orphan() {
         "<plist/>",
     );
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Clean);
 
     assert_eq!(
         deletes(&scanned),
         [(
             "/Library/LaunchDaemons/com.disabled.Daemon.plist".to_owned(),
-            Status::Ticked
+            Status::Clean
         )]
     );
 }
@@ -191,13 +191,13 @@ fn a_system_job_listing_rosie_cannot_read_fails_the_scan() {
     let malformed = scan_orphans(
         &ctx(&malformed, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Ticked,
+        AggressiveItems::Clean,
         Mounts::Skip,
     );
     let no_block = scan_orphans(
         &ctx(&no_block, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Ticked,
+        AggressiveItems::Clean,
         Mounts::Skip,
     );
 
@@ -221,11 +221,11 @@ fn an_id_of_an_installed_homebrew_formula_is_not_an_orphan() {
     fake.add_file(lib("LaunchAgents/homebrew.mxcl.mysql.plist"), "<plist/>");
     fake.add_file(lib("LaunchAgents/homebrew.mxcl.gone.plist"), "<plist/>");
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Clean);
 
     assert_eq!(
         deletes(&scanned),
-        [(lib("LaunchAgents/homebrew.mxcl.gone.plist"), Status::Ticked)]
+        [(lib("LaunchAgents/homebrew.mxcl.gone.plist"), Status::Clean)]
     );
 }
 
@@ -238,7 +238,7 @@ fn a_launch_job_listing_rosie_cannot_read_fails_the_scan() {
     let result = scan_orphans(
         &ctx(&fake, &ALL_ROOTS),
         &paths(),
-        AggressiveItems::Ticked,
+        AggressiveItems::Clean,
         Mounts::Skip,
     );
 

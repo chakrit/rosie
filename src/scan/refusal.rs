@@ -3,7 +3,7 @@
 //! verdict into a plan entry (`docs/spec/safety.md#running-processes`, `#roots`):
 //!
 //! - an item the checks pass is planned inside the roots;
-//! - one outside the roots is planned blocked, with its `rosie roots add` hint;
+//! - one outside the roots is planned `outside-roots`, with its `rosie roots add` hint;
 //! - one a process runs a program from is left out of the plan, sized, and reported;
 //! - a mount point is a walk skip, never planned (`docs/spec/safety.md#walk-skips`);
 //! - one the checks refuse otherwise is a scan problem.

@@ -10,9 +10,9 @@ is a plan like any other ([plan.md](plan.md)).
 
 | Item                               | Treatment                                              |
 |------------------------------------|--------------------------------------------------------|
-| the bundle itself                  | included, ticked                                       |
-| bundle-ID matches                  | ticked                                                 |
-| name-only matches                  | aggressive (unticked)                                  |
+| the bundle itself                  | included, `clean`                                      |
+| bundle-ID matches                  | `clean`                                                |
+| name-only matches                  | aggressive (`keep`)                                    |
 | launch agents and daemons          | `launchctl bootout` before the plist is deleted        |
 | package receipts                   | `pkgutil --forget`                                     |
 | login items, system extensions     | report-only, with manual steps                         |
@@ -22,7 +22,7 @@ is a plan like any other ([plan.md](plan.md)).
   `<id>.` (dot-bounded), plus the team-prefixed Group Containers form
   (`<team>.<id>`).
 - A name-only match uses `CFBundleName`.
-- A match claimed by an equal-or-longer installed bundle ID is unticked (for example
+- A match claimed by an equal-or-longer installed bundle ID is `keep` (for example
   Chrome vs Chrome Canary).
 - `group.<id>` containers are not matched.
 - An app whose bundle ID cannot be read is a report entry.
@@ -61,7 +61,7 @@ gated by `roots`, and every orphan item is aggressive.
   *(agent-inferred)*
 - A claimed ID claims a leftover whose name contains its dot-parts as whole consecutive
   parts, ignoring case. *(agent-inferred)*
-- Claimed IDs never appear in orphans, ticked or not.
+- Claimed IDs never appear in orphans, `clean` or not.
 - An app whose bundle ID cannot be read fails the orphans scan.
 - An app without a bundle ID is a note in orphans.
 - `com.apple.*` is excluded.

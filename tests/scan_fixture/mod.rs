@@ -65,7 +65,7 @@ impl Default for Options {
             home: PathBuf::from(HOME),
             roots: vec![PathBuf::from(HOME)],
             walk: Walk::default(),
-            aggressive: AggressiveItems::Unticked,
+            aggressive: AggressiveItems::Keep,
             only: Vec::new(),
         }
     }

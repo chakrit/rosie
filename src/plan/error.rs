@@ -53,7 +53,7 @@ pub enum Error {
 
     #[error(
         "the plan has {count} rule conflict(s); save it as TOML and set each \"conflict\" \
-         status to ticked or unticked"
+         status to clean or keep"
     )]
     UnresolvedConflicts { count: usize },
 

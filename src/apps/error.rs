@@ -45,6 +45,16 @@ pub enum Error {
         source: Box<Error>,
     },
 
+    /// The scanned app's own bundle, as typed, could not be read: a filesystem or
+    /// `plutil` failure, which [`Error::Fs`] and [`Error::Process`] alone would not tell
+    /// apart from failures unrelated to the bundle.
+    #[error("cannot read the app {bundle}: {source}", bundle = bundle.display())]
+    UnreadableBundle {
+        bundle: PathBuf,
+        #[source]
+        source: Box<Error>,
+    },
+
     #[error(
         "cannot list the app folder {folder}, so the apps in it cannot be told from \
          orphans: {source}",

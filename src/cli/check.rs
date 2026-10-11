@@ -117,7 +117,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             }) => (Word::InUse, running(&program, pid)),
             Err(
                 error @ (apps::Error::Refused { .. }
-                | apps::Error::UnreadableApp { .. }
+                | apps::Error::UnreadableBundle { .. }
                 | apps::Error::NoInfoPlist { .. }
                 | apps::Error::MissingKey { .. }
                 | apps::Error::InvalidBundleId { .. }

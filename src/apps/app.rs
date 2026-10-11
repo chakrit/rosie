@@ -15,7 +15,7 @@ use super::search::{Candidate, Search};
 use crate::fs::{Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool, UserInput};
 use crate::plan::Report;
 use crate::process;
-use crate::scan::{Entry, Mounts, Scan, Settings};
+use crate::scan::{Entry, Mounts, NotAnEntry, Scan, Settings};
 use crate::tier::Tier;
 
 /// Scans for `app` and its leftovers in the user's home and the system folders.
@@ -23,12 +23,13 @@ use crate::tier::Tier;
 /// The app argument is a user-typed path: a symlink or misspelling in it is refused, and
 /// so is a bundle that is a dataless placeholder, which rosie does not open, or the root
 /// of a mounted volume, since rosie never plans a mount point, which would plan the
-/// whole volume. Before any leftover is listed, the bundle passes its own delete checks:
-/// any refusal, such as a process running from it, a bundle outside the roots, or a
-/// mount point, refuses the whole operation, naming the reason, so nothing of an app
-/// that cannot be deleted is cleaned (`docs/spec/app.md`). A leftover a process runs
-/// from is refused alone. An installed app rosie cannot identify is reported, since
-/// leftovers the two apps share may be `clean`.
+/// whole volume. A filesystem or `plutil` failure reading the bundle itself is
+/// [`Error::UnreadableBundle`]. Before any leftover is listed, the bundle passes its own
+/// delete checks: any refusal, such as a process running from it, a bundle outside the
+/// roots, or a mount point, refuses the whole operation, naming the reason, so nothing
+/// of an app that cannot be deleted is cleaned (`docs/spec/app.md`). A leftover a
+/// process runs from is refused alone. An installed app rosie cannot identify is
+/// reported, since leftovers the two apps share may be `clean`.
 ///
 /// The app itself may have no bundle-ID key: it is the app the user asked to remove, not
 /// one rosie must first identify among others, so this is not refused. Its own bundle is
@@ -40,7 +41,11 @@ where
 {
     let mounts = Mounts::from(settings.walk);
     let path = UserInput::path(app, settings.walk.enter_links).perform(ctx)?;
-    let entry = Entry::lstat(ctx, &path)?;
+    let entry = match Entry::lstat(ctx, &path) {
+        Ok(entry) => entry,
+        Err(NotAnEntry::Fs(error)) => return Err(unreadable(&path, error.into())),
+        Err(refused) => return Err(refused.into()),
+    };
     let name = path
         .file_name()
         .unwrap_or_default()
@@ -53,7 +58,10 @@ where
     let Some(itself) = itself else {
         return Err(Error::NotAnApp { path });
     };
-    let bundle = read_bundle(ctx, &path)?;
+    let bundle = read_bundle(ctx, &path).map_err(|error| match error {
+        Error::Fs(_) | Error::Process(_) => unreadable(&path, error),
+        described => described,
+    })?;
     Cleanup::delete(&bundle.path)
         .verify(ctx)
         .map_err(|source| Error::Refused {
@@ -104,6 +112,15 @@ where
         search.add_report(unidentified_report(unidentified, &bundle)?);
     }
     search.finish()
+}
+
+/// A filesystem or `plutil` failure reading the typed bundle at `bundle`, named as such
+/// so it is never mistaken for a failure unrelated to the bundle.
+fn unreadable(bundle: &Path, source: Error) -> Error {
+    Error::UnreadableBundle {
+        bundle: bundle.to_path_buf(),
+        source: Box::new(source),
+    }
 }
 
 /// A bundle-ID match is `clean`, unless it also belongs to another installed app,

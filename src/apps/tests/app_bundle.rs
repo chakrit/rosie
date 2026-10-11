@@ -23,6 +23,12 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     )
 }
 
+/// `plutil` failing on the scanned app's own `Info.plist` makes the bundle unreadable.
+fn is_unreadable_by_plutil(result: &Result<Scan, Error>) -> bool {
+    matches!(result, Err(Error::UnreadableBundle { source, .. })
+        if matches!(**source, Error::Process(process::Error::Failed { .. })))
+}
+
 #[test]
 fn a_scanned_app_whose_bundle_id_cannot_be_read_is_refused() {
     let fake = FakeBackend::new();
@@ -34,10 +40,7 @@ fn a_scanned_app_whose_bundle_id_cannot_be_read_is_refused() {
 
     let result = app_scan(&fake, BAR);
 
-    assert!(
-        matches!(result, Err(Error::Process(process::Error::Failed { .. }))),
-        "{result:?}"
-    );
+    assert!(is_unreadable_by_plutil(&result), "{result:?}");
 }
 
 #[test]
@@ -51,10 +54,7 @@ fn a_scanned_app_whose_bundle_name_cannot_be_read_is_refused() {
 
     let result = app_scan(&fake, BAR);
 
-    assert!(
-        matches!(result, Err(Error::Process(process::Error::Failed { .. }))),
-        "{result:?}"
-    );
+    assert!(is_unreadable_by_plutil(&result), "{result:?}");
 }
 
 /// `plutil` ends a raw value with a newline; a value printed without one is still read

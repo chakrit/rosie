@@ -168,8 +168,8 @@ impl<B: Backend + Sync> Scanner<B> {
     /// goes down toward `path`, judging each folder on the way as a `tree` walk would; at
     /// `path` it takes the entry as any other, so a folder it would enter is walked whole
     /// (`docs/spec/cli.md#check`), unless `path` is where the walk starts, which is
-    /// walked as a `tree` walk is and is never a target itself. Only the fixed rule paths on that way, or at or below
-    /// `path`, are looked at.
+    /// walked as a `tree` walk is and is never a target itself. Only the fixed rule paths
+    /// on that way, or at or below `path`, are looked at.
     pub fn path<P: Progress>(&self, path: &Path, progress: &P) -> Result<PathScan, Error> {
         let links = self.settings.walk.enter_links;
         let real = UserInput::path(path, links)

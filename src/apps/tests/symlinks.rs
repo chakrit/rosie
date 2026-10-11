@@ -56,14 +56,18 @@ fn a_symlinked_info_plist_is_refused_by_app_and_orphan_scans() {
     );
     let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep));
 
-    assert!(
-        matches!(app, Err(Error::Fs(fs::Error::Symlink { .. }))),
-        "{app:?}"
-    );
+    assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
     assert!(
         matches!(orphans, Err(Error::UnreadableApp { ref source, .. }) if matches!(**source, Error::Fs(fs::Error::Symlink { .. }))),
         "{orphans:?}"
     );
+}
+
+/// A symlink on the way to the scanned app's own bundle or its `Info.plist` makes the
+/// bundle unreadable.
+fn is_unreadable_through_a_symlink(result: &Result<Scan, Error>) -> bool {
+    matches!(result, Err(Error::UnreadableBundle { source, .. })
+        if matches!(**source, Error::Fs(fs::Error::Symlink { .. })))
 }
 
 // fixed folders: a symlink anywhere in their path fails the scan
@@ -165,7 +169,7 @@ fn a_symlinked_wrapped_info_plist_is_refused_by_app_and_orphan_scans() {
     let app = app_scan(&fake, NPLAYER);
     let orphans = orphan_scan(&fake);
 
-    assert!(is_symlink_refusal(&app), "{app:?}");
+    assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
     assert!(
         matches!(orphans, Err(Error::UnreadableApp { ref source, .. }) if matches!(**source, Error::Fs(fs::Error::Symlink { .. }))),
         "{orphans:?}"
@@ -182,7 +186,7 @@ fn a_symlinked_wrapper_folder_is_refused() {
 
     let app = app_scan(&fake, NPLAYER);
 
-    assert!(is_symlink_refusal(&app), "{app:?}");
+    assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
 }
 
 #[test]

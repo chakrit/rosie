@@ -9,7 +9,7 @@ use std::io::ErrorKind;
 
 use cli_fixture::{CWD, HOME, Ran, Sandbox};
 use rosie::cli::ExitStatus;
-use rosie::fs::{Argv, Op};
+use rosie::fs::{Argv, CommandOutput, Exit, Op};
 
 /// A rule that calls a Python project's `.venv` aggressive.
 const VENV_RULE: &str = "[rules.python-venv]\nstrategy = \"marker\"\n\
@@ -583,6 +583,61 @@ fn an_app_without_an_info_plist_is_skipped_with_the_error() {
             "/Users/me/src/apps/Foo.app has no Info.plist: neither Contents/Info.plist \
              nor a single Wrapper/<name>.app/Info.plist"
         )
+    );
+}
+
+/// An installed app whose own `Info.plist` cannot be read is unreadable, so `skipped`
+/// with the error's text (`docs/spec/cli.md#check`), and the other paths still print.
+#[test]
+fn an_app_whose_info_plist_cannot_be_read_is_skipped_with_the_error() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+    install_slack(&sandbox);
+    sandbox.fake.fail_on(
+        format!("{SLACK}/Contents/Info.plist"),
+        Op::Lstat,
+        ErrorKind::PermissionDenied,
+    );
+
+    let ran = check(&sandbox, &["app/node_modules", SLACK]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(line_for(&ran, "~/src/app/node_modules").status, "clean");
+    assert_eq!(
+        line_for(&ran, "~/Applications/Slack.app"),
+        line(
+            "skipped",
+            "~/Applications/Slack.app",
+            "cannot read the app /Users/me/Applications/Slack.app: cannot inspect \
+             /Users/me/Applications/Slack.app/Contents/Info.plist: permission denied"
+        )
+    );
+}
+
+/// An app-mode error that is not about the bundle, here a failing receipt listing, fails
+/// `check` as it fails `scan app`.
+#[test]
+fn an_app_mode_error_not_about_the_bundle_fails_check() {
+    let sandbox = Sandbox::new();
+    install_slack(&sandbox);
+    sandbox.fake.respond(
+        Argv::new("/usr/sbin/pkgutil").arg("--pkgs"),
+        CommandOutput {
+            exit: Exit::Code(1),
+            stdout: Vec::new(),
+            stderr: b"pkgutil: broken\n".to_vec(),
+        },
+    );
+
+    let ran = check(&sandbox, &[SLACK]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert_eq!(ran.stdout, "");
+    assert!(
+        ran.stderr
+            .starts_with("rosie: `/usr/sbin/pkgutil --pkgs` failed"),
+        "{}",
+        ran.stderr
     );
 }
 

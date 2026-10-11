@@ -3,9 +3,10 @@ use std::path::{Path, PathBuf};
 
 use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
+use super::claims::system_jobs_argv;
 use super::fixture::{
-    ALL_ROOTS, HOME, ctx, failed, install_app, install_wrapped_app, loaded, no_value, paths, quiet,
-    receipts, succeeded,
+    ALL_ROOTS, HOME, ctx, failed, install_app, install_wrapped_app, loaded, loaded_system,
+    no_value, paths, quiet, receipts, succeeded,
 };
 use super::*;
 use crate::config::Walk;

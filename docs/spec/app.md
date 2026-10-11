@@ -52,6 +52,8 @@ gated by `roots`, and every orphan item is aggressive.
   - an installed app sharing its vendor prefix (the first two dot-parts);
   - a currently loaded launchd job;
   - an installed Homebrew formula (`homebrew.mxcl.<formula>`).
+- Loaded launchd jobs are those of the user domain (`launchctl list`) and of the system
+  domain (`launchctl print system`, its `services` block).
 - Claimed IDs never appear in orphans, ticked or not.
 - An app whose bundle ID cannot be read fails the orphans scan.
 - An app without a bundle ID is a note in orphans.

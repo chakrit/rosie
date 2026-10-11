@@ -21,7 +21,7 @@ use std::path::PathBuf;
 use crate::fs::{Backend, FsContext, Paths};
 
 pub use app::scan_app;
-pub use claims::launch_jobs_argv;
+pub use claims::{launch_jobs_argv, system_jobs_argv};
 pub use error::Error;
 pub use orphans::scan_orphans;
 

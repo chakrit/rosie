@@ -14,6 +14,11 @@ use crate::process;
 /// and on Intel.
 const CELLARS: [&str; 2] = ["/opt/homebrew/Cellar", "/usr/local/Cellar"];
 
+/// The lines of `launchctl print system` that open and close its loaded-jobs block, one
+/// tab in from the domain's own braces.
+const SERVICES_OPEN: &str = "\tservices = {";
+const BLOCK_CLOSE: &str = "\t}";
+
 /// The label prefix Homebrew gives a formula's launchd service.
 const HOMEBREW_SERVICE: &str = "homebrew.mxcl.";
 
@@ -28,13 +33,18 @@ impl Claims {
     /// it would have claimed could otherwise be listed as an orphan.
     pub fn read<B: Backend>(ctx: &FsContext<B>, installed: &[InstalledApp]) -> Result<Self, Error> {
         let vendors = installed.iter().map(|app| vendor_prefix(app.id.as_str()));
-        let jobs = loaded_jobs(ctx)?;
+        let user_jobs = loaded_jobs(ctx)?;
+        let system_jobs = system_jobs(ctx)?;
         let formulae = installed_formulae(ctx)?;
         let services = formulae
             .into_iter()
             .map(|formula| format!("{HOMEBREW_SERVICE}{formula}"));
 
-        let ids = vendors.chain(jobs).chain(services).collect();
+        let ids = vendors
+            .chain(user_jobs)
+            .chain(system_jobs)
+            .chain(services)
+            .collect();
         Ok(Claims { ids })
     }
 
@@ -46,6 +56,13 @@ impl Claims {
 /// `launchctl list`, which lists the jobs loaded in the invoking user's domain.
 pub fn launch_jobs_argv() -> SystemArgv {
     SystemTool::LAUNCHCTL.argv().arg("list")
+}
+
+/// `launchctl print system`, which lists the jobs loaded in the system domain without
+/// root. Its output is not a stable format, so anything unexpected in the part rosie
+/// reads fails the scan.
+pub fn system_jobs_argv() -> SystemArgv {
+    SystemTool::LAUNCHCTL.argv().arg("print").arg("system")
 }
 
 /// An app's vendor prefix: the first two dot-parts of its bundle ID. It claims the app's
@@ -72,6 +89,35 @@ fn loaded_jobs<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Error> {
             [_, _, label] if !label.is_empty() => Ok(label.to_owned()),
             _ => Err(unreadable(line)),
         })
+        .collect()
+}
+
+/// The labels of the jobs loaded in the system domain: the last column of each
+/// `<pid> <status> <label>` line in the `services` block of `launchctl print system`.
+/// Every other block, `disabled services` included, names jobs that need not be loaded.
+fn system_jobs<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Error> {
+    let printed = process::run_tool_text(ctx, &system_jobs_argv())?;
+    let unreadable = |line: &str| Error::SystemJobs {
+        line: line.to_owned(),
+    };
+
+    let lines: Vec<&str> = printed.lines().collect();
+    let Some(open) = lines.iter().position(|line| *line == SERVICES_OPEN) else {
+        return Err(Error::SystemJobsMissing);
+    };
+    let after_open = &lines[open + 1..];
+    let Some(close) = after_open.iter().position(|line| *line == BLOCK_CLOSE) else {
+        return Err(Error::SystemJobsMissing);
+    };
+
+    after_open[..close]
+        .iter()
+        .map(
+            |line| match line.split_whitespace().collect::<Vec<_>>()[..] {
+                [pid, _, label] if pid.bytes().all(|b| b.is_ascii_digit()) => Ok(label.to_owned()),
+                _ => Err(unreadable(line)),
+            },
+        )
         .collect()
 }
 

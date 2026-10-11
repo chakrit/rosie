@@ -151,6 +151,67 @@ fn an_id_of_a_loaded_launch_job_is_not_an_orphan() {
 }
 
 #[test]
+fn an_id_of_a_job_loaded_in_the_system_domain_is_not_an_orphan() {
+    let fake = FakeBackend::new();
+    installed_suite(&fake);
+    loaded_system(
+        &fake,
+        "       0      - \tcom.docker.vmnetd\n     654   (pe) \tcom.vpn.helper",
+    );
+    fake.add_file("/Library/LaunchDaemons/com.docker.vmnetd.plist", "<plist/>");
+    fake.add_file("/Library/PrivilegedHelperTools/com.vpn.helper", "x");
+    fake.add_file(
+        "/Library/LaunchDaemons/com.disabled.Daemon.plist",
+        "<plist/>",
+    );
+
+    let scanned = scanned_orphans(&fake, AggressiveItems::Ticked);
+
+    assert_eq!(
+        deletes(&scanned),
+        [(
+            "/Library/LaunchDaemons/com.disabled.Daemon.plist".to_owned(),
+            Status::Ticked
+        )]
+    );
+}
+
+#[test]
+fn a_system_job_listing_rosie_cannot_read_fails_the_scan() {
+    let malformed = FakeBackend::new();
+    installed_suite(&malformed);
+    loaded_system(&malformed, "0 - com.docker.vmnetd\ncom.half.line");
+    let no_block = FakeBackend::new();
+    installed_suite(&no_block);
+    no_block.respond(
+        system_jobs_argv(),
+        succeeded("system = {\n\ttype = system\n}\n"),
+    );
+
+    let malformed = scan_orphans(
+        &ctx(&malformed, &ALL_ROOTS),
+        &paths(),
+        AggressiveItems::Ticked,
+        Mounts::Skip,
+    );
+    let no_block = scan_orphans(
+        &ctx(&no_block, &ALL_ROOTS),
+        &paths(),
+        AggressiveItems::Ticked,
+        Mounts::Skip,
+    );
+
+    assert!(
+        matches!(&malformed, Err(Error::SystemJobs { line }) if line.contains("com.half.line")),
+        "expected an unreadable services line, got {malformed:?}"
+    );
+    assert!(
+        matches!(no_block, Err(Error::SystemJobsMissing)),
+        "expected a missing services block, got {no_block:?}"
+    );
+}
+
+#[test]
 fn an_id_of_an_installed_homebrew_formula_is_not_an_orphan() {
     let fake = FakeBackend::new();
     installed_suite(&fake);

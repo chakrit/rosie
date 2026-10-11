@@ -1,11 +1,11 @@
 //! Test fixtures for app and orphan scans: apps installed in the fake, with canned
-//! `plutil`, `ps`, `pkgutil`, and `launchctl` output.
+//! `plutil`, `lsof`, `pkgutil`, and `launchctl` output.
 
 use std::path::{Path, PathBuf};
 
 use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
-use super::claims::launch_jobs_argv;
+use super::claims::{launch_jobs_argv, system_jobs_argv};
 use crate::fs::fake::{FakeBackend, USER_UID};
 use crate::fs::{Bounds, CommandOutput, Exit, FsContext, Paths};
 
@@ -80,6 +80,18 @@ pub(super) fn loaded(fake: &FakeBackend, rows: &str) {
     fake.respond(launch_jobs_argv(), succeeded(&listing));
 }
 
+/// What `launchctl print system` prints, trimmed to its shape: a `services` block whose
+/// `rows` are `<pid> <status> <label>`, then a `disabled services` block naming
+/// `com.disabled.Daemon`, which is not loaded.
+pub(super) fn loaded_system(fake: &FakeBackend, rows: &str) {
+    let services: String = rows.lines().map(|row| format!("\t\t{row}\n")).collect();
+    let printed = format!(
+        "system = {{\n\ttype = system\n\n\tservices = {{\n{services}\t}}\n\n\
+         \tdisabled services = {{\n\t\t\"com.disabled.Daemon\" => disabled\n\t}}\n}}\n"
+    );
+    fake.respond(system_jobs_argv(), succeeded(&printed));
+}
+
 pub(super) fn receipts(fake: &FakeBackend, pkgs: &str) {
     fake.respond(pkgs_argv(), succeeded(pkgs));
 }
@@ -90,6 +102,7 @@ pub(super) fn quiet(fake: &FakeBackend) {
     fake.respond_running(&[(1, "/sbin/launchd")]);
     receipts(fake, "com.apple.pkg.CLTools_SDK_macOS13\n");
     loaded(fake, "1\t0\tcom.apple.launchd\n");
+    loaded_system(fake, "1 - com.apple.launchd.system");
 }
 
 /// Installs an iPhone or iPad app as macOS on Apple silicon does: the real bundle in

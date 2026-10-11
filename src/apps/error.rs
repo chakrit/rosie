@@ -71,6 +71,18 @@ pub enum Error {
     )]
     LaunchJobs { line: String },
 
+    #[error(
+        "cannot read `launchctl print system`, so the IDs of loaded system jobs cannot be \
+         told from orphans; unexpected line in its services block: {line:?}"
+    )]
+    SystemJobs { line: String },
+
+    #[error(
+        "cannot read `launchctl print system`, so the IDs of loaded system jobs cannot be \
+         told from orphans; it printed no complete services block"
+    )]
+    SystemJobsMissing,
+
     #[error("{path} is a dataless placeholder; rosie does not open it", path = path.display())]
     Placeholder { path: PathBuf },
 

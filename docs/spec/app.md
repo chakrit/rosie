@@ -54,6 +54,13 @@ gated by `roots`, and every orphan item is aggressive.
   - an installed Homebrew formula (`homebrew.mxcl.<formula>`).
 - Loaded launchd jobs are those of the user domain (`launchctl list`) and of the system
   domain (`launchctl print system`, its `services` block).
+- `launchctl list` output rosie cannot parse fails the orphans scan. *(agent-inferred)*
+- Installed Homebrew formulae are the folder names in `/opt/homebrew/Cellar` and
+  `/usr/local/Cellar`; `brew` is not run. A missing Cellar has no formulae, any other
+  read error fails the scan, and a formula name that is not UTF-8 is ignored.
+  *(agent-inferred)*
+- A claimed ID claims a leftover whose name contains its dot-parts as whole consecutive
+  parts, ignoring case. *(agent-inferred)*
 - Claimed IDs never appear in orphans, ticked or not.
 - An app whose bundle ID cannot be read fails the orphans scan.
 - An app without a bundle ID is a note in orphans.

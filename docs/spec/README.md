@@ -37,3 +37,6 @@ already has a row.
 
 Use one file per subject: `<slug>.md`. Start it with a status: `draft`, `accepted`,
 `implemented`, or `superseded`.
+
+A rule ending in *(agent-inferred)* was decided by an agent during implementation and is
+not yet confirmed by chakrit.

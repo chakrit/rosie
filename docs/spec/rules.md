@@ -37,6 +37,10 @@ strategy has its own fields:
   the symlink ban and fails like any refused path, unless `enter_links` allows it
   ([safety.md](safety.md#symlinks)). Pack authors write the non-symlink path, e.g.
   `/private/var/...`.
+- A bare `~` is accepted as a fixed path. *(agent-inferred)*
+- A fixed path is expanded by text at load and checked against the disk when a scan uses
+  it. One that cannot be located (denied, misspelled, through a link) is logged as a
+  skip. *(agent-inferred)*
 
 ### Tool strategy
 
@@ -61,8 +65,10 @@ env = { HOMEBREW_NO_ENV_HINTS = "1" }
 - Rosie never parses or splits `cmd`.
 - `shell` is an absolute path; it defaults to `/bin/bash`.
 - `env` is a table of variables. Names are letters, digits, and `_`, not starting with
-  a digit.
-- `shell` and `env` apply to both `cmd` and `cmd_aggressive`.
+  a digit. *(agent-inferred)*
+- `shell` and `env` apply to both `cmd` and `cmd_aggressive`. *(agent-inferred)*
+- NUL is refused in `shell`, `cmd`, and `env`; a `cmd` of only whitespace is empty.
+  *(agent-inferred)*
 - A missing tool fails normally and is reported.
 
 ### Aggressive twins
@@ -121,6 +127,10 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
 - Pull is HTTPS only, with a 30 s total timeout and caps on download and unpacked size.
   Files are written create-new, and the install is crash-safe.
 - Pull refuses a pack whose rules fail the loader the rule layers use.
+- Pull checks only the pulled pack's rules; a broken installed pack fails when rules are
+  loaded for a scan. *(agent-inferred)*
+- A pull whose pack name is already installed from another owner is refused.
+  *(agent-inferred)*
 - A pulled pack is replaced wholesale in `~/.local/share/rosie/packs/<owner>/<repo>/`.
 - A stray folder under the packs folder stops loading.
 - On first run with no pulled pack, rosie auto-runs `rules pull` from the default

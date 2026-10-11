@@ -66,6 +66,9 @@ Bare `rosie` is `rosie clean tree .`.
 - `rosie roots add` refuses a path that contains a symlink (unless `enter_links` is
   `roots` or `all`) or does not match the disk's spelling, naming the real path
   ([safety.md](safety.md#symlinks)).
+- `rosie roots remove` matches an entry as written or at its real location, without a
+  disk check. *(agent-inferred)*
+- `rosie config set` refusals list the key's allowed values. *(agent-inferred)*
 
 The hidden `__elevated` subcommand is internal and refuses every invocation that does
 not come from rosie itself ([safety.md](safety.md#elevation)).

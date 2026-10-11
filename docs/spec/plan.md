@@ -92,6 +92,12 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 - Each `[[tool]]` entry is one rule's action, keyed by that rule, carrying `shell`,
   `cmd`, and `env` as the rule gave them.
 - Rosie never compares, dedupes, merges, or conflict-checks tool commands.
+- A plan always writes a `[[tool]]` entry's `shell`; a plan read back without it is
+  refused. *(agent-inferred)*
+- A `[[tool]]` entry's `rule` is not validated when a plan is read. *(agent-inferred)*
+- Every found item goes through all delete checks: outside `roots` is blocked, a running
+  process leaves it out of the plan (sized and reported), a mount point is a walk skip,
+  and any other refusal is a scan problem. *(agent-inferred)*
 - Nested matches collapse into the outer one. The outer entry is `sudo` if any inner one
   was.
 - Aggressive items appear unticked unless `--aggressive` is given
@@ -115,6 +121,12 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 - The user resolves each conflict to `ticked` or `unticked`, by editing the plan or
   through `e`.
 - `rosie scan … --sh` refuses while any `conflict` entry remains.
+- A rule never conflicts with itself: a rule whose normal and aggressive values match the
+  same path counts as normal, and a rule matching inside a path it already matched keeps
+  the outer match's tier. *(agent-inferred)*
+- `--aggressive` does not hide a conflict. *(agent-inferred)*
+- A conflict entry's `rules` lists only the outer path's own rules; rules from nested
+  paths appear only in its comment. *(agent-inferred)*
 
 ## Stats
 
@@ -142,12 +154,19 @@ The interactive prompt is `[y/N/e]`. `e` first asks, for each `conflict` entry, 
 to tick or untick it; the user must choose one. It then opens a pre-ticked checklist;
 after the user edits it, rosie re-shows the trimmed plan and re-prompts.
 
+- A conflict pick has no default; cancelling any pick cancels the whole edit.
+  *(agent-inferred)*
+- The checklist shows a tool entry's `cmd` only. *(agent-inferred)*
+
 ## Run
 
 - Run re-validates each entry; a stale entry is skipped and reported. An entry is stale
   when its path is missing or its `lstat` type changed.
 - Run refuses items that any process is executing from
   ([safety.md](safety.md#running-processes)).
+- Run checks staleness before the running-process check. *(agent-inferred)*
+- Run output shows a tool's full command: `NAME=value` pairs, then `<shell> -c <cmd>`.
+  *(agent-inferred)*
 - A failed item is reported and the run continues.
 - Run does the user's items first, then elevates once for the remaining `sudo` items
   ([safety.md](safety.md#elevation)).

@@ -28,6 +28,7 @@ forced through it; there are no exceptions.
   bootout; `perform` re-checks.
 - A plan file is read with `UserInput::read`, which follows links.
 - System tools are a type holding only absolute paths (`/bin/ps`, `/usr/bin/sudo`, …).
+- Commands (`run`, `sudo`) are context methods, not typed ops. *(agent-inferred)*
 - Static generics, no `dyn`: `FsContext<B>`, `Scanner<B>`, `Runner<B>`, `App<B>`.
 - The trait carries no `Send` or `Sync` bound. Only parallel functions add
   `where B: Sync`, using scoped threads; no `Send`, no `'static`.
@@ -74,6 +75,8 @@ carries or widens roots.
   `~/Applications`, the app-leftover folders under `~/Library` and `/Library` listed in
   [macos-filesystem-layout.md](../vendor/macos-filesystem-layout.md), and the tool cache
   folders named by the built-in pack. All are written as real, non-symlink paths (for
+- Creating an entry in rosie's own data refuses a case clash with an existing entry
+  before the write. *(agent-inferred)*
   example `/private/var/...`). No development roots are seeded.
 
 ## Symlinks
@@ -140,6 +143,13 @@ off:
 |------------------------|---------------------------|
 | `enter_bundles`        | `--enter-bundles`         |
 | `enter_mounts`         | `--enter-mounts`          |
+- `roots` entries are checked at the `enter_links` level set in `config.toml`, never at
+  the CLI flag's. *(agent-inferred)*
+- A path given through a link takes its real spelling; a misspelling elsewhere in it is
+  not refused separately. *(agent-inferred)*
+- At `"roots"`, a fixed rule path that is itself a link resolves to its target, and the
+  target is planned. *(agent-inferred)*
+
 | `enter_placeholders`   | `--enter-placeholders`    |
 | `enter_links`          | `--enter-links=<level>`   |
 
@@ -150,6 +160,9 @@ off:
 - A mount point is never planned, even with `--enter-mounts`.
 - Bundles are folders with these extensions: `.app`, `.framework`, `.bundle`, `.plugin`,
   `.xcarchive`, `.photoslibrary`, `.sparsebundle`, `.dSYM`.
+- A followed link's target is matched by its own real name, never the link's name. A
+  link to a file is not followed. *(agent-inferred)*
+- Skipped links are counted as links in the summary. *(agent-inferred)*
 - The walk `lstat`s an entry before any `readdir`. A dataless placeholder is detected by
   `SF_DATALESS` in `st_flags`, read via std `MetadataExt`.
 - `EPERM` during the walk is logged as a walk skip.
@@ -169,6 +182,8 @@ off:
 
 - Rosie deletes. There is no Trash mode, no run log, no stash directory, and no
   `rosie restore`.
+- A mount point a scan matches is a mount walk skip, never a scan problem.
+  *(agent-inferred)*
 - Rosie's delete never follows symlinks and makes user-owned read-only folders writable
   as it goes.
 - Decision record: [no Trash mode](../decisions/2026-09-29-no-trash-mode.md).
@@ -183,6 +198,9 @@ Rosie elevates only root items, once per run.
   file.
 - The elevated process gets the invoking user's home from the stdin header, loads that
   user's config and roots, never `$HOME`, and runs through the same safety layer.
+- The snapshot is taken once per context. A context is made per scan and per run, so a
+  run's user part and its after-elevation part share one snapshot; the elevated child
+  takes its own as root. *(agent-inferred)*
 - If sudo is refused or fails, those items are reported as skipped.
 - The elevated child deletes root-owned items anywhere inside the roots. On the root side
   it never follows symlinks, never crosses mounts, and never chmods.

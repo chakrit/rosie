@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use super::{Plan, Size, Status};
+use super::{Delete, Plan, Size, Status};
 
 /// How much one item weighs in the totals. Tool commands are "size unknown" and are
 /// excluded from the byte totals.
@@ -75,10 +75,6 @@ pub struct PlanStats {
 impl PlanStats {
     /// Report-only entries are not items: rosie does nothing with them.
     pub fn of(plan: &Plan) -> Self {
-        let deletes = plan
-            .deletes()
-            .iter()
-            .map(|delete| (&delete.status, ItemSize::Known(delete.size)));
         let commands = plan
             .tools()
             .iter()
@@ -86,12 +82,20 @@ impl PlanStats {
             .chain(plan.receipts().iter().map(|receipt| receipt.selection))
             .map(|selection| (Status::from(selection), ItemSize::Unknown));
 
-        let mut stats = PlanStats::default();
-        for (status, size) in deletes {
-            stats.bucket(status).add(size);
-        }
+        let mut stats = PlanStats::of_deletes(plan.deletes());
         for (status, size) in commands {
             stats.bucket(&status).add(size);
+        }
+        stats
+    }
+
+    /// The tallies of `deletes` alone, such as the plan's entries inside one folder.
+    pub fn of_deletes<'d>(deletes: impl IntoIterator<Item = &'d Delete>) -> Self {
+        let mut stats = PlanStats::default();
+        for delete in deletes {
+            stats
+                .bucket(&delete.status)
+                .add(ItemSize::Known(delete.size));
         }
         stats
     }
@@ -552,7 +556,7 @@ mod tests {
             .expect("valid plist");
         builder.add_report(Report::new("login item X".to_owned(), vec![]).expect("valid"));
 
-        let stats = PlanStats::of(&builder.build());
+        let stats = PlanStats::of(&builder.build().plan);
 
         assert_eq!(
             stats,

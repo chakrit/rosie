@@ -295,7 +295,7 @@ fn behind_a_closed_mount<B: Backend>(
 /// Where the volume check for a fixed path starts: home for a path under it, however
 /// the rule spelled it, and `/` otherwise. Both `path` and home have their dots
 /// resolved, so each has one spelling.
-fn anchor<'p>(path: &Path, paths: &'p Paths) -> &'p Path {
+pub(super) fn anchor<'p>(path: &Path, paths: &'p Paths) -> &'p Path {
     match path.starts_with(paths.home()) {
         true => paths.home(),
         false => Path::new("/"),

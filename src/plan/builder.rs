@@ -65,6 +65,25 @@ pub struct PathMatch {
     pub twin: Twin,
 }
 
+/// What [`PlanBuilder::build`] makes: the plan, and the tier its rules agree on for each
+/// delete entry that is not a conflict, which the plan file does not record.
+#[derive(Debug)]
+pub struct Built {
+    pub plan: Plan,
+    pub tiers: AgreedTiers,
+}
+
+/// The tier each delete entry's rules, and the rules of the paths nested in it, agree
+/// on, by the entry's path. A conflict entry has none.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct AgreedTiers(BTreeMap<PathBuf, Twin>);
+
+impl AgreedTiers {
+    pub fn of(&self, path: &Path) -> Option<Twin> {
+        self.0.get(path).copied()
+    }
+}
+
 pub struct PlanBuilder {
     aggressive: AggressiveItems,
     deletes: BTreeMap<PathBuf, FoundPath>,
@@ -157,15 +176,26 @@ impl PlanBuilder {
         self.reports.push(report);
     }
 
-    pub fn build(self) -> Plan {
+    pub fn build(self) -> Built {
         let aggressive = self.aggressive;
-        let deletes = Deletes::collapsing(self.deletes, |found| found.into_delete(aggressive));
+        let mut agreed = BTreeMap::new();
+        let deletes = Deletes::collapsing(self.deletes, |found| {
+            let verdict = found.tiers.verdict();
+            if let Verdict::Agreed(twin) = &verdict {
+                agreed.insert(found.path.clone(), *twin);
+            }
+            found.into_delete(verdict, aggressive)
+        });
 
-        Plan {
+        let plan = Plan {
             deletes,
             tools: self.tools,
             receipts: self.receipts,
             reports: self.reports,
+        };
+        Built {
+            plan,
+            tiers: AgreedTiers(agreed),
         }
     }
 
@@ -227,9 +257,9 @@ struct FoundPath {
 
 impl FoundPath {
     /// `outside-roots` outside the roots; otherwise the tier its rules agree on, or a
-    /// conflict.
-    fn into_delete(self, aggressive: AggressiveItems) -> Delete {
-        let status = match (self.reach, self.tiers.verdict()) {
+    /// conflict, as `verdict`, the verdict of its tiers, says.
+    fn into_delete(self, verdict: Verdict, aggressive: AggressiveItems) -> Delete {
+        let status = match (self.reach, verdict) {
             (Reach::OutsideRoots, _) => Status::OutsideRoots,
             (Reach::InRoots, Verdict::Agreed(twin)) => aggressive.selection(twin).into(),
             (Reach::InRoots, Verdict::Disagreed(disagreement)) => Status::Conflict(disagreement),
@@ -295,7 +325,7 @@ mod tests {
         for found in matches {
             builder.add_path(found).expect("valid match");
         }
-        builder.build()
+        builder.build().plan
     }
 
     fn paths(plan: &Plan) -> Vec<&str> {
@@ -546,7 +576,7 @@ mod tests {
                     "{path}: {refused:?}"
                 );
             }
-            assert_eq!(builder.build(), Plan::default(), "{path}");
+            assert_eq!(builder.build().plan, Plan::default(), "{path}");
         }
     }
 
@@ -561,7 +591,7 @@ mod tests {
 
         assert!(matches!(package, Err(Error::EmptyPackage)), "{package:?}");
         assert!(matches!(report, Err(Error::EmptySubject)), "{report:?}");
-        assert_eq!(builder.build(), Plan::default());
+        assert_eq!(builder.build().plan, Plan::default());
     }
 
     /// A NUL byte ends a path or an argument at the operating system, so the item run
@@ -582,7 +612,7 @@ mod tests {
         for refused in refusals {
             assert!(matches!(refused, Err(Error::NulByte { .. })), "{refused:?}");
         }
-        let plan = builder.build();
+        let plan = builder.build().plan;
         assert_eq!(plan, Plan::default());
     }
 
@@ -604,7 +634,7 @@ mod tests {
             )
             .expect("valid plist");
 
-        let plan = builder.build();
+        let plan = builder.build().plan;
 
         assert_eq!(runnable_bootouts(&plan), ["/L/LaunchDaemons/com.y.plist"]);
         assert_eq!(
@@ -637,7 +667,7 @@ mod tests {
                 LaunchDomain::Gui(501),
             )
             .expect("valid plist");
-        let plan = builder.build();
+        let plan = builder.build().plan;
 
         let user = plan.runnable_as(RunAs::User);
         let sudo = plan.runnable_as(RunAs::Sudo);
@@ -665,7 +695,7 @@ mod tests {
             .add_launch_job(plist(path, Twin::Normal), LaunchDomain::Gui(501))
             .expect("valid plist");
 
-        let plan = builder.build();
+        let plan = builder.build().plan;
 
         assert_eq!(plan.deletes()[0].bootouts.len(), 1, "{plan:?}");
         assert_eq!(runnable_bootouts(&plan), [path]);
@@ -682,7 +712,7 @@ mod tests {
             .add_path(plist(path, Twin::Normal))
             .expect("valid path");
 
-        let plan = builder.build();
+        let plan = builder.build().plan;
 
         assert_eq!(runnable_bootouts(&plan), [path]);
     }
@@ -698,7 +728,7 @@ mod tests {
             .add_path(found("/w/app", "app/x", Twin::Normal))
             .expect("valid path");
 
-        let plan = builder.build();
+        let plan = builder.build().plan;
 
         assert_eq!(paths(&plan), ["/w/app"]);
         assert_eq!(runnable_bootouts(&plan), [path]);
@@ -745,7 +775,7 @@ mod tests {
             builder.add_tool(rule, cmds);
         }
 
-        let plan = builder.build();
+        let plan = builder.build().plan;
 
         assert_eq!(
             tool_summary(&plan),
@@ -783,7 +813,7 @@ mod tests {
         builder.add_tool("rosie/docker", twins);
         builder.add_tool("rosie/brew", ToolCmds::Normal(&cleanup));
 
-        let plan = builder.build();
+        let plan = builder.build().plan;
 
         assert_eq!(
             tool_summary(&plan),

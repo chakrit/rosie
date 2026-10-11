@@ -149,10 +149,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         app_usage: &str,
     ) -> Result<Scan, Error> {
         let walk = walk_with_scan_flags(config.config().walk, flags);
-        let aggressive = match flags.aggressive {
-            true => AggressiveItems::Clean,
-            false => AggressiveItems::Keep,
-        };
+        let aggressive = flags.aggressive_items();
         let ctx = self.roots_ctx(config.config())?;
         let paths = &self.env.paths;
 
@@ -188,7 +185,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         }
     }
 
-    fn scanner(
+    pub(super) fn scanner(
         &self,
         ctx: FsContext<&'a B>,
         rules: RuleSet,
@@ -336,7 +333,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
 /// The config's `[walk]` settings, with `enter_mounts` turned on by `--enter-mounts`
 /// and `enter_links` replaced by `--enter-links` (`docs/spec/safety.md#walk-skips`).
-fn walk_with_scan_flags(config: Walk, flags: &ScanFlags) -> Walk {
+pub(super) fn walk_with_scan_flags(config: Walk, flags: &ScanFlags) -> Walk {
     let enter_links = flags.enter_links.unwrap_or(config.enter_links);
     Walk {
         enter_mounts: config.enter_mounts || flags.enter_mounts,
@@ -346,7 +343,7 @@ fn walk_with_scan_flags(config: Walk, flags: &ScanFlags) -> Walk {
 }
 
 /// `walk`, with `enter_bundles` and `enter_placeholders` each turned on by its CLI flag.
-fn walk_with_rule_flags(walk: Walk, flags: &RuleFlags) -> Walk {
+pub(super) fn walk_with_rule_flags(walk: Walk, flags: &RuleFlags) -> Walk {
     Walk {
         enter_bundles: walk.enter_bundles || flags.enter_bundles,
         enter_placeholders: walk.enter_placeholders || flags.enter_placeholders,

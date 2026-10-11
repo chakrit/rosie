@@ -248,8 +248,10 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
             }
         }
         skipped.sort_by(|a, b| a.path.cmp(&b.path));
+        let built = builder.build();
         Ok(Scan {
-            plan: builder.build(),
+            plan: built.plan,
+            tiers: built.tiers,
             refused,
             skipped,
             problems: Vec::new(),

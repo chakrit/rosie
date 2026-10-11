@@ -44,6 +44,76 @@ Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 
 Bare `rosie` is `rosie clean tree .`.
 
+## Check
+
+| Command               | Does                                           |
+|-----------------------|------------------------------------------------|
+| `rosie check <path>…` | says, per path, what a plan would do with it   |
+
+- One line per path: status, path, and reason plus hint, in readable columns.
+- Plan words for would-be entries: `clean`, `keep`, `outside-roots`, `conflict`. Scan
+  report words otherwise: `in use`, `skipped`, `no rule`.
+- Same flags as `scan`.
+- Walks each given folder's subtree so its verdict equals the plan's.
+- A folder containing targets gets a one-line summary pointing to `rosie scan`.
+- Exit 0 if any path would be cleaned, else 1.
+
+Approved example:
+
+```text
+clean          ~/src/app/node_modules                 rosie/node-modules (normal)
+clean          ~/src/app/node_modules/react           inside ~/src/app/node_modules (rosie/node-modules)
+clean          ~/Library/Developer/Xcode/DerivedData  rosie/xcode-derived-data (normal); needs sudo
+keep           ~/src/old/.venv                        rosie/python-venv (aggressive); --aggressive cleans it
+outside-roots  ~/Library/Caches/com.foo.Bar           to allow it: rosie roots add ~/Library/Caches
+conflict       ~/src/api/target                       rosie/cargo-target (normal) vs alice/rust (aggressive, on target/debug); choose clean or keep in the plan
+clean          ~/src/web                              contains 3 items: 2 clean (1.4 GB), 1 keep (210 MB); see rosie scan tree ~/src/web
+in use         ~/Applications/Slack.app               running: Slack (pid 4123)
+skipped        ~/.cargo/registry                      through symlink ~/.cargo → ~/dotfiles/cargo; enter_links = "roots" allows it
+skipped        /Volumes/Backup/build                  another volume; --enter-mounts enters it
+no rule        ~/src/app/src                          no rule matches it or anything inside
+no rule        ~/Downloads/missing                    does not exist
+```
+
+- `check` does not take `--sh`. *(agent-inferred)*
+- Lines go to stdout; scan problems go to stderr as `scan` prints them.
+  *(agent-inferred)*
+- Paths under home print as `~`. *(agent-inferred)*
+- Columns are as wide as the widest printed entry. *(agent-inferred)*
+- Exit 0 when any printed line's status is `clean`. *(agent-inferred)*
+- The walk starts at home for a path under it and at `/` otherwise, judges each folder
+  on the way down as a `tree` walk would, and walks the given path's subtree whole.
+  *(agent-inferred)*
+- A line's verdict, first match wins: an item a process runs from at or above the path,
+  a plan entry at or above it, a walk skip at or above it, plan entries inside it, items
+  refused or skipped inside it, then `no rule`. *(agent-inferred)*
+- A path inside a plan entry takes the entry's status: `inside <entry> (<rules>)`.
+  *(agent-inferred)*
+- A `keep`, `outside-roots`, or `conflict` line carries its hint inside an entry too.
+  *(agent-inferred)*
+- `; needs sudo` ends every line about an entry not owned by the user, inside lines
+  included. *(agent-inferred)*
+- An `outside-roots` hint names the entry's path, as the plan's hint does.
+  *(agent-inferred)*
+- A conflict found by a `tree` walk is at one path, so neither side names an
+  `on <path>`. *(agent-inferred)*
+- A summary's status is the most consequential inside: `conflict`, `clean`, `keep`,
+  `outside-roots`. Its counts list those plan statuses, in that order.
+  *(agent-inferred)*
+- A folder with no plan entry inside but items refused or skipped inside is `in use`
+  when any item runs, else `skipped`: `contains N in use, M skipped; see rosie scan tree
+  <path>`. It is never `no rule`. *(agent-inferred)*
+- An item inside the path that a process runs from reads `inside <item> (<rules>);
+  running: <program> (pid <pid>)`. *(agent-inferred)*
+- A skip names every flag that would enter it: `--a and --b enter it`.
+  *(agent-inferred)*
+- A refused typed path is `skipped` with the refusal's own text; one through a symlink
+  names the link and where it leads. *(agent-inferred)*
+- A resolved path prints at its real location; a refused one prints as typed.
+  *(agent-inferred)*
+- `check` covers `tree` and `caches` targets; `orphans` is not consulted.
+  *(agent-inferred)*
+
 ## Management commands
 
 | Command                          | Does                                                      |
@@ -89,7 +159,7 @@ When stdin or stdout is not a terminal, rosie prints the usage error instead.
 
 ## Flags
 
-Flags for `scan`, `plan`, and `clean`:
+Flags for `scan`, `plan`, `clean`, and `check`:
 
 | Flag                     | Effect                                                         |
 |--------------------------|----------------------------------------------------------------|
@@ -101,8 +171,8 @@ Flags for `scan`, `plan`, and `clean`:
 | `--enter-links=<level>`  | `none`, `roots`, or `all` (overrides `[walk] enter_links`)     |
 | `--sh`                   | `scan` / `plan` only: prints the plan as a shell script        |
 
-- `--only`, `--enter-bundles`, and `--enter-placeholders` exist only on `tree` and
-  `caches`.
+- `--only`, `--enter-bundles`, and `--enter-placeholders` exist only on `tree`, `caches`,
+  and `check`.
 - Rule names for `--only` are listed by `rosie rules`.
 - Skip lines name the path and a short reason, with a flag hint only when that flag could
   change the outcome.
@@ -116,6 +186,9 @@ Global flags are `--help` and `--version`. There is no `--verbose`.
 | `0`  | ok                                         |
 | `1`  | an item failed or the command errored      |
 | `2`  | usage error                                |
+
+`rosie check` exits `0` when any path would be cleaned and `1` otherwise
+([Check](#check)).
 
 ## Configuration
 

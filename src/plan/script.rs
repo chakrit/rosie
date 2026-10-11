@@ -233,7 +233,7 @@ mod tests {
             )
             .expect("valid"),
         );
-        builder.build()
+        builder.build().plan
     }
 
     /// The lines that run a program: everything that is neither blank, a comment, nor
@@ -438,7 +438,7 @@ mod tests {
             builder.add_path(found).expect("valid");
         }
 
-        let refused = builder.build().to_sh();
+        let refused = builder.build().plan.to_sh();
 
         assert!(
             matches!(refused, Err(Error::UnresolvedConflicts { count: 1 })),
@@ -459,7 +459,7 @@ mod tests {
             .add_path(found("/w/app", Reach::InRoots, Twin::Normal))
             .expect("valid");
 
-        let script = builder.build().to_sh().expect("no conflicts");
+        let script = builder.build().plan.to_sh().expect("no conflicts");
 
         assert_eq!(
             executable_lines(&script),

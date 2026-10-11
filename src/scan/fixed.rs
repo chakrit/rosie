@@ -71,6 +71,23 @@ impl FixedTargets {
         FixedTargets { located, refused }
     }
 
+    /// Only the paths on the way down to `path` and those at or below it: located ones
+    /// by where they are, refused ones as written.
+    pub fn along(self, path: &Path) -> Self {
+        let on_the_way = |fixed: &Path| path.starts_with(fixed) || fixed.starts_with(path);
+        let located = self
+            .located
+            .into_iter()
+            .filter(|(fixed, _)| on_the_way(fixed))
+            .collect();
+        let refused = self
+            .refused
+            .into_iter()
+            .filter(|(fixed, _)| on_the_way(fixed))
+            .collect();
+        FixedTargets { located, refused }
+    }
+
     /// Only the outermost located paths: one inside another collapses into it, as the
     /// walk would never reach it past a match.
     pub fn outermost(self) -> Self {

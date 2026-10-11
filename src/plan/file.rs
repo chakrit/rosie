@@ -504,7 +504,7 @@ mod tests {
             )
             .expect("valid"),
         );
-        builder.build()
+        builder.build().plan
     }
 
     fn parse_error(text: &str) -> Error {
@@ -688,7 +688,7 @@ mod tests {
             };
             builder.add_path(found).expect("valid");
         }
-        builder.build()
+        builder.build().plan
     }
 
     #[test]

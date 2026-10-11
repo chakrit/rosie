@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::fs::EnterLinks;
-use crate::plan::{WalkSetting, WalkSkip};
+use crate::plan::{AggressiveItems, WalkSetting, WalkSkip};
 use crate::rules::Name;
 use crate::run::elevated;
 
@@ -36,6 +36,9 @@ pub enum UserCommand {
 
     /// Scan, confirm, and run.
     Clean(CleanArgs),
+
+    /// Say, per path, what a plan would do with it.
+    Check(CheckArgs),
 
     /// Execute a plan file, or `-` to read the plan from stdin.
     Run {
@@ -94,6 +97,20 @@ pub struct CleanArgs {
     pub flags: ScanFlags,
 }
 
+/// `rosie check <path>…` takes the flags of `scan`, without `--sh`
+/// (`docs/spec/cli.md#check`).
+#[derive(Debug, Args)]
+pub struct CheckArgs {
+    #[arg(required = true)]
+    pub paths: Vec<PathBuf>,
+
+    #[command(flatten)]
+    pub flags: ScanFlags,
+
+    #[command(flatten)]
+    pub rules: RuleFlags,
+}
+
 #[derive(Debug, Clone, Default, Args)]
 pub struct ScanFlags {
     /// Mark aggressive items `clean`; `cmd_aggressive` replaces `cmd`.
@@ -107,6 +124,16 @@ pub struct ScanFlags {
     /// `none`, `roots`, or `all` (overrides `[walk] enter_links`).
     #[arg(long, global = true, value_name = "LEVEL", value_parser = parse_enter_links)]
     pub enter_links: Option<EnterLinks>,
+}
+
+impl ScanFlags {
+    /// How the plan lists aggressive items: `clean` with `--aggressive`, else `keep`.
+    pub fn aggressive_items(&self) -> AggressiveItems {
+        match self.aggressive {
+            true => AggressiveItems::Clean,
+            false => AggressiveItems::Keep,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -171,7 +198,7 @@ impl Mode {
 }
 
 /// The command-line flag that turns `setting` on.
-fn flag(setting: WalkSetting) -> &'static str {
+pub(super) fn flag(setting: WalkSetting) -> &'static str {
     match setting {
         WalkSetting::Placeholders => "--enter-placeholders",
         WalkSetting::Mounts => "--enter-mounts",

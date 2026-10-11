@@ -6,6 +6,7 @@
 //! once. Nothing below `main` reads the environment.
 
 mod args;
+mod check;
 mod console;
 mod error;
 mod findings;

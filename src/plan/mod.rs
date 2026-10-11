@@ -27,7 +27,9 @@ use crate::shell;
 
 use deletes::Deletes;
 
-pub use builder::{AggressiveItems, PathMatch, PlanBuilder, Reach, ToolCmds, Twin};
+pub use builder::{
+    AggressiveItems, AgreedTiers, Built, PathMatch, PlanBuilder, Reach, ToolCmds, Twin,
+};
 pub use conflict::Disagreement;
 pub use error::Error;
 pub use size::Size;

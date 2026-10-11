@@ -69,7 +69,7 @@ fn report_line(report: &Report) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::{Needs, WalkSkip};
+    use crate::plan::{AgreedTiers, Needs, WalkSkip};
 
     #[test]
     fn a_report_only_item_is_a_skip_naming_its_subject_why_and_the_steps() {
@@ -82,6 +82,7 @@ mod tests {
             skipped: Vec::new(),
             refused: Vec::new(),
             problems: Vec::new(),
+            tiers: AgreedTiers::default(),
         };
 
         assert_eq!(
@@ -103,6 +104,7 @@ mod tests {
             }],
             refused: Vec::new(),
             problems: Vec::new(),
+            tiers: AgreedTiers::default(),
         };
 
         assert_eq!(
@@ -121,6 +123,7 @@ mod tests {
             }],
             refused: Vec::new(),
             problems: Vec::new(),
+            tiers: AgreedTiers::default(),
         };
 
         assert_eq!(

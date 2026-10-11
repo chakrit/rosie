@@ -102,6 +102,55 @@ enum Step<'p> {
 }
 
 impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
+    /// Walks the start folder `root`, whose own `lstat` gave `root_meta`. The folder
+    /// itself is never a target; one that is a dataless placeholder is not opened unless
+    /// the walk may open placeholders.
+    pub fn start<'s>(&'s self, scope: &Scope<'s>, root: PathBuf, root_meta: Metadata) {
+        match root_meta.is_dataless() && !self.flags.enter_placeholders {
+            true => self.log.skip(root, WalkSkip::Closed(Needs::PLACEHOLDERS)),
+            false => self.visit(scope, root, root_meta),
+        }
+    }
+
+    /// Walks from `folder`, whose own `lstat` gave `folder_meta`, down toward `target`,
+    /// a path inside it. Each folder on the way is listed and its next entry judged
+    /// among its siblings exactly as [`TreeWalk::visit`] would judge it, but only that
+    /// entry: the walk goes on toward `target` past a folder it would descend into, and
+    /// any other step on the way, such as a match or a skip, is taken as the walk takes
+    /// it and ends the way down. `target` itself is taken as any entry is, so a folder
+    /// the walk descends into is walked whole.
+    pub fn visit_toward<'s>(
+        &'s self,
+        scope: &Scope<'s>,
+        folder: PathBuf,
+        folder_meta: Metadata,
+        target: &Path,
+    ) {
+        let Some(name) = next_name(&folder, target) else {
+            return;
+        };
+        let names = match Cleanup::read_dir(&folder).perform(self.ctx) {
+            Ok(names) => names,
+            Err(error) => return self.log.entry_failed(folder, error),
+        };
+        let path = folder.join(name);
+        let meta = match Cleanup::lstat(&path).perform(self.ctx) {
+            Ok(meta) => meta,
+            Err(error) => return self.log.entry_failed(path, error),
+        };
+
+        let step = self.step(&path, name, meta, &names, folder_meta);
+        match (path == target, step) {
+            (false, Step::Descend(readable)) => {
+                let inside = readable.path().to_path_buf();
+                if self.walked.first_time(&inside) {
+                    self.visit_toward(scope, inside, meta, target);
+                }
+            }
+            (_, step) => self.take(scope, &path, meta, step, None),
+        }
+    }
+
     /// Lists `folder`, whose own `lstat` gave `folder_meta`, and handles each entry in
     /// it. Each entry's volume is compared with this folder's, so an entry inside a
     /// mount the walk entered is not taken for the root of one.
@@ -386,6 +435,15 @@ fn with_lua<T>(check: impl FnOnce(&LuaSandbox) -> T) -> Result<T, rules::Error> 
         slot.replace(Some(sandbox));
         Ok(checked)
     })
+}
+
+/// The name of the entry of `folder` on the way to `target`; none when `target` is not
+/// inside `folder`.
+fn next_name<'t>(folder: &Path, target: &'t Path) -> Option<&'t OsStr> {
+    let rest = target.strip_prefix(folder).ok()?;
+    rest.components()
+        .next()
+        .map(|component| component.as_os_str())
 }
 
 fn is_bundle(path: &Path) -> bool {

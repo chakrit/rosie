@@ -26,7 +26,7 @@ use thiserror::Error;
 
 use crate::config::Walk;
 use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Paths, UserInput};
-use crate::plan::{self, AggressiveItems, Needs, Plan, PlanBuilder, ToolCmds, WalkSkip, WalkSkips};
+use crate::plan::{self, AggressiveItems, AgreedTiers, Plan, PlanBuilder, ToolCmds, WalkSkips};
 use crate::rules::{RuleId, RuleSet, Shape, Tier, Twin};
 
 pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry, Sealed};
@@ -47,6 +47,14 @@ pub enum Error {
 
     #[error("{path} is not a folder", path = path.display())]
     NotAFolder { path: PathBuf },
+
+    /// The path [`Scanner::path`] was given is refused, such as one through a symlink
+    /// or spelled differently from the disk, or cannot be looked at.
+    #[error(transparent)]
+    PathRefused(fs::Error),
+
+    #[error("{path} does not exist", path = path.display())]
+    Missing { path: PathBuf },
 }
 
 /// What a scan is told beyond the rules: the injected home for `~`, the walk flags
@@ -63,6 +71,8 @@ pub struct Settings {
 #[derive(Debug)]
 pub struct Scan {
     pub plan: Plan,
+    /// The tier the rules of each delete entry agree on; a conflict entry has none.
+    pub tiers: AgreedTiers,
     /// Items a running process executes from, kept out of the plan, sorted by path.
     pub refused: Vec<Refused>,
     /// Paths the walk or the sizing did not enter, sorted by path.
@@ -70,6 +80,13 @@ pub struct Scan {
     /// Errors that cost the scan an item or a rule check, such as a fixed rule path
     /// through a symlink or a failing Lua rule. The rest of the scan went on.
     pub problems: Vec<Problem>,
+}
+
+/// What [`Scanner::path`] found: where the typed path is on disk, and the scan.
+#[derive(Debug)]
+pub struct PathScan {
+    pub path: PathBuf,
+    pub scan: Scan,
 }
 
 impl Scan {
@@ -127,14 +144,57 @@ impl<B: Backend + Sync> Scanner<B> {
             log: &log,
             walked: Walked::starting_at(&root, links),
         };
-        match root_meta.is_dataless() && !self.settings.walk.enter_placeholders {
-            true => log.skip(root, WalkSkip::Closed(Needs::PLACEHOLDERS)),
-            false => rayon::scope(|scope| walk.visit(scope, root, root_meta)),
-        }
+        rayon::scope(|scope| walk.start(scope, root, root_meta));
 
         let found = targets.finish();
         let builder = PlanBuilder::new(self.settings.aggressive);
         Ok(self.assemble(builder, found, log))
+    }
+
+    /// Scans what a plan would hold at, above, and below `path`, a path the user typed,
+    /// refused as [`Scanner::tree`] refuses its folder. The walk starts where a fixed
+    /// path's volume check does, at home for a path under it and at `/` otherwise, and
+    /// goes down toward `path`, judging each folder on the way as a `tree` walk would; at
+    /// `path` it takes the entry as any other, so a folder it would enter is walked whole
+    /// (`docs/spec/cli.md#check`). Only the fixed rule paths on that way, or at or below
+    /// `path`, are looked at.
+    pub fn path<P: Progress>(&self, path: &Path, progress: &P) -> Result<PathScan, Error> {
+        let links = self.settings.walk.enter_links;
+        let real = UserInput::path(path, links)
+            .perform(&self.ctx)
+            .map_err(Error::PathRefused)?;
+        match Cleanup::lstat(&real).perform(&self.ctx) {
+            Ok(_) => {}
+            Err(error) if error.has_vanished() => return Err(Error::Missing { path: real }),
+            Err(error) => return Err(Error::PathRefused(error)),
+        }
+        self.ctx.snapshot_running()?;
+        let anchor = entry::anchor(&real, &self.settings.paths).to_path_buf();
+        let anchor_meta = Cleanup::lstat(&anchor).perform(&self.ctx)?;
+        let log = Log::default();
+        let fixed = FixedTargets::of(&self.rules, &self.settings.paths, &self.ctx, links);
+        let fixed = fixed.under(&anchor).along(&real);
+        let fixed = fixed::by_path(fixed.report_refused(&log));
+
+        let targets = Targets::new(&self.ctx, &log, progress);
+        let walk = TreeWalk {
+            ctx: &self.ctx,
+            rules: &self.rules,
+            fixed: &fixed,
+            flags: self.settings.walk,
+            targets: &targets,
+            log: &log,
+            walked: Walked::starting_at(&anchor, links),
+        };
+        rayon::scope(|scope| match real == anchor {
+            true => walk.start(scope, anchor, anchor_meta),
+            false => walk.visit_toward(scope, anchor, anchor_meta, &real),
+        });
+
+        let found = targets.finish();
+        let builder = PlanBuilder::new(self.settings.aggressive);
+        let scan = self.assemble(builder, found, log);
+        Ok(PathScan { path: real, scan })
     }
 
     /// Scans the fixed rule paths, with `~` taken as the injected home, and lists the
@@ -198,8 +258,10 @@ impl<B: Backend + Sync> Scanner<B> {
 
         let (mut skipped, problems) = log.into_parts();
         skipped.sort_by(|a, b| a.path.cmp(&b.path));
+        let built = builder.build();
         Scan {
-            plan: builder.build(),
+            plan: built.plan,
+            tiers: built.tiers,
             refused: found.refused,
             skipped,
             problems,

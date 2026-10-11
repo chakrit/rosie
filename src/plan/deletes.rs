@@ -40,7 +40,7 @@ impl Deletes {
     /// holds each path once.
     pub(super) fn collapsing<F: Found>(
         found: BTreeMap<PathBuf, F>,
-        finish: impl Fn(F) -> Delete,
+        finish: impl FnMut(F) -> Delete,
     ) -> Deletes {
         let absorbed = outermost(found.into_values(), |outer: &mut F, inner| {
             outer.absorb(inner);

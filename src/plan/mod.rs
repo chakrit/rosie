@@ -6,9 +6,10 @@
 //! [`Runnable`], whose fields are private: the only ways to get one are
 //! [`Plan::runnable_as`] and [`Plan::after_elevation`], which yield only the ticked
 //! entries of one part of a run, and a `Runnable` can only be narrowed from there.
-//! Unticked and blocked entries are kept for the user to see, never executed.
+//! Unticked, blocked, and conflict entries are kept for the user to see, never executed.
 
 mod builder;
+mod conflict;
 mod deletes;
 mod error;
 mod file;
@@ -27,6 +28,7 @@ use crate::shell;
 use deletes::Deletes;
 
 pub use builder::{AggressiveItems, PathMatch, PlanBuilder, Reach, ToolCmds, Twin};
+pub use conflict::Disagreement;
 pub use error::Error;
 pub use size::Size;
 pub use stats::{
@@ -480,26 +482,30 @@ impl ItemKind {
 }
 
 /// Whether a filesystem entry runs.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
     Ticked,
     /// An aggressive item listed without `--aggressive`.
     Unticked,
     /// Outside the `roots` allowlist; shown with a `rosie roots add <path>` hint.
     Blocked,
+    /// Rules disagree on its tier; only a scan produces one, and the user must resolve
+    /// it before anything runs (`docs/spec/plan.md#rule-conflicts`).
+    Conflict(Disagreement),
 }
 
 impl Status {
-    pub fn label(self) -> &'static str {
+    pub fn label(&self) -> &'static str {
         match self {
             Status::Ticked => "ticked",
             Status::Unticked => "unticked",
             Status::Blocked => "blocked",
+            Status::Conflict(_) => "conflict",
         }
     }
 
-    pub fn is_ticked(self) -> bool {
-        self == Status::Ticked
+    pub fn is_ticked(&self) -> bool {
+        *self == Status::Ticked
     }
 }
 

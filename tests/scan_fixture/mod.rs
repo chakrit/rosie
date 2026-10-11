@@ -93,9 +93,8 @@ pub fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
 pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     let bounds = bounds_with_roots(options.roots);
     let ctx = FsContext::new(fake, bounds.clone()).expect("absolute bounds");
-    let home = Paths::new(Path::new(HOME)).expect("absolute home");
     let packs = SettlePacks
-        .run(&Store::new(&ctx, &home, Path::new(DATA)))
+        .run(&Store::new(&ctx, Path::new(DATA)))
         .and_then(|settled| settled.pack_folders())
         .expect("installed packs list");
     let rules = RuleSet::load(&ctx, &RuleLayers::new(packs, &bounds.paths.config_dir()))
@@ -180,7 +179,7 @@ pub fn entries(scan: &Scan) -> Vec<(&str, Vec<&str>, Status)> {
         .map(|delete| {
             let path = delete.path.to_str().expect("utf-8");
             let rules = delete.rules.iter().map(String::as_str).collect();
-            (path, rules, delete.status)
+            (path, rules, delete.status.clone())
         })
         .collect()
 }

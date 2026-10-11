@@ -11,10 +11,9 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::archive::{RULE_EXTENSION, RuleFile};
 use super::error::{Error, Stray};
 use super::source::Source;
-use crate::fs::{self, Backend, FileKind, FsContext, FsOp, Paths, Rosie};
+use crate::fs::{self, Backend, FileKind, FsContext, FsOp, Rosie};
 use crate::rules::Name;
 
 const PACKS_FOLDER: &str = "packs";
@@ -115,7 +114,6 @@ pub(super) fn pulled_text(pulled_at: SystemTime) -> String {
 /// default source from the one download it also reads the config from.
 pub struct Store<'g, B: Backend> {
     ctx: &'g FsContext<B>,
-    paths: Paths,
     dir: PathBuf,
 }
 
@@ -127,40 +125,18 @@ pub struct Installed {
 }
 
 impl<'g, B: Backend> Store<'g, B> {
-    /// `paths` holds the injected home folder, which a rule's `~` stands for;
     /// `data_dir` is rosie's injected data folder, `~/.local/share/rosie`.
-    pub fn new(ctx: &'g FsContext<B>, paths: &Paths, data_dir: &Path) -> Self {
+    pub fn new(ctx: &'g FsContext<B>, data_dir: &Path) -> Self {
         Store {
             ctx,
-            paths: paths.clone(),
             dir: data_dir.join(PACKS_FOLDER),
         }
-    }
-
-    /// The rule files of an installed pack, sorted by name so a duplicate rule's error
-    /// names the same "first" and "second" file on every run, regardless of `read_dir`
-    /// order.
-    pub fn rule_files(&self, source: &Source) -> Result<Vec<RuleFile>, Error> {
-        let pack = self.pack_dir(source);
-        let names = sorted(Rosie::read_dir(&pack).perform(self.ctx)?);
-        names
-            .into_iter()
-            .filter(|name| Path::new(name).extension() == Some(OsStr::new(RULE_EXTENSION)))
-            .map(|name| {
-                let contents = Rosie::read(&pack.join(&name)).perform(self.ctx)?;
-                Ok(RuleFile::new(name, contents))
-            })
-            .collect()
     }
 
     // layout, for the pack actions
 
     pub(super) fn ctx(&self) -> &FsContext<B> {
         self.ctx
-    }
-
-    pub(super) fn paths(&self) -> &Paths {
-        &self.paths
     }
 
     pub(super) fn owner_dir(&self, source: &Source) -> PathBuf {
@@ -373,8 +349,8 @@ mod tests {
     use std::ffi::OsString;
 
     use super::*;
-    use crate::fs::Bounds;
     use crate::fs::fake::{FakeBackend, USER_UID};
+    use crate::fs::{Bounds, Paths};
 
     const DATA: &str = "/Users/me/.local/share/rosie";
     const PACKS: &str = "/Users/me/.local/share/rosie/packs";
@@ -386,8 +362,7 @@ mod tests {
             user_uid: USER_UID,
         };
         let ctx = FsContext::new(fake, bounds).expect("absolute bounds");
-        let paths = Paths::new(Path::new("/Users/me")).expect("absolute paths");
-        Store::new(&ctx, &paths, Path::new(DATA)).unsettled_sources()
+        Store::new(&ctx, Path::new(DATA)).unsettled_sources()
     }
 
     #[test]

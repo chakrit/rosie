@@ -35,9 +35,8 @@ fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
 fn load(fake: &FakeBackend) -> Result<RuleSet, Error> {
     let ctx = ctx(fake);
     let bounds = bounds();
-    let paths = Paths::new(Path::new(HOME)).expect("absolute paths");
     let packs = SettlePacks
-        .run(&Store::new(&ctx, &paths, &bounds.paths.data_dir()))
+        .run(&Store::new(&ctx, &bounds.paths.data_dir()))
         .and_then(|settled| settled.pack_folders())
         .expect("installed packs list");
     RuleSet::load(&ctx, &RuleLayers::new(packs, &bounds.paths.config_dir()))

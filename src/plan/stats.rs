@@ -68,6 +68,8 @@ pub struct PlanStats {
     pub unticked: Tally,
     /// Items outside the roots.
     pub blocked: Tally,
+    /// Items whose rules disagree on their tier, awaiting the user's choice.
+    pub conflicts: Tally,
 }
 
 impl PlanStats {
@@ -76,28 +78,30 @@ impl PlanStats {
         let deletes = plan
             .deletes()
             .iter()
-            .map(|delete| (delete.status, ItemSize::Known(delete.size)));
-        let tools = plan
+            .map(|delete| (&delete.status, ItemSize::Known(delete.size)));
+        let commands = plan
             .tools()
             .iter()
-            .map(|tool| (tool.selection.into(), ItemSize::Unknown));
-        let receipts = plan
-            .receipts()
-            .iter()
-            .map(|receipt| (receipt.selection.into(), ItemSize::Unknown));
+            .map(|tool| tool.selection)
+            .chain(plan.receipts().iter().map(|receipt| receipt.selection))
+            .map(|selection| (Status::from(selection), ItemSize::Unknown));
 
         let mut stats = PlanStats::default();
-        for (status, size) in deletes.chain(tools).chain(receipts) {
+        for (status, size) in deletes {
             stats.bucket(status).add(size);
+        }
+        for (status, size) in commands {
+            stats.bucket(&status).add(size);
         }
         stats
     }
 
-    fn bucket(&mut self, status: Status) -> &mut Tally {
+    fn bucket(&mut self, status: &Status) -> &mut Tally {
         match status {
             Status::Ticked => &mut self.ticked,
             Status::Unticked => &mut self.unticked,
             Status::Blocked => &mut self.blocked,
+            Status::Conflict(_) => &mut self.conflicts,
         }
     }
 }
@@ -110,6 +114,13 @@ impl fmt::Display for PlanStats {
         }
         if !self.blocked.is_empty() {
             writeln!(f, "blocked (outside roots, not run): {}", self.blocked)?;
+        }
+        if !self.conflicts.is_empty() {
+            writeln!(
+                f,
+                "conflicts (rules disagree, resolve before running): {}",
+                self.conflicts
+            )?;
         }
         Ok(())
     }
@@ -549,6 +560,7 @@ mod tests {
                 ticked: tally(5, 3_800, 2),
                 unticked: tally(2, 40_000, 1),
                 blocked: tally(1, 7, 0),
+                conflicts: Tally::default(),
             }
         );
     }

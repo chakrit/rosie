@@ -304,7 +304,7 @@ fn fixed_paths_get_the_same_marks_as_walked_ones() {
         .plan
         .deletes()
         .iter()
-        .map(|d| (d.path.to_str().expect("utf-8"), d.status, d.run_as))
+        .map(|d| (d.path.to_str().expect("utf-8"), d.status.clone(), d.run_as))
         .collect();
     assert_eq!(
         marks,

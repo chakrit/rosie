@@ -47,7 +47,7 @@ fn deletes(scanned: &Scan) -> Vec<(String, Status)> {
         .plan
         .deletes()
         .iter()
-        .map(|delete| (delete.path.display().to_string(), delete.status))
+        .map(|delete| (delete.path.display().to_string(), delete.status.clone()))
         .collect()
 }
 

@@ -8,7 +8,6 @@
 mod actions;
 mod age;
 mod archive;
-mod conflict;
 mod error;
 mod network;
 mod source;
@@ -18,7 +17,6 @@ use std::time::SystemTime;
 
 use actions::download_archive::DownloadArchive;
 use actions::install_pack::InstallPack;
-use conflict::PackRules;
 
 use crate::fs::Backend;
 
@@ -26,7 +24,6 @@ pub use actions::remove_pack::RemovePack;
 pub use actions::settle_packs::{SettlePacks, Settled};
 pub use age::{AgeWarning, MONTH, age_warning};
 pub use archive::{Archive, RuleFile};
-pub use conflict::Conflict;
 pub use error::{Error, Refusal, Stray};
 pub use network::{Https, Network};
 pub use source::Source;
@@ -36,8 +33,6 @@ pub use store::{Installed, Store};
 #[derive(Debug)]
 pub struct Pulled {
     pub source: Source,
-    /// Pulled rules that duplicate rules of other installed packs, to warn about.
-    pub conflicts: Vec<Conflict>,
 }
 
 /// What the first-run check did.
@@ -111,27 +106,23 @@ pub fn seed_config<B: Backend, N: Network>(
     Ok(Seed { config, first_run })
 }
 
-/// Checks a downloaded pack against the other installed packs, then installs it.
+/// Checks a downloaded pack's rules load, then installs it.
 fn install<B: Backend>(
     settled: &Settled<B>,
     source: &Source,
     archive: &Archive,
     now: SystemTime,
 ) -> Result<Pulled, Error> {
-    let store = settled.store();
-    let installed = settled.sources()?;
-    let pulled_rules = PackRules::load(source, archive.rules())?;
-    let conflicts = conflicts_with_others(store, source, &pulled_rules, &installed)?;
+    archive.check_rules(source)?;
 
     InstallPack {
         source,
         rules: archive.rules(),
         pulled_at: now,
     }
-    .run(store)?;
+    .run(settled.store())?;
     Ok(Pulled {
         source: source.clone(),
-        conflicts,
     })
 }
 
@@ -160,21 +151,4 @@ fn installed_spelling<'a>(installed: &'a [Source], requested: &'a Source) -> &'a
         Some(installed) => installed,
         None => requested,
     }
-}
-
-fn conflicts_with_others<B: Backend>(
-    store: &Store<B>,
-    source: &Source,
-    pulled: &PackRules,
-    installed: &[Source],
-) -> Result<Vec<Conflict>, Error> {
-    let others = installed.iter().filter(|other| *other != source);
-    let per_pack = others
-        .map(|other| {
-            let rules = PackRules::load(other, &store.rule_files(other)?)?;
-            Ok(pulled.conflicts_with(&rules, store.paths()))
-        })
-        .collect::<Result<Vec<_>, Error>>()?;
-
-    Ok(per_pack.into_iter().flatten().collect())
 }

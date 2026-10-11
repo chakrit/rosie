@@ -322,11 +322,10 @@ fn refuses_a_rules_path_that_is_not_a_folder() {
     assert!(
         matches!(
             &result,
-            Err(Error::WrongKind {
+            Err(Error::Fs(rosie::fs::Error::NotAFolder {
                 found: "file",
-                expected: "folder",
                 ..
-            })
+            }))
         ),
         "{:?}",
         result.err()

@@ -3,18 +3,18 @@
 
 use std::path::{Path, PathBuf};
 
-use super::args::{CleanArgs, Mode, PlanSource, RuleFlags, ScanArgs, ScanFlags};
+use super::args::{CleanArgs, Mode, PlanSource, ScanArgs, ScanFlags};
 use super::console::{Console, Finish, PromptError};
 use super::findings::{findings_lines, stats_lines};
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps;
-use crate::config::{ConfigFile, Walk};
+use crate::config::ConfigFile;
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::packs::Network;
 use crate::plan::{ItemSize, Outcome, Plan, Selection, SkipReason, WalkSkips};
 use crate::run::{Elevation, Runner};
-use crate::scan::{Refused, Scan, Scanner, Settings};
+use crate::scan::{Refused, Scan};
 
 /// What the scan behind a run skipped, which the end-of-run stats count beside the
 /// run's own items (`docs/spec/plan.md#stats`). A saved plan's run has none.
@@ -147,46 +147,36 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         flags: &ScanFlags,
         app_usage: &str,
     ) -> Result<Scan, Error> {
-        let settings = Settings {
-            walk: walk_with_scan_flags(config.config().walk, flags),
-            aggressive: flags.aggressive_items(),
-        };
-        let ctx = self.roots_ctx(config.config())?;
+        let settings = flags.settings(config.config().walk);
 
         match mode {
             Mode::Tree { dir, rules } => {
-                let settings = Settings {
-                    walk: walk_with_rule_flags(settings.walk, rules),
-                    ..settings
-                };
-                let rules = self.rules(&rules.only)?;
+                let scanner = self.rule_scanner(config.config(), settings, rules)?;
                 let dir = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
-                let scanner = Scanner::new(ctx, rules, settings);
                 let progress = self.console.progress();
                 let scan = scanner.tree(&dir, &progress);
                 progress.finish()?;
                 Ok(scan?)
             }
             Mode::Caches { rules } => {
-                let settings = Settings {
-                    walk: walk_with_rule_flags(settings.walk, rules),
-                    ..settings
-                };
-                let rules = self.rules(&rules.only)?;
-                let scanner = Scanner::new(ctx, rules, settings);
+                let scanner = self.rule_scanner(config.config(), settings, rules)?;
                 let progress = self.console.progress();
                 let scan = scanner.caches(&progress);
                 progress.finish()?;
                 Ok(scan?)
             }
             Mode::App { app } => {
+                let ctx = self.roots_ctx(config.config())?;
                 let app = match app {
                     Some(app) => self.absolute(app),
                     None => self.pick_app(&ctx, app_usage)?,
                 };
                 Ok(apps::scan_app(&ctx, &app, &settings)?)
             }
-            Mode::Orphans => Ok(apps::scan_orphans(&ctx, &settings)?),
+            Mode::Orphans => {
+                let ctx = self.roots_ctx(config.config())?;
+                Ok(apps::scan_orphans(&ctx, &settings)?)
+            }
         }
     }
 
@@ -317,25 +307,5 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     fn show_stats(&mut self, plan: &Plan, skips: WalkSkips) -> Result<(), Error> {
         self.note(stats_lines(plan, skips).trim_end())?;
         Ok(())
-    }
-}
-
-/// The config's `[walk]` settings, with `enter_mounts` turned on by `--enter-mounts`
-/// and `enter_links` replaced by `--enter-links` (`docs/spec/safety.md#walk-skips`).
-pub(super) fn walk_with_scan_flags(config: Walk, flags: &ScanFlags) -> Walk {
-    let enter_links = flags.enter_links.unwrap_or(config.enter_links);
-    Walk {
-        enter_mounts: config.enter_mounts || flags.enter_mounts,
-        enter_links,
-        ..config
-    }
-}
-
-/// `walk`, with `enter_bundles` and `enter_placeholders` each turned on by its CLI flag.
-pub(super) fn walk_with_rule_flags(walk: Walk, flags: &RuleFlags) -> Walk {
-    Walk {
-        enter_bundles: walk.enter_bundles || flags.enter_bundles,
-        enter_placeholders: walk.enter_placeholders || flags.enter_placeholders,
-        ..walk
     }
 }

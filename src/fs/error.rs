@@ -78,6 +78,9 @@ pub enum Error {
     #[error("cannot check for running processes: {reason}")]
     RunningUnknown { reason: String },
 
+    #[error("{path} is a {found}, not a folder", path = path.display())]
+    NotAFolder { path: PathBuf, found: &'static str },
+
     #[error("{path} is outside rosie's own folders", path = path.display())]
     OutsideOwnData { path: PathBuf },
 
@@ -97,6 +100,12 @@ impl Error {
             Error::Io { source, .. }
                 if matches!(source.kind(), io::ErrorKind::NotFound | io::ErrorKind::NotADirectory)
         )
+    }
+
+    /// Whether this error says the path itself does not exist. Unlike
+    /// [`Error::has_vanished`], a parent that is not a folder does not count.
+    pub fn is_not_found(&self) -> bool {
+        matches!(self, Error::Io { source, .. } if source.kind() == io::ErrorKind::NotFound)
     }
 
     /// Whether this error is the system refusing rosie access to a path.

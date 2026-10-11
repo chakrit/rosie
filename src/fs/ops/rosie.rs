@@ -3,10 +3,10 @@
 //! any component (`docs/spec/safety.md#rosies-own-data`).
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{FsOp, sealed};
-use crate::fs::backend::{Backend, Metadata};
+use crate::fs::backend::{Backend, FileKind, Metadata};
 use crate::fs::context::FsContext;
 use crate::fs::error::Error;
 
@@ -17,6 +17,14 @@ impl Rosie {
     /// Lists a folder under rosie's own folders.
     pub fn read_dir(path: &Path) -> ReadDir<'_> {
         ReadDir { path }
+    }
+
+    /// Lists a folder under rosie's own folders: every entry with its kind, in name
+    /// order, whatever the backend's own order; none when the folder is missing. The
+    /// folder is `lstat`ed, with no symlink anywhere on its path, before it is listed,
+    /// and refused when it is not a folder.
+    pub fn entries(path: &Path) -> Entries<'_> {
+        Entries { path }
     }
 
     /// `lstat`s an entry under rosie's own folders, such as one found listing a folder. A
@@ -70,6 +78,10 @@ pub struct ReadDir<'p> {
     path: &'p Path,
 }
 
+pub struct Entries<'p> {
+    path: &'p Path,
+}
+
 pub struct Lstat<'p> {
     path: &'p Path,
 }
@@ -106,6 +118,7 @@ pub struct Delete<'p> {
 }
 
 impl sealed::Sealed for ReadDir<'_> {}
+impl sealed::Sealed for Entries<'_> {}
 impl sealed::Sealed for Lstat<'_> {}
 impl sealed::Sealed for LstatLinkFree<'_> {}
 impl sealed::Sealed for Read<'_> {}
@@ -120,6 +133,35 @@ impl<B: Backend> FsOp<B> for ReadDir<'_> {
 
     fn perform(self, ctx: &FsContext<B>) -> Result<Vec<OsString>, Error> {
         ctx.read_own_dir(self.path)
+    }
+}
+
+impl<B: Backend> FsOp<B> for Entries<'_> {
+    type Output = Vec<(PathBuf, FileKind)>;
+
+    fn perform(self, ctx: &FsContext<B>) -> Result<Vec<(PathBuf, FileKind)>, Error> {
+        match Rosie::lstat_link_free(self.path).perform(ctx) {
+            Ok(meta) if meta.kind == FileKind::Dir => {}
+            Ok(meta) => {
+                return Err(Error::NotAFolder {
+                    path: self.path.into(),
+                    found: meta.kind.label(),
+                });
+            }
+            Err(error) if error.is_not_found() => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        }
+
+        let mut names = Rosie::read_dir(self.path).perform(ctx)?;
+        names.sort();
+        names
+            .into_iter()
+            .map(|name| {
+                let path = self.path.join(name);
+                let meta = Rosie::lstat(&path).perform(ctx)?;
+                Ok((path, meta.kind))
+            })
+            .collect()
     }
 }
 

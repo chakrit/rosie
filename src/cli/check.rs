@@ -16,7 +16,6 @@ use std::path::Path;
 use super::args::{CheckArgs, flag};
 use super::console::{Console, Finish};
 use super::findings::problem_line;
-use super::scan::{walk_with_rule_flags, walk_with_scan_flags};
 use super::session::Session;
 use super::{Error, ExitStatus};
 use crate::apps;
@@ -36,17 +35,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn check(&mut self, args: CheckArgs) -> Result<ExitStatus, Error> {
         let config = self.config()?;
         // The settings `rosie scan app` runs with under the same flags.
-        let app_mode = Settings {
-            walk: walk_with_scan_flags(config.config().walk, &args.flags),
-            aggressive: args.flags.aggressive_items(),
-        };
-        let settings = Settings {
-            walk: walk_with_rule_flags(app_mode.walk, &args.rules),
-            ..app_mode
-        };
-        let rules = self.rules(&args.rules.only)?;
-        let ctx = self.roots_ctx(config.config())?;
-        let scanner = Scanner::new(ctx, rules, settings);
+        let app_mode = args.flags.settings(config.config().walk);
+        let scanner = self.rule_scanner(config.config(), app_mode, &args.rules)?;
 
         let mut lines = Vec::new();
         for typed in &args.paths {

@@ -13,7 +13,6 @@ mod document;
 pub mod keys;
 pub mod roots;
 
-use std::io;
 use std::path::{Path, PathBuf};
 use std::str::Utf8Error;
 
@@ -285,9 +284,9 @@ fn validate_shape(document: &DocumentMut, path: &Path) -> Result<(), Error> {
 }
 
 fn load_error(source: fs::Error) -> Error {
-    match &source {
-        fs::Error::Io { source: io, .. } if io.kind() == io::ErrorKind::NotFound => Error::NotFound,
-        _ => Error::Fs(source),
+    match source.is_not_found() {
+        true => Error::NotFound,
+        false => Error::Fs(source),
     }
 }
 

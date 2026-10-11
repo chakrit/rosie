@@ -25,14 +25,14 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::config::Walk;
-use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, UserInput};
+use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, UserInput};
 use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder, WalkSkips};
 use crate::rules::{RuleId, RuleSet, Shape};
 use crate::tier::Tier;
 
 pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry, Sealed};
 pub use log::{Log, Problem, Skipped};
-pub use progress::{NoProgress, Progress, StderrProgress};
+pub use progress::{NoProgress, Progress};
 pub use refusal::Refused;
 pub(crate) use refusal::{RefusedItems, Verdict, screen};
 pub use sizing::{Measure, Sizer};
@@ -135,26 +135,8 @@ impl<B: Backend + Sync> Scanner<B> {
             return Err(Error::NotAFolder { path: root });
         }
         self.ctx.snapshot_running()?;
-        let log = Log::default();
-        let links = self.settings.walk.enter_links;
-        let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
-        let fixed = fixed::by_path(fixed.under(&root).report_refused(&log));
 
-        let targets = Targets::new(&self.ctx, &log, progress);
-        let walk = TreeWalk {
-            ctx: &self.ctx,
-            rules: &self.rules,
-            fixed: &fixed,
-            flags: self.settings.walk,
-            targets: &targets,
-            log: &log,
-            walked: Walked::starting_at(&root, links),
-        };
-        rayon::scope(|scope| walk.start(scope, root, root_meta));
-
-        let found = targets.finish();
-        let builder = PlanBuilder::new(self.settings.aggressive);
-        Ok(self.assemble(builder, found, log))
+        Ok(self.walk_toward(&root, root_meta, &root, progress))
     }
 
     /// Scans what a plan would hold at, above, and below `path`, a path the user typed,
@@ -177,29 +159,8 @@ impl<B: Backend + Sync> Scanner<B> {
         self.ctx.snapshot_running()?;
         let anchor = entry::anchor(&real, self.ctx.paths()).to_path_buf();
         let anchor_meta = Cleanup::lstat(&anchor).perform(&self.ctx)?;
-        let log = Log::default();
-        let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
-        let fixed = fixed.under(&anchor).along(&real);
-        let fixed = fixed::by_path(fixed.report_refused(&log));
 
-        let targets = Targets::new(&self.ctx, &log, progress);
-        let walk = TreeWalk {
-            ctx: &self.ctx,
-            rules: &self.rules,
-            fixed: &fixed,
-            flags: self.settings.walk,
-            targets: &targets,
-            log: &log,
-            walked: Walked::starting_at(&anchor, links),
-        };
-        rayon::scope(|scope| match real == anchor {
-            true => walk.start(scope, anchor, anchor_meta),
-            false => walk.visit_toward(scope, anchor, anchor_meta, &real),
-        });
-
-        let found = targets.finish();
-        let builder = PlanBuilder::new(self.settings.aggressive);
-        let scan = self.assemble(builder, found, log);
+        let scan = self.walk_toward(&anchor, anchor_meta, &real, progress);
         Ok(PathScan { path: real, scan })
     }
 
@@ -230,6 +191,45 @@ impl<B: Backend + Sync> Scanner<B> {
         let mut builder = PlanBuilder::new(self.settings.aggressive);
         self.add_tools(&mut builder);
         Ok(self.assemble(builder, found, log))
+    }
+
+    /// Walks from `start`, whose own `lstat` gave `start_meta`, down toward `target`, at
+    /// or below it, judging each folder on the way as a `tree` walk would, and takes
+    /// `target` as any other entry; a `tree` walk is the one whose target is its start.
+    /// Only the fixed rule paths under `start`, on the way to `target` or at or below it,
+    /// are looked at.
+    fn walk_toward<P: Progress>(
+        &self,
+        start: &Path,
+        start_meta: Metadata,
+        target: &Path,
+        progress: &P,
+    ) -> Scan {
+        let log = Log::default();
+        let links = self.settings.walk.enter_links;
+        let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
+        let fixed = fixed.under(start).along(target);
+        let fixed = fixed::by_path(fixed.report_refused(&log));
+
+        let targets = Targets::new(&self.ctx, &log, progress);
+        let walk = TreeWalk {
+            ctx: &self.ctx,
+            rules: &self.rules,
+            fixed: &fixed,
+            flags: self.settings.walk,
+            targets: &targets,
+            log: &log,
+            walked: Walked::starting_at(start, links),
+        };
+        let start = start.to_path_buf();
+        rayon::scope(|scope| match start == target {
+            true => walk.start(scope, start, start_meta),
+            false => walk.visit_toward(scope, start, start_meta, target),
+        });
+
+        let found = targets.finish();
+        let builder = PlanBuilder::new(self.settings.aggressive);
+        self.assemble(builder, found, log)
     }
 
     // plan

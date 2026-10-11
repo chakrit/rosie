@@ -5,7 +5,6 @@
 //! other reader of the packs folder takes the same list.
 
 use std::collections::BTreeMap;
-use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use super::error::{Error, Problem};
@@ -14,7 +13,7 @@ use super::name::{Name, NameError, RuleId};
 use super::pack::load_pack;
 use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
-use crate::fs::{self, Backend, FileKind, FsContext, FsOp, Rosie};
+use crate::fs::{Backend, FileKind, FsContext, FsOp, Rosie};
 
 /// A pulled pack's name and the folder holding its `*.toml` rule files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -172,7 +171,7 @@ fn read_rule_files<B: Backend>(
 /// The `*.toml` files in `dir`, in name order; none when `dir` is missing. Other entries
 /// are passed over; a `*.toml` entry that is not a regular file is refused.
 fn rule_files<B: Backend>(ctx: &FsContext<B>, dir: &Path) -> Result<Vec<PathBuf>, Error> {
-    let entries = entries(ctx, dir)?;
+    let entries = Rosie::entries(dir).perform(ctx)?;
     let mut files = Vec::new();
     for (path, kind) in entries {
         let is_toml = path
@@ -191,34 +190,4 @@ fn rule_files<B: Backend>(ctx: &FsContext<B>, dir: &Path) -> Result<Vec<PathBuf>
         }
     }
     Ok(files)
-}
-
-/// Every entry of a folder with its kind, in name order. The folder is `lstat`ed, with
-/// no symlink anywhere on its path, before it is listed.
-fn entries<B: Backend>(ctx: &FsContext<B>, dir: &Path) -> Result<Vec<(PathBuf, FileKind)>, Error> {
-    match Rosie::lstat_link_free(dir).perform(ctx) {
-        Ok(meta) if meta.kind == FileKind::Dir => {}
-        Ok(meta) => {
-            return Err(Error::WrongKind {
-                path: dir.into(),
-                found: meta.kind.label(),
-                expected: "folder",
-            });
-        }
-        Err(fs::Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound => {
-            return Ok(Vec::new());
-        }
-        Err(error) => return Err(error.into()),
-    }
-
-    let mut names = Rosie::read_dir(dir).perform(ctx)?;
-    names.sort();
-    names
-        .into_iter()
-        .map(|name| {
-            let path = dir.join(name);
-            let meta = Rosie::lstat(&path).perform(ctx)?;
-            Ok((path, meta.kind))
-        })
-        .collect()
 }

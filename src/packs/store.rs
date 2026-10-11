@@ -6,14 +6,13 @@
 //! each copy means is set out on [`Store`].
 
 use std::collections::BTreeSet;
-use std::ffi::{OsStr, OsString};
-use std::io::ErrorKind;
+use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use super::error::{Error, Stray};
 use super::source::Source;
-use crate::fs::{self, Backend, FileKind, FsContext, FsOp, Rosie};
+use crate::fs::{Backend, FileKind, FsContext, FsOp, Rosie};
 use crate::rules::Name;
 
 const PACKS_FOLDER: &str = "packs";
@@ -192,7 +191,7 @@ impl<'g, B: Backend> Store<'g, B> {
     pub(super) fn exists(&self, path: &Path) -> Result<bool, Error> {
         match Rosie::lstat(path).perform(self.ctx) {
             Ok(_) => Ok(true),
-            Err(fs::Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound => Ok(false),
+            Err(error) if error.is_not_found() => Ok(false),
             Err(error) => Err(error.into()),
         }
     }
@@ -206,8 +205,8 @@ impl<'g, B: Backend> Store<'g, B> {
 
     /// Every entry of every owner's folder, `<packs>/<owner>/<entry>`, as what it is.
     fn owner_entries(&self) -> Result<Vec<OwnerEntry>, Error> {
-        let owners = self
-            .entries(&self.dir)?
+        let owners = Rosie::entries(&self.dir)
+            .perform(self.ctx)?
             .into_iter()
             .map(|(path, kind)| top_entry(&path, kind))
             .collect::<Result<Vec<_>, _>>()?;
@@ -217,40 +216,11 @@ impl<'g, B: Backend> Store<'g, B> {
             let TopEntry::Owner(owner) = owner else {
                 continue;
             };
-            for (path, kind) in self.entries(&self.dir.join(owner.as_str()))? {
+            for (path, kind) in Rosie::entries(&self.dir.join(owner.as_str())).perform(self.ctx)? {
                 held.push(owner_entry(&owner, &path, kind)?);
             }
         }
         Ok(held)
-    }
-
-    /// Every entry of a folder of the packs tree with its kind, in name order; none
-    /// when the folder is missing. The folder is `lstat`ed, with no symlink anywhere on
-    /// its path, before it is listed.
-    fn entries(&self, dir: &Path) -> Result<Vec<(PathBuf, FileKind)>, Error> {
-        match Rosie::lstat_link_free(dir).perform(self.ctx) {
-            Ok(meta) if meta.kind == FileKind::Dir => {}
-            Ok(meta) => {
-                return Err(Error::NotAFolder {
-                    path: dir.into(),
-                    found: meta.kind.label(),
-                });
-            }
-            Err(fs::Error::Io { source, .. }) if source.kind() == ErrorKind::NotFound => {
-                return Ok(Vec::new());
-            }
-            Err(error) => return Err(error.into()),
-        }
-
-        let names = sorted(Rosie::read_dir(dir).perform(self.ctx)?);
-        names
-            .into_iter()
-            .map(|name| {
-                let path = dir.join(name);
-                let meta = Rosie::lstat(&path).perform(self.ctx)?;
-                Ok((path, meta.kind))
-            })
-            .collect()
     }
 
     pub(super) fn installed_from(&self, source: Source) -> Result<Installed, Error> {
@@ -338,19 +308,12 @@ fn stray(path: &Path, problem: Stray) -> Error {
     }
 }
 
-/// `names` in a fixed order, independent of the backend's own `read_dir` order.
-fn sorted(mut names: Vec<OsString>) -> Vec<OsString> {
-    names.sort();
-    names
-}
-
 #[cfg(test)]
 mod tests {
-    use std::ffi::OsString;
 
     use super::*;
     use crate::fs::fake::{FakeBackend, USER_UID};
-    use crate::fs::{Bounds, Paths};
+    use crate::fs::{self, Bounds, Paths};
 
     const DATA: &str = "/Users/me/.local/share/rosie";
     const PACKS: &str = "/Users/me/.local/share/rosie/packs";
@@ -423,27 +386,11 @@ mod tests {
         let result = listed(&fake);
 
         assert!(
-            matches!(&result, Err(Error::NotAFolder { found: "file", .. })),
+            matches!(
+                &result,
+                Err(Error::Fs(fs::Error::NotAFolder { found: "file", .. }))
+            ),
             "{result:?}"
-        );
-    }
-
-    #[test]
-    fn sorts_names_regardless_of_read_dir_order() {
-        let names: Vec<OsString> = ["c.toml", "a.toml", "b.toml"]
-            .into_iter()
-            .map(OsString::from)
-            .collect();
-
-        let sorted_names = sorted(names);
-
-        assert_eq!(
-            sorted_names,
-            vec![
-                OsString::from("a.toml"),
-                OsString::from("b.toml"),
-                OsString::from("c.toml"),
-            ]
         );
     }
 }

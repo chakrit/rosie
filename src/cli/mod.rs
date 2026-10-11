@@ -11,6 +11,7 @@ mod console;
 mod error;
 mod findings;
 mod manage;
+mod progress;
 mod root;
 mod scan;
 mod session;

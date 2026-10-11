@@ -5,10 +5,12 @@ use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
 
+use crate::config::Walk;
 use crate::fs::EnterLinks;
 use crate::plan::{AggressiveItems, WalkSetting, WalkSkip};
 use crate::rules::Name;
 use crate::run::elevated;
+use crate::scan::Settings;
 
 #[derive(Debug, Parser)]
 #[command(name = "rosie", version, about = "A macOS cleanup CLI for developers.")]
@@ -134,6 +136,23 @@ impl ScanFlags {
             false => AggressiveItems::Keep,
         }
     }
+
+    /// The settings every scan mode starts from, and the ones `app` and `orphans` scan
+    /// with: the config's `[walk]` settings, with `enter_mounts` turned on by
+    /// `--enter-mounts` and `enter_links` replaced by `--enter-links`
+    /// (`docs/spec/safety.md#walk-skips`).
+    pub fn settings(&self, walk: Walk) -> Settings {
+        let enter_links = self.enter_links.unwrap_or(walk.enter_links);
+        let walk = Walk {
+            enter_mounts: walk.enter_mounts || self.enter_mounts,
+            enter_links,
+            ..walk
+        };
+        Settings {
+            walk,
+            aggressive: self.aggressive_items(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Subcommand)]
@@ -230,6 +249,17 @@ pub struct RuleFlags {
     /// Open dataless cloud placeholders (overrides `[walk] enter_placeholders`).
     #[arg(long)]
     pub enter_placeholders: bool,
+}
+
+impl RuleFlags {
+    /// `walk`, with `enter_bundles` and `enter_placeholders` each turned on by its flag.
+    pub fn applied_to(&self, walk: Walk) -> Walk {
+        Walk {
+            enter_bundles: walk.enter_bundles || self.enter_bundles,
+            enter_placeholders: walk.enter_placeholders || self.enter_placeholders,
+            ..walk
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

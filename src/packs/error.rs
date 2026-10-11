@@ -89,9 +89,6 @@ pub enum Error {
     )]
     StrayEntry { path: PathBuf, problem: Stray },
 
-    #[error("{path} is a {found}, not a folder", path = path.display())]
-    NotAFolder { path: PathBuf, found: &'static str },
-
     #[error("no pack named {pack} is installed")]
     NotInstalled { pack: String },
 

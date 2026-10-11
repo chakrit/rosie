@@ -4,7 +4,7 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use super::args::UserCommand;
+use super::args::{RuleFlags, UserCommand};
 use super::console::Console;
 use super::root::refuse_root;
 use super::{Env, Error, ExitStatus};
@@ -12,6 +12,7 @@ use crate::config::{self, Config, ConfigFile};
 use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, UserInput};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
 use crate::rules::{Name, RuleLayers, RuleSet};
+use crate::scan::{Scanner, Settings};
 
 /// Proof that stdin and stdout are terminals, which [`Session::pick`] takes: only
 /// [`Session::picker`] makes one.
@@ -152,6 +153,24 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             .paths
             .bounds(config.roots.clone(), self.own.user_uid());
         Ok(FsContext::new(self.backend, bounds)?)
+    }
+
+    /// The scanner of the rule-driven scans, `tree`, `caches` and `check`: the roots
+    /// context, the rules `flags` keep, and `settings` with `flags` applied to its walk.
+    pub fn rule_scanner(
+        &mut self,
+        config: &Config,
+        settings: Settings,
+        flags: &RuleFlags,
+    ) -> Result<Scanner<&'a B>, Error> {
+        let ctx = self.roots_ctx(config)?;
+        let rules = self.rules(&flags.only)?;
+
+        let settings = Settings {
+            walk: flags.applied_to(settings.walk),
+            ..settings
+        };
+        Ok(Scanner::new(ctx, rules, settings))
     }
 
     pub fn store(&self) -> Store<'_, &'a B> {

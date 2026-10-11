@@ -6,10 +6,11 @@ use std::io::{self, IsTerminal, Read, Stderr, Stdout, Write};
 
 use inquire::{InquireError, MultiSelect, Select, Text};
 
+use super::progress::StderrProgress;
 use crate::fs::Argv;
 use crate::run::elevated::Stdin;
 use crate::run::{ItemResult, OutputWindow, PlainReporter, Reporter, TerminalReporter};
-use crate::scan::{Progress, StderrProgress};
+use crate::scan::Progress;
 
 /// Which standard streams are terminals.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

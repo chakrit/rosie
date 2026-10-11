@@ -1,12 +1,15 @@
 //! Screening every found item through the context's own delete checks, in every scan
 //! mode: tree, caches, app, and orphans. The context decides; a scan only turns its
-//! verdict into a plan entry (`docs/spec/safety.md#running-processes`, `#roots`):
+//! verdict into a plan entry (`docs/spec/safety.md#running-processes`, `#roots`,
+//! `#elevation`):
 //!
 //! - an item the checks pass is planned inside the roots;
 //! - one outside the roots is planned `outside-roots`, with its `rosie roots add` hint;
 //! - one a process runs a program from is left out of the plan, sized, and reported;
 //! - a mount point is a walk skip, never planned (`docs/spec/safety.md#walk-skips`);
 //! - one the checks refuse otherwise is a scan problem.
+//!
+//! A planned item is marked `sudo` when the user does not own it.
 //!
 //! A refused item is sized too, for the end-of-run stats, by a sizer of its own: a file
 //! it shares with a planned item still weighs in the plan, and its bytes stay out of the
@@ -18,35 +21,11 @@ use std::sync::{Mutex, MutexGuard};
 use rayon::Scope;
 
 use super::entry::Entry;
-use super::log::{Log, SizingLog};
+use super::log::{Log, Problem, SizingLog};
 use super::progress::NoProgress;
 use super::sizing::{Measure, Sizer};
 use crate::fs::{self, Backend, Cleanup, FsContext};
-use crate::plan::{Reach, Size, WalkSkip};
-
-/// What the context's delete checks say about a found item.
-#[derive(Debug)]
-pub(crate) enum Verdict {
-    Planned(Reach),
-    Running {
-        pid: u32,
-        program: PathBuf,
-    },
-    /// Never planned, whatever the settings; logged as a walk skip.
-    Skipped(WalkSkip),
-    Problem(fs::Error),
-}
-
-/// Runs the delete checks on a found item without deleting it.
-pub(crate) fn screen<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Verdict {
-    match Cleanup::delete(path).verify(ctx) {
-        Ok(()) => Verdict::Planned(Reach::InRoots),
-        Err(fs::Error::OutsideRoots { .. }) => Verdict::Planned(Reach::OutsideRoots),
-        Err(fs::Error::Running { pid, program, .. }) => Verdict::Running { pid, program },
-        Err(fs::Error::CrossesVolume { .. }) => Verdict::Skipped(WalkSkip::SealedMount),
-        Err(error) => Verdict::Problem(error),
-    }
-}
+use crate::plan::{Reach, RunAs, Size, WalkSkip};
 
 /// An item left out of the plan because a process runs a program from inside it.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,10 +41,19 @@ pub struct Refused {
     pub size: Size,
 }
 
-/// Sizes the refused items of one scan, from any of its workers.
-pub(crate) struct RefusedItems<'a, B: Backend> {
-    sizer: Sizer<'a, B, NoProgress>,
+/// Screens the items one scan found, from any of its workers, and sizes the refused.
+pub(crate) struct Screening<'a, B: Backend> {
+    ctx: &'a FsContext<B>,
+    log: &'a Log,
+    refused_sizer: Sizer<'a, B, NoProgress>,
     refused: Mutex<Vec<(Pending, Measure)>>,
+}
+
+/// A found item the delete checks let into the plan, with the marks they give it.
+pub(crate) struct Admitted {
+    pub entry: Entry,
+    pub reach: Reach,
+    pub run_as: RunAs,
 }
 
 /// A refused item before its size is final.
@@ -76,32 +64,64 @@ struct Pending {
     program: PathBuf,
 }
 
-impl<'a, B: Backend + Sync> RefusedItems<'a, B> {
+/// What the context's delete checks say about a found item.
+#[derive(Debug)]
+enum Verdict {
+    Planned(Reach),
+    Running {
+        pid: u32,
+        program: PathBuf,
+    },
+    /// Never planned, whatever the settings; logged as a walk skip.
+    Skipped(WalkSkip),
+    Problem(fs::Error),
+}
+
+impl<'a, B: Backend + Sync> Screening<'a, B> {
     pub fn new(ctx: &'a FsContext<B>, log: &'a Log) -> Self {
-        RefusedItems {
-            sizer: Sizer::new(ctx, &NoProgress, SizingLog::refused(log)),
+        Screening {
+            ctx,
+            log,
+            refused_sizer: Sizer::new(ctx, &NoProgress, SizingLog::refused(log)),
             refused: Mutex::default(),
         }
     }
 
-    /// Records `entry` as refused for the process `pid` running `program`, under the
-    /// names `rules` gives, and sizes it on `scope`.
-    pub fn refuse<'s>(
+    /// Runs the delete checks on `entry` and admits it when they plan it. Otherwise the
+    /// entry is refused and sized on `scope` under the names `rule_names` gives, logged
+    /// as a walk skip, or logged as a problem, and nothing is admitted.
+    pub fn admit<'s>(
         &'s self,
         scope: &Scope<'s>,
         entry: Entry,
-        rules: Vec<String>,
-        pid: u32,
-        program: PathBuf,
-    ) {
-        let pending = Pending {
-            path: entry.path().to_path_buf(),
-            rules: sorted(rules),
-            pid,
-            program,
+        rule_names: impl FnOnce() -> Vec<String>,
+    ) -> Option<Admitted> {
+        let reach = match screen(self.ctx, entry.path()) {
+            Verdict::Planned(reach) => reach,
+            Verdict::Running { pid, program } => {
+                self.refuse(scope, entry, rule_names(), pid, program);
+                return None;
+            }
+            Verdict::Skipped(reason) => {
+                self.log.skip(entry.path().to_path_buf(), reason);
+                return None;
+            }
+            Verdict::Problem(error) => {
+                let met_at = entry.path().to_path_buf();
+                self.log.problem(Problem::Path { met_at, error });
+                return None;
+            }
         };
-        let size = self.sizer.measure(scope, entry);
-        self.lock().push((pending, size));
+
+        let run_as = match entry.meta().uid == self.ctx.user_uid() {
+            true => RunAs::User,
+            false => RunAs::Sudo,
+        };
+        Some(Admitted {
+            entry,
+            reach,
+            run_as,
+        })
     }
 
     /// Every refused item, sorted by path; called once the scope the sizing ran on has
@@ -125,10 +145,41 @@ impl<'a, B: Backend + Sync> RefusedItems<'a, B> {
         refused
     }
 
+    /// Records `entry` as refused for the process `pid` running `program`, under the
+    /// names `rules`, and sizes it on `scope`.
+    fn refuse<'s>(
+        &'s self,
+        scope: &Scope<'s>,
+        entry: Entry,
+        rules: Vec<String>,
+        pid: u32,
+        program: PathBuf,
+    ) {
+        let pending = Pending {
+            path: entry.path().to_path_buf(),
+            rules: sorted(rules),
+            pid,
+            program,
+        };
+        let size = self.refused_sizer.measure(scope, entry);
+        self.lock().push((pending, size));
+    }
+
     fn lock(&self) -> MutexGuard<'_, Vec<(Pending, Measure)>> {
         self.refused
             .lock()
             .expect("no scan worker panics while refusing")
+    }
+}
+
+/// Runs the delete checks on a found item without deleting it.
+fn screen<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Verdict {
+    match Cleanup::delete(path).verify(ctx) {
+        Ok(()) => Verdict::Planned(Reach::InRoots),
+        Err(fs::Error::OutsideRoots { .. }) => Verdict::Planned(Reach::OutsideRoots),
+        Err(fs::Error::Running { pid, program, .. }) => Verdict::Running { pid, program },
+        Err(fs::Error::CrossesVolume { .. }) => Verdict::Skipped(WalkSkip::SealedMount),
+        Err(error) => Verdict::Problem(error),
     }
 }
 

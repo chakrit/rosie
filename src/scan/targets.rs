@@ -1,5 +1,5 @@
-//! Claiming found targets: the context's delete checks, the item marks, and the start
-//! of sizing (`docs/spec/safety.md#running-processes`, `#roots`, `#elevation`).
+//! Claiming found targets: each is screened by [`Screening`], which gives its marks,
+//! and the admitted are counted as found and start sizing.
 
 use std::path::PathBuf;
 use std::sync::{Mutex, MutexGuard};
@@ -10,15 +10,14 @@ use super::RuleMatch;
 use super::entry::Entry;
 use super::log::{Log, Problem, SizingLog};
 use super::progress::Progress;
-use super::refusal::{Refused, RefusedItems, Verdict, screen};
+use super::refusal::{Admitted, Refused, Screening};
 use super::sizing::{Measure, Sizer};
 use crate::fs::{Backend, FsContext};
 use crate::plan::{ItemKind, PathMatch, Reach, RunAs};
 
 /// Takes every target the walk or the fixed paths find, from any worker.
 pub(super) struct Targets<'a, B: Backend, P: Progress> {
-    ctx: &'a FsContext<B>,
-    refused: RefusedItems<'a, B>,
+    screening: Screening<'a, B>,
     sizer: Sizer<'a, B, P>,
     log: &'a Log,
     progress: &'a P,
@@ -61,8 +60,7 @@ impl Target {
 impl<'a, B: Backend + Sync, P: Progress> Targets<'a, B, P> {
     pub fn new(ctx: &'a FsContext<B>, log: &'a Log, progress: &'a P) -> Self {
         Targets {
-            ctx,
-            refused: RefusedItems::new(ctx, log),
+            screening: Screening::new(ctx, log),
             sizer: Sizer::new(ctx, progress, SizingLog::walked(log)),
             log,
             progress,
@@ -72,27 +70,23 @@ impl<'a, B: Backend + Sync, P: Progress> Targets<'a, B, P> {
 
     /// Claims `entry` for the rules that matched it, and starts sizing it on `scope`.
     pub fn claim<'s>(&'s self, scope: &Scope<'s>, entry: Entry, rules: Vec<RuleMatch>) {
-        let reach = match screen(self.ctx, entry.path()) {
-            Verdict::Planned(reach) => reach,
-            Verdict::Running { pid, program } => {
-                let names = rules.iter().map(|matched| matched.rule.to_string());
-                return self
-                    .refused
-                    .refuse(scope, entry, names.collect(), pid, program);
-            }
-            Verdict::Skipped(reason) => return self.log.skip(entry.path().to_path_buf(), reason),
-            Verdict::Problem(error) => {
-                let met_at = entry.path().to_path_buf();
-                return self.log.problem(Problem::Path { met_at, error });
-            }
+        let names = || {
+            rules
+                .iter()
+                .map(|matched| matched.rule.to_string())
+                .collect()
+        };
+        let Some(Admitted {
+            entry,
+            reach,
+            run_as,
+        }) = self.screening.admit(scope, entry, names)
+        else {
+            return;
         };
         let path = entry.path().to_path_buf();
         let Some(kind) = entry.item_kind() else {
             return self.log.problem(Problem::Special { path });
-        };
-        let run_as = match entry.meta().uid == self.ctx.user_uid() {
-            true => RunAs::User,
-            false => RunAs::Sudo,
         };
 
         self.progress.found();
@@ -117,7 +111,7 @@ impl<'a, B: Backend + Sync, P: Progress> Targets<'a, B, P> {
             .expect("no scan worker panics while claiming");
         Found {
             targets,
-            refused: self.refused.finish(),
+            refused: self.screening.finish(),
         }
     }
 

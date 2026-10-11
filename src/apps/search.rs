@@ -17,11 +17,9 @@ use super::listing::{FolderLookup, Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
 use crate::fs::{Backend, FsContext};
 use crate::plan::{
-    AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Report, RunAs, WalkSkip,
+    AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Report, WalkSkip,
 };
-use crate::scan::{
-    Entry, InFolder, Log, Mounts, NoProgress, Problem, RefusedItems, Scan, Sizer, Verdict, screen,
-};
+use crate::scan::{Entry, InFolder, Log, Mounts, NoProgress, Scan, Screening, Sizer};
 use crate::tier::Tier;
 
 /// A file or folder a scan may match by name. Symlinks never match, so none is ever a
@@ -59,11 +57,10 @@ impl Candidate {
     }
 }
 
-/// How a matched item is planned, apart from its size.
+/// How a matched item is planned, apart from its size and the marks its screening gives.
 struct Marks {
     kind: ItemKind,
     launch: Option<LaunchDomain>,
-    run_as: RunAs,
     rule: String,
     tier: Tier,
 }
@@ -146,21 +143,14 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                 return Ok(());
             }
         };
-        let user_uid = self.ctx.user_uid();
-
-        let run_as = match entry.meta().uid == user_uid {
-            true => RunAs::User,
-            false => RunAs::Sudo,
-        };
         let launch = match kind {
-            ItemKind::File => holds.launch_domain(user_uid),
+            ItemKind::File => holds.launch_domain(self.ctx.user_uid()),
             ItemKind::Folder => None,
         };
 
         let marks = Marks {
             kind,
             launch,
-            run_as,
             rule: rule.to_owned(),
             tier,
         };
@@ -191,45 +181,31 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         } = self;
 
         let (sized, refused) = {
-            let refused = RefusedItems::new(ctx, &log);
+            let screening = Screening::new(ctx, &log);
             let sizer = Sizer::walking(ctx, &NoProgress, &log);
             let sized = rayon::scope(|scope| {
                 let started = matched.into_iter().filter_map(|(entry, marks)| {
-                    match screen(ctx, entry.path()) {
-                        Verdict::Planned(reach) => {
-                            let path = entry.path().to_path_buf();
-                            Some((path, marks, reach, sizer.measure(scope, entry)))
-                        }
-                        Verdict::Running { pid, program } => {
-                            refused.refuse(scope, entry, vec![marks.rule], pid, program);
-                            None
-                        }
-                        Verdict::Skipped(reason) => {
-                            log.skip(entry.path().to_path_buf(), reason);
-                            None
-                        }
-                        Verdict::Problem(error) => {
-                            let met_at = entry.path().to_path_buf();
-                            log.problem(Problem::Path { met_at, error });
-                            None
-                        }
-                    }
+                    let names = || vec![marks.rule.clone()];
+                    let admitted = screening.admit(scope, entry, names)?;
+                    let path = admitted.entry.path().to_path_buf();
+                    let size = sizer.measure(scope, admitted.entry);
+                    Some((path, marks, admitted.reach, admitted.run_as, size))
                 });
                 started.collect::<Vec<_>>()
             });
-            (sized, refused.finish())
+            (sized, screening.finish())
         };
-        let (mut skipped, problems) = log.into_parts();
+        let (skipped, problems) = log.into_parts();
         if let Some(problem) = problems.into_iter().next() {
             return Err(Error::Item(problem));
         }
 
-        for (path, marks, reach, size) in sized {
+        for (path, marks, reach, run_as, size) in sized {
             let found = PathMatch {
                 path,
                 kind: marks.kind,
                 size: size.get(),
-                run_as: marks.run_as,
+                run_as,
                 reach,
                 rule: marks.rule,
                 tier: marks.tier,
@@ -239,14 +215,6 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                 None => builder.add_path(found)?,
             }
         }
-        skipped.sort_by(|a, b| a.path.cmp(&b.path));
-        let built = builder.build();
-        Ok(Scan {
-            plan: built.plan,
-            tiers: built.tiers,
-            refused,
-            skipped,
-            problems: Vec::new(),
-        })
+        Ok(Scan::new(builder, refused, skipped, Vec::new()))
     }
 }

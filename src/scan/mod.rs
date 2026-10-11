@@ -34,7 +34,7 @@ pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry, Sealed}
 pub use log::{Log, Problem, Skipped};
 pub use progress::{NoProgress, Progress};
 pub use refusal::Refused;
-pub(crate) use refusal::{RefusedItems, Verdict, screen};
+pub(crate) use refusal::Screening;
 pub use sizing::{Measure, Sizer};
 
 use fixed::{FixedClaim, FixedTargets};
@@ -90,6 +90,25 @@ pub struct PathScan {
 }
 
 impl Scan {
+    /// Builds the plan, and keeps what the scan met beside it with the skips sorted by
+    /// path.
+    pub(crate) fn new(
+        builder: PlanBuilder,
+        refused: Vec<Refused>,
+        mut skipped: Vec<Skipped>,
+        problems: Vec<Problem>,
+    ) -> Scan {
+        skipped.sort_by(|a, b| a.path.cmp(&b.path));
+        let built = builder.build();
+        Scan {
+            plan: built.plan,
+            tiers: built.tiers,
+            refused,
+            skipped,
+            problems,
+        }
+    }
+
     /// Walk-skip counts per reason, for the stats.
     pub fn skip_counts(&self) -> WalkSkips {
         self.skipped.iter().map(|skipped| skipped.reason).collect()
@@ -254,15 +273,7 @@ impl<B: Backend + Sync> Scanner<B> {
             }
         }
 
-        let (mut skipped, problems) = log.into_parts();
-        skipped.sort_by(|a, b| a.path.cmp(&b.path));
-        let built = builder.build();
-        Scan {
-            plan: built.plan,
-            tiers: built.tiers,
-            refused: found.refused,
-            skipped,
-            problems,
-        }
+        let (skipped, problems) = log.into_parts();
+        Scan::new(builder, found.refused, skipped, problems)
     }
 }

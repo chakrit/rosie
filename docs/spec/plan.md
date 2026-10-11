@@ -44,9 +44,20 @@ status = "ticked"
 
 # size unknown
 [[tool]]
-rules = ["rosie/docker", "user/docker"]
-cmd = ["docker", "system", "prune", "--force"]
+rule = "rosie/docker"
+shell = "/bin/bash"
+cmd = "docker system prune --force"
 status = "ticked"
+
+# size unknown
+[[tool]]
+rule = "user/homebrew"
+shell = "/bin/zsh"
+cmd = "brew cleanup"
+status = "ticked"
+
+[tool.env]
+HOMEBREW_NO_ENV_HINTS = "1"
 
 # size unknown
 [[forget]]
@@ -66,7 +77,8 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 |                       | the user)                                                          |
 | `[[delete.bootout]]`  | `plist` (the delete's `path` or inside it), `domain` (`system` or  |
 |                       | `gui/<uid>`); runs when its delete does, before any delete         |
-| `[[tool]]`            | `rules`, `cmd` (argv), `status`                                    |
+| `[[tool]]`            | `rule`, `shell`, `cmd`, `status`, `env` (present when the rule     |
+|                       | sets one); runs `<shell> -c <cmd>` with `env` added                |
 | `[[forget]]`          | `package` for `pkgutil --forget`, `status`                         |
 | `[[report]]`          | `subject`, `steps`; report-only, never run                         |
 
@@ -76,11 +88,12 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 
 - A plan carries a format version.
 - A plan is a TOML file with one entry per item: target, path, size, action.
-- Path entries are keyed by path and list every rule that matched that path. Tool
-  entries are keyed by rule.
+- Path entries are keyed by path and list every rule that matched that path.
+- Each `[[tool]]` entry is one rule's action, keyed by that rule, carrying `shell`,
+  `cmd`, and `env` as the rule gave them.
+- Rosie never compares, dedupes, merges, or conflict-checks tool commands.
 - Nested matches collapse into the outer one. The outer entry is `sudo` if any inner one
   was.
-- Tool rules with an identical parsed argv dedupe into one entry.
 - Aggressive items appear unticked unless `--aggressive` is given
   ([rules.md](rules.md#aggressive-twins)).
 - Items outside `roots` appear as blocked, with a `rosie roots add <path>` hint
@@ -146,3 +159,6 @@ after the user edits it, rosie re-shows the trimmed plan and re-prompts.
 
 `rosie scan … --sh` prints the plan as a shell script that the user inspects and runs
 with sudo themselves. An `.sh` plan is export-only, for power users; rosie cannot run it.
+
+- A `[[tool]]` entry is exported as `<shell> -c <cmd>`, preceded by
+  `/usr/bin/env NAME=value …` when it has an `env`.

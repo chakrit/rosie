@@ -34,7 +34,6 @@ fn root_ctx<'a>(fake: &'a FakeBackend, roots: &[&str]) -> FsContext<&'a FakeBack
 fn elevation() -> Elevation {
     Elevation {
         exe: PathBuf::from(EXE),
-        paths: Paths::new(Path::new(HOME)).expect("absolute home"),
     }
 }
 
@@ -710,14 +709,12 @@ fn refuses_a_report_naming_items_it_was_not_sent() {
 fn keeps_a_user_folder_when_the_elevated_child_never_launches() {
     let (fake, plan) = user_folder_with_system_plist();
     // A home holding a newline fails `Header::encode`, so `sudo` is never even called.
-    let never_launches = Elevation {
-        exe: PathBuf::from(EXE),
-        paths: Paths::new(Path::new("/Users/me\nnonce x")).expect("absolute home"),
-    };
+    let never_launches = Paths::new(Path::new("/Users/me\nnonce x")).expect("absolute home");
+    let bounds = never_launches.bounds(vec![PathBuf::from("/Users/me/Library")], USER_UID);
+    let ctx = FsContext::new(&fake, bounds).expect("absolute bounds");
 
     let mut recorder = Recorder::default();
-    let stats =
-        Runner::new(ctx(&fake, &["/Users/me/Library"])).run(&plan, &never_launches, &mut recorder);
+    let stats = Runner::new(ctx).run(&plan, &elevation(), &mut recorder);
 
     assert!(!fake.calls().iter().any(|c| matches!(c, Call::Sudo(..))));
     assert!(fake.exists(HELPER_PLIST));

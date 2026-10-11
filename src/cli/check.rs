@@ -20,14 +20,12 @@ use super::scan::{walk_with_rule_flags, walk_with_scan_flags};
 use super::session::Session;
 use super::{Error, ExitStatus};
 use crate::apps;
-use crate::config::Walk;
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
 use crate::packs::Network;
 use crate::plan::{
-    AggressiveItems, Delete, Disagreement, Needs, PlanStats, RunAs, Status, StatusKind, Tally,
-    WalkSkip,
+    Delete, Disagreement, Needs, PlanStats, RunAs, Status, StatusKind, Tally, WalkSkip,
 };
-use crate::scan::{self, PathScan, Problem, Refused, Scan, Scanner, Skipped};
+use crate::scan::{self, PathScan, Problem, Refused, Scan, Scanner, Settings, Skipped};
 use crate::shell;
 use crate::tier::Tier;
 
@@ -37,15 +35,18 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// cleaned, else 1.
     pub fn check(&mut self, args: CheckArgs) -> Result<ExitStatus, Error> {
         let config = self.config()?;
-        let aggressive = args.flags.aggressive_items();
-        let app_mode = AppMode {
+        // The settings `rosie scan app` runs with under the same flags.
+        let app_mode = Settings {
             walk: walk_with_scan_flags(config.config().walk, &args.flags),
-            aggressive,
+            aggressive: args.flags.aggressive_items(),
         };
-        let walk = walk_with_rule_flags(app_mode.walk, &args.rules);
+        let settings = Settings {
+            walk: walk_with_rule_flags(app_mode.walk, &args.rules),
+            ..app_mode
+        };
         let rules = self.rules(&args.rules.only)?;
         let ctx = self.roots_ctx(config.config())?;
-        let scanner = self.scanner(ctx, rules, walk, aggressive);
+        let scanner = Scanner::new(ctx, rules, settings);
 
         let mut lines = Vec::new();
         for typed in &args.paths {
@@ -85,7 +86,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         &mut self,
         scanned: &PathScan,
         scanner: &Scanner<&'a B>,
-        app_mode: AppMode,
+        app_mode: Settings,
     ) -> Result<Line, Error> {
         for problem in &scanned.scan.problems {
             self.note(&problem_line(problem))?;
@@ -105,11 +106,10 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// `in use` when that scan refuses the bundle for a process running from it, and
     /// `skipped` with the error's text when it refuses or cannot read the bundle for any
     /// other reason. `None` when the path is not an app after all.
-    fn app_line(&self, ctx: &FsContext<&'a B>, path: &Path, app_mode: AppMode) -> Option<Line> {
-        let paths = &self.env.paths;
+    fn app_line(&self, ctx: &FsContext<&'a B>, path: &Path, app_mode: Settings) -> Option<Line> {
         let shown = self.tilde();
 
-        let scanned = apps::scan_app(ctx, path, paths, app_mode.aggressive, app_mode.walk);
+        let scanned = apps::scan_app(ctx, path, &app_mode);
 
         let (word, reason) = match scanned {
             Ok(scan) => return Some(judge(path, &scan).line(path, &shown)),
@@ -151,13 +151,6 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             home: self.env.paths.home(),
         }
     }
-}
-
-/// The settings `rosie scan app` runs with under the same flags.
-#[derive(Clone, Copy)]
-struct AppMode {
-    walk: Walk,
-    aggressive: AggressiveItems,
 }
 
 /// One printed line: status, path, and the reason with any hint.

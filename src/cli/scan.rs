@@ -12,8 +12,7 @@ use crate::apps;
 use crate::config::{ConfigFile, Walk};
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::packs::Network;
-use crate::plan::{AggressiveItems, ItemSize, Outcome, Plan, Selection, SkipReason, WalkSkips};
-use crate::rules::RuleSet;
+use crate::plan::{ItemSize, Outcome, Plan, Selection, SkipReason, WalkSkips};
 use crate::run::{Elevation, Runner};
 use crate::scan::{Refused, Scan, Scanner, Settings};
 
@@ -148,26 +147,33 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         flags: &ScanFlags,
         app_usage: &str,
     ) -> Result<Scan, Error> {
-        let walk = walk_with_scan_flags(config.config().walk, flags);
-        let aggressive = flags.aggressive_items();
+        let settings = Settings {
+            walk: walk_with_scan_flags(config.config().walk, flags),
+            aggressive: flags.aggressive_items(),
+        };
         let ctx = self.roots_ctx(config.config())?;
-        let paths = &self.env.paths;
 
         match mode {
             Mode::Tree { dir, rules } => {
-                let walk = walk_with_rule_flags(walk, rules);
+                let settings = Settings {
+                    walk: walk_with_rule_flags(settings.walk, rules),
+                    ..settings
+                };
                 let rules = self.rules(&rules.only)?;
                 let dir = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
-                let scanner = self.scanner(ctx, rules, walk, aggressive);
+                let scanner = Scanner::new(ctx, rules, settings);
                 let progress = self.console.progress();
                 let scan = scanner.tree(&dir, &progress);
                 progress.finish()?;
                 Ok(scan?)
             }
             Mode::Caches { rules } => {
-                let walk = walk_with_rule_flags(walk, rules);
+                let settings = Settings {
+                    walk: walk_with_rule_flags(settings.walk, rules),
+                    ..settings
+                };
                 let rules = self.rules(&rules.only)?;
-                let scanner = self.scanner(ctx, rules, walk, aggressive);
+                let scanner = Scanner::new(ctx, rules, settings);
                 let progress = self.console.progress();
                 let scan = scanner.caches(&progress);
                 progress.finish()?;
@@ -178,31 +184,15 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     Some(app) => self.absolute(app),
                     None => self.pick_app(&ctx, app_usage)?,
                 };
-                let paths = &self.env.paths;
-                Ok(apps::scan_app(&ctx, &app, paths, aggressive, walk)?)
+                Ok(apps::scan_app(&ctx, &app, &settings)?)
             }
-            Mode::Orphans => Ok(apps::scan_orphans(&ctx, paths, aggressive, walk.into())?),
+            Mode::Orphans => Ok(apps::scan_orphans(&ctx, &settings)?),
         }
-    }
-
-    pub(super) fn scanner(
-        &self,
-        ctx: FsContext<&'a B>,
-        rules: RuleSet,
-        walk: Walk,
-        aggressive: AggressiveItems,
-    ) -> Scanner<&'a B> {
-        let settings = Settings {
-            paths: self.env.paths.clone(),
-            walk,
-            aggressive,
-        };
-        Scanner::new(ctx, rules, settings)
     }
 
     fn pick_app(&mut self, ctx: &FsContext<&'a B>, usage: &str) -> Result<PathBuf, Error> {
         let picker = self.picker(usage)?;
-        let apps = apps::picker_apps(ctx, &self.env.paths)?;
+        let apps = apps::picker_apps(ctx)?;
         let options = apps
             .into_iter()
             .map(|app| (app.display().to_string(), app))
@@ -301,7 +291,6 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let ctx = self.roots_ctx(config.config())?;
         let elevation = Elevation {
             exe: self.env.exe.clone(),
-            paths: self.env.paths.clone(),
         };
 
         let mut reporter = self.console.reporter();

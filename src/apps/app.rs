@@ -12,13 +12,10 @@ use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
 use super::matching::{claimed_by_other, claims_by_id, claims_by_name};
 use super::search::{Candidate, Search};
-use crate::config::Walk;
-use crate::fs::{
-    Backend, Cleanup, FileKind, FsContext, FsOp, Paths, SystemArgv, SystemTool, UserInput,
-};
-use crate::plan::{AggressiveItems, Report};
+use crate::fs::{Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool, UserInput};
+use crate::plan::Report;
 use crate::process;
-use crate::scan::{Entry, Mounts, Scan};
+use crate::scan::{Entry, Mounts, Scan, Settings};
 use crate::tier::Tier;
 
 /// Scans for `app` and its leftovers in the user's home and the system folders.
@@ -37,18 +34,12 @@ use crate::tier::Tier;
 /// one rosie must first identify among others, so this is not refused. Its own bundle is
 /// still `clean` and its `CFBundleName` still matches leftovers by name (aggressively,
 /// like any name-only match); it simply has no bundle ID to match leftovers by.
-pub fn scan_app<B>(
-    ctx: &FsContext<B>,
-    app: &Path,
-    paths: &Paths,
-    aggressive: AggressiveItems,
-    walk: Walk,
-) -> Result<Scan, Error>
+pub fn scan_app<B>(ctx: &FsContext<B>, app: &Path, settings: &Settings) -> Result<Scan, Error>
 where
     B: Backend + Sync,
 {
-    let mounts = Mounts::from(walk);
-    let path = UserInput::path(app, walk.enter_links).perform(ctx)?;
+    let mounts = Mounts::from(settings.walk);
+    let path = UserInput::path(app, settings.walk.enter_links).perform(ctx)?;
     let entry = Entry::lstat(ctx, &path)?;
     let name = path
         .file_name()
@@ -69,7 +60,7 @@ where
             app: bundle.path.clone(),
             source,
         })?;
-    let installed = installed_apps(ctx, paths)?;
+    let installed = installed_apps(ctx)?;
     let others: Vec<BundleId> = installed
         .apps
         .into_iter()
@@ -81,10 +72,10 @@ where
         None => "app".to_owned(),
     };
 
-    let mut search = Search::new(ctx, paths, mounts, aggressive);
+    let mut search = Search::new(ctx, mounts, settings.aggressive);
     search.add(itself, Holds::Plain, &rule, Tier::Normal)?;
 
-    for location in leftover_locations(paths) {
+    for location in leftover_locations(ctx.paths()) {
         for candidate in search.candidates(&location)? {
             let id_tier = bundle
                 .id

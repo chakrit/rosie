@@ -27,7 +27,6 @@ mod header;
 mod item;
 mod outcomes;
 mod report;
-mod root;
 
 use std::collections::BTreeMap;
 use std::path::Path;
@@ -43,7 +42,6 @@ use report::Forwarding;
 pub use elevate::Elevation;
 pub use item::{ItemResult, Subject};
 pub use report::{OutputWindow, PlainReporter, Reporter, TerminalReporter};
-pub use root::{RootError, RootRefusal, refuse_root};
 
 pub struct Runner<B: Backend> {
     ctx: FsContext<B>,

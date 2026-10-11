@@ -5,16 +5,16 @@ use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
 use super::claims::system_jobs_argv;
 use super::fixture::{
-    ALL_ROOTS, HOME, ctx, failed, install_app, install_wrapped_app, loaded, loaded_system,
-    no_value, paths, quiet, receipts, succeeded,
+    ALL_ROOTS, HOME, ctx, ctx_at_home, failed, install_app, install_wrapped_app, loaded,
+    loaded_system, no_value, quiet, receipts, settings, succeeded,
 };
 use super::*;
 use crate::config::Walk;
 use crate::fs::ROOT_UID;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{self, Op, Paths};
+use crate::fs::{self, Op};
 use crate::plan::{AggressiveItems, Delete, LaunchDomain, Needs, RunAs, Size, Status, WalkSkip};
-use crate::scan::{Mounts, Scan};
+use crate::scan::{Scan, Settings};
 
 mod app_bundle;
 mod app_scan;
@@ -28,18 +28,11 @@ const BAR: &str = "/Applications/Bar.app";
 const NPLAYER: &str = "/Applications/nPlayer.app";
 
 fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scan {
-    scan_app(
-        &ctx(fake, roots),
-        Path::new(BAR),
-        &paths(),
-        aggressive,
-        Walk::default(),
-    )
-    .expect("app scan")
+    scan_app(&ctx(fake, roots), Path::new(BAR), &settings(aggressive)).expect("app scan")
 }
 
 fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {
-    scan_orphans(&ctx(fake, &ALL_ROOTS), &paths(), aggressive, Mounts::Skip).expect("orphan scan")
+    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(aggressive)).expect("orphan scan")
 }
 
 /// `(path, status)` of every delete entry, in plan order.

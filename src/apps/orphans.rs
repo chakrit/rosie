@@ -7,9 +7,8 @@ use super::claims::Claims;
 use super::locations::leftover_locations;
 use super::matching::reads_as_bundle_id;
 use super::search::Search;
-use crate::fs::{Backend, FsContext, Paths};
-use crate::plan::AggressiveItems;
-use crate::scan::{Mounts, Scan};
+use crate::fs::{Backend, FsContext};
+use crate::scan::{Scan, Settings};
 use crate::tier::Tier;
 
 const RULE: &str = "orphans";
@@ -21,16 +20,11 @@ const RULE: &str = "orphans";
 /// be listed as orphans. An installed app with no bundle-ID key cannot be matched to its
 /// leftovers by ID either, so any it has may appear among the orphans; it is reported
 /// only as a note, not a reason to fail the scan.
-pub fn scan_orphans<B>(
-    ctx: &FsContext<B>,
-    paths: &Paths,
-    aggressive: AggressiveItems,
-    mounts: Mounts,
-) -> Result<Scan, Error>
+pub fn scan_orphans<B>(ctx: &FsContext<B>, settings: &Settings) -> Result<Scan, Error>
 where
     B: Backend + Sync,
 {
-    let installed = installed_apps(ctx, paths)?;
+    let installed = installed_apps(ctx)?;
     if let Some(unidentified) = installed.unidentified.into_iter().next() {
         return Err(unidentified.into_error());
     }
@@ -38,11 +32,11 @@ where
     let claims = Claims::read(ctx, &installed.apps)?;
 
     ctx.snapshot_running()?;
-    let mut search = Search::new(ctx, paths, mounts, aggressive);
+    let mut search = Search::new(ctx, settings.walk.into(), settings.aggressive);
     for path in &installed.no_id {
         search.add_report(no_id_report(path)?);
     }
-    for location in leftover_locations(paths) {
+    for location in leftover_locations(ctx.paths()) {
         for candidate in search.candidates(&location)? {
             let reads_as_id = reads_as_bundle_id(&candidate.name, location.holds);
             if reads_as_id && !claims.claim(&candidate.name) {

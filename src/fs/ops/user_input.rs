@@ -4,7 +4,7 @@
 use std::path::{Path, PathBuf};
 
 use super::{FsOp, sealed};
-use crate::fs::backend::{Backend, Metadata};
+use crate::fs::backend::Backend;
 use crate::fs::context::FsContext;
 use crate::fs::error::Error;
 use crate::fs::links::EnterLinks;
@@ -28,9 +28,10 @@ impl UserInput {
         Read { path }
     }
 
-    /// `lstat`s a path the user's environment names, such as the home folder.
-    pub fn lstat(path: &Path) -> Lstat<'_> {
-        Lstat { path }
+    /// The uid of the user rosie acts for: the owner of the injected home folder,
+    /// `lstat`ed without following a symlink at the home itself.
+    pub fn home_owner() -> HomeOwner {
+        HomeOwner
     }
 }
 
@@ -43,13 +44,11 @@ pub struct Read<'p> {
     path: &'p Path,
 }
 
-pub struct Lstat<'p> {
-    path: &'p Path,
-}
+pub struct HomeOwner;
 
 impl sealed::Sealed for Resolve<'_> {}
 impl sealed::Sealed for Read<'_> {}
-impl sealed::Sealed for Lstat<'_> {}
+impl sealed::Sealed for HomeOwner {}
 
 impl<B: Backend> FsOp<B> for Resolve<'_> {
     type Output = PathBuf;
@@ -68,11 +67,12 @@ impl<B: Backend> FsOp<B> for Read<'_> {
     }
 }
 
-impl<B: Backend> FsOp<B> for Lstat<'_> {
-    type Output = Metadata;
+impl<B: Backend> FsOp<B> for HomeOwner {
+    type Output = u32;
 
-    fn perform(self, ctx: &FsContext<B>) -> Result<Metadata, Error> {
-        ctx.lstat(self.path)
+    fn perform(self, ctx: &FsContext<B>) -> Result<u32, Error> {
+        let home = ctx.lstat(ctx.paths().home())?;
+        Ok(home.uid)
     }
 }
 

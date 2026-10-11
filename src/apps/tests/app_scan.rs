@@ -237,9 +237,7 @@ fn a_failing_receipt_listing_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(
@@ -307,9 +305,7 @@ fn refuses_the_plan_while_the_app_is_running() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(
@@ -330,9 +326,7 @@ fn refuses_the_whole_plan_when_the_bundle_is_outside_the_roots() {
     let result = scan_app(
         &ctx(&fake, &["/Users/me/Library"]),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(
@@ -351,9 +345,7 @@ fn a_process_from_a_sibling_app_does_not_block_the_plan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(result.is_ok(), "{result:?}");
@@ -399,9 +391,7 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new("/Users/me/code"),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
@@ -469,9 +459,7 @@ fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_as_keep() {
     let scanned = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(beta),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     )
     .expect("app scan");
 
@@ -522,9 +510,7 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
         let result = scan_app(
             &ctx(&fake, &ALL_ROOTS),
             Path::new(BAR),
-            &paths(),
-            AggressiveItems::Keep,
-            Walk::default(),
+            &settings(AggressiveItems::Keep),
         );
 
         assert!(matches!(result, Err(Error::Fs(_))), "{folder}: {result:?}");
@@ -641,9 +627,7 @@ fn a_package_id_a_plan_cannot_hold_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(matches!(result, Err(Error::Plan(_))), "{result:?}");

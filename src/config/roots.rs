@@ -20,7 +20,6 @@ pub fn list(config: &Config) -> &[PathBuf] {
 pub fn add<B: Backend>(
     ctx: &FsContext<B>,
     config_dir: &Path,
-    paths: &Paths,
     file: &ConfigFile,
     path: &Path,
 ) -> Result<ConfigFile, Error> {
@@ -29,6 +28,7 @@ pub fn add<B: Backend>(
         return Ok(file.clone());
     }
 
+    let paths = ctx.paths();
     let entry = spelled_as_typed(path, &paths.expand(path)?, paths);
     let entry = entry.to_str().ok_or_else(|| Error::RootNotUtf8 {
         path: located.clone(),
@@ -44,11 +44,10 @@ pub fn add<B: Backend>(
 pub fn remove<B: Backend>(
     ctx: &FsContext<B>,
     config_dir: &Path,
-    paths: &Paths,
     file: &ConfigFile,
     path: &Path,
 ) -> Result<ConfigFile, Error> {
-    let target = paths.expand(path)?;
+    let target = ctx.paths().expand(path)?;
     let index = file
         .written_roots
         .iter()
@@ -119,7 +118,6 @@ mod tests {
         let updated = add(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("/Users/me/code"),
         )
@@ -141,7 +139,6 @@ mod tests {
         let updated = add(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("~/Library/Caches"),
         )
@@ -172,7 +169,6 @@ mod tests {
         let result = add(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("/Users/me/code"),
         );
@@ -197,7 +193,6 @@ mod tests {
         let result = add(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("/Users/me/code"),
         );
@@ -227,7 +222,6 @@ mod tests {
         let updated = add(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("~/.cargo/registry"),
         )
@@ -254,7 +248,6 @@ mod tests {
         let updated = remove(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("~/.cargo/registry"),
         )
@@ -274,7 +267,6 @@ mod tests {
         let updated = add(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("/Users/me/code"),
         )
@@ -294,7 +286,6 @@ mod tests {
         let updated = remove(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("~/Applications"),
         )
@@ -324,7 +315,6 @@ mod tests {
         let result = remove(
             &ctx,
             config_dir(),
-            &paths(),
             &loaded(&ctx),
             Path::new("/Users/me/other"),
         );

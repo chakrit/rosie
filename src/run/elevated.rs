@@ -213,7 +213,7 @@ fn is_root_sudo(process: &Process) -> bool {
 /// no permissions.
 fn root_ctx<'b, B: Backend>(backend: &'b B, paths: &Paths) -> Result<FsContext<&'b B>, Error> {
     let bootstrap = FsContext::new(backend, paths.bounds(Vec::new(), ROOT_UID))?;
-    let user_uid = UserInput::lstat(paths.home()).perform(&bootstrap)?.uid;
+    let user_uid = UserInput::home_owner().perform(&bootstrap)?;
     let file = config::load(&bootstrap, &paths.config_dir())?;
 
     let roots = file.config().roots.clone();

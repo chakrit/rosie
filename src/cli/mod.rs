@@ -11,6 +11,7 @@ mod console;
 mod error;
 mod findings;
 mod manage;
+mod root;
 mod scan;
 mod session;
 
@@ -25,7 +26,6 @@ use clap::error::ErrorKind;
 use crate::fs::{Backend, Paths, VersionCheck};
 use crate::packs::Network;
 use crate::plan::RunStats;
-use crate::run::RootError;
 use crate::run::elevated::{self, Invocation};
 
 use args::{Cli, Command, UserCommand};
@@ -33,6 +33,7 @@ use session::Session;
 
 pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals};
 pub use error::Error;
+pub use root::{RootError, RootRefusal};
 
 /// Everything rosie takes from its environment, gathered by `main`.
 #[derive(Debug, Clone)]

@@ -91,7 +91,8 @@ pub fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
 }
 
 pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
-    let bounds = bounds_with_roots(options.roots);
+    let paths = Paths::new(&options.home).expect("absolute home");
+    let bounds = paths.bounds(options.roots, USER_UID);
     let ctx = FsContext::new(fake, bounds.clone()).expect("absolute bounds");
     let packs = SettlePacks
         .run(&Store::new(&ctx, Path::new(DATA)))
@@ -104,7 +105,6 @@ pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
         false => rules.only(&names(&options.only)).expect("known rule names"),
     };
     let settings = Settings {
-        paths: Paths::new(&options.home).expect("absolute home"),
         walk: options.walk,
         aggressive: options.aggressive,
     };

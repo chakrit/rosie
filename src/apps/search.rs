@@ -15,7 +15,7 @@ use std::path::PathBuf;
 use super::Error;
 use super::listing::{FolderLookup, Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
-use crate::fs::{Backend, FsContext, Paths};
+use crate::fs::{Backend, FsContext};
 use crate::plan::{
     AggressiveItems, ItemKind, LaunchDomain, Needs, PathMatch, PlanBuilder, Report, RunAs, WalkSkip,
 };
@@ -70,8 +70,6 @@ struct Marks {
 
 pub(super) struct Search<'g, B: Backend> {
     ctx: &'g FsContext<B>,
-    /// Paths anchors the volume check of each leftover location.
-    paths: &'g Paths,
     mounts: Mounts,
     builder: PlanBuilder,
     matched: Vec<(Entry, Marks)>,
@@ -79,15 +77,9 @@ pub(super) struct Search<'g, B: Backend> {
 }
 
 impl<'g, B: Backend + Sync> Search<'g, B> {
-    pub(super) fn new(
-        ctx: &'g FsContext<B>,
-        paths: &'g Paths,
-        mounts: Mounts,
-        aggressive: AggressiveItems,
-    ) -> Self {
+    pub(super) fn new(ctx: &'g FsContext<B>, mounts: Mounts, aggressive: AggressiveItems) -> Self {
         Search {
             ctx,
-            paths,
             mounts,
             builder: PlanBuilder::new(aggressive),
             matched: Vec::new(),
@@ -104,7 +96,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         let FolderLookup::Found(folder) = find_folder(self.ctx, &location.path)? else {
             return Ok(Vec::new());
         };
-        if folder.is_behind_a_closed_mount(self.ctx, self.paths, self.mounts)? {
+        if folder.is_behind_a_closed_mount(self.ctx, self.mounts)? {
             self.log
                 .skip(location.path.clone(), WalkSkip::Closed(Needs::MOUNTS));
             return Ok(Vec::new());
@@ -192,7 +184,6 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
     pub(super) fn finish(self) -> Result<Scan, Error> {
         let Search {
             ctx,
-            paths: _,
             mounts: _,
             mut builder,
             matched,

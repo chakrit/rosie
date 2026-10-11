@@ -10,7 +10,7 @@ use super::{
     ItemResult, Refusal, Reporter, Runner, Subject, elevated, exit_reason, item_count, path_result,
     unrun,
 };
-use crate::fs::{Argv, Backend, Paths};
+use crate::fs::{Argv, Backend};
 use crate::plan::{Delete, Outcome, Plan, RunAs, Runnable, SkipReason};
 
 /// What launching the elevated child needs, injected by `main`.
@@ -18,8 +18,6 @@ use crate::plan::{Delete, Outcome, Plan, RunAs, Runnable, SkipReason};
 pub struct Elevation {
     /// This rosie executable, as an absolute path: sudo's `PATH` may find another.
     pub exe: PathBuf,
-    /// The invoking user's home, passed to the child in the stdin header.
-    pub paths: Paths,
 }
 
 impl<B: Backend + Sync> Runner<B> {
@@ -40,7 +38,7 @@ impl<B: Backend + Sync> Runner<B> {
         let nonce = Nonce::generate();
         let header = Header {
             nonce: nonce.clone(),
-            paths: elevation.paths.clone(),
+            paths: self.ctx.paths().clone(),
         };
         let stdin = part
             .to_toml()

@@ -50,9 +50,7 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(
@@ -81,9 +79,7 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(
@@ -120,9 +116,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
         scan_app(
             &ctx(fake, &ALL_ROOTS),
             Path::new(BAR),
-            &paths(),
-            AggressiveItems::Keep,
-            Walk::default(),
+            &settings(AggressiveItems::Keep),
         )
     };
 
@@ -135,9 +129,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     assert!(
         fails(scan_orphans(
             &ctx(&orphan, &ALL_ROOTS),
-            &paths(),
-            AggressiveItems::Keep,
-            Mounts::Skip
+            &settings(AggressiveItems::Keep)
         )),
         "an orphan"
     );
@@ -200,17 +192,14 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
         fake
     };
     let scan = |fake: &FakeBackend, enter_mounts: bool| {
-        scan_app(
-            &ctx(fake, &ALL_ROOTS),
-            Path::new(BAR),
-            &paths(),
-            AggressiveItems::Keep,
-            Walk {
+        let settings = Settings {
+            walk: Walk {
                 enter_mounts,
                 ..Walk::default()
             },
-        )
-        .expect("app scan")
+            aggressive: AggressiveItems::Keep,
+        };
+        scan_app(&ctx(fake, &ALL_ROOTS), Path::new(BAR), &settings).expect("app scan")
     };
     let skips = |scanned: &Scan| -> Vec<(String, WalkSkip)> {
         let skipped = scanned.skipped.iter();

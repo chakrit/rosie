@@ -467,20 +467,14 @@ mod tests {
         let tilde_entries = |text: &str| text.matches("\"~/").count();
 
         let seeded = seed(&ctx, config_dir(), default_text).expect("seed");
-        let added = roots::add(&ctx, config_dir(), &paths(), &seeded, Path::new("~/code"))
-            .expect("add a root");
+        let added =
+            roots::add(&ctx, config_dir(), &seeded, Path::new("~/code")).expect("add a root");
         let set = keys::set(&ctx, config_dir(), &added, WalkKey::EnterBundles, "true")
             .expect("set a flag");
         let unset =
             keys::unset(&ctx, config_dir(), &set, WalkKey::EnterBundles).expect("unset the flag");
-        roots::remove(
-            &ctx,
-            config_dir(),
-            &paths(),
-            &unset,
-            Path::new("~/.cargo/registry"),
-        )
-        .expect("remove the root under the tool-cache comment");
+        roots::remove(&ctx, config_dir(), &unset, Path::new("~/.cargo/registry"))
+            .expect("remove the root under the tool-cache comment");
 
         let text = String::from_utf8(
             Rosie::read(&config_path(config_dir()))

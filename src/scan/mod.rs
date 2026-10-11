@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::config::Walk;
-use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Paths, UserInput};
+use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, UserInput};
 use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder, WalkSkips};
 use crate::rules::{RuleId, RuleSet, Shape};
 use crate::tier::Tier;
@@ -58,11 +58,10 @@ pub enum Error {
     Missing { path: PathBuf },
 }
 
-/// What a scan is told beyond the rules: the injected home for `~`, the walk flags
-/// (config `[walk]` with the CLI flags applied), and whether `--aggressive` was given.
-#[derive(Debug, Clone)]
+/// What a scan is told beyond the rules and its context: the walk flags (config `[walk]`
+/// with the CLI flags applied), and whether `--aggressive` was given.
+#[derive(Debug, Clone, Copy)]
 pub struct Settings {
-    pub paths: Paths,
     pub walk: Walk,
     pub aggressive: AggressiveItems,
 }
@@ -138,7 +137,7 @@ impl<B: Backend + Sync> Scanner<B> {
         self.ctx.snapshot_running()?;
         let log = Log::default();
         let links = self.settings.walk.enter_links;
-        let fixed = FixedTargets::of(&self.rules, &self.settings.paths, &self.ctx, links);
+        let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
         let fixed = fixed::by_path(fixed.under(&root).report_refused(&log));
 
         let targets = Targets::new(&self.ctx, &log, progress);
@@ -176,10 +175,10 @@ impl<B: Backend + Sync> Scanner<B> {
             Err(error) => return Err(Error::PathRefused(error)),
         }
         self.ctx.snapshot_running()?;
-        let anchor = entry::anchor(&real, &self.settings.paths).to_path_buf();
+        let anchor = entry::anchor(&real, self.ctx.paths()).to_path_buf();
         let anchor_meta = Cleanup::lstat(&anchor).perform(&self.ctx)?;
         let log = Log::default();
-        let fixed = FixedTargets::of(&self.rules, &self.settings.paths, &self.ctx, links);
+        let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
         let fixed = fixed.under(&anchor).along(&real);
         let fixed = fixed::by_path(fixed.report_refused(&log));
 
@@ -210,13 +209,12 @@ impl<B: Backend + Sync> Scanner<B> {
         self.ctx.snapshot_running()?;
         let log = Log::default();
         let links = self.settings.walk.enter_links;
-        let fixed = FixedTargets::of(&self.rules, &self.settings.paths, &self.ctx, links);
+        let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
         let fixed = fixed.outermost().report_refused(&log);
 
         let targets = Targets::new(&self.ctx, &log, progress);
         let claim = FixedClaim {
             ctx: &self.ctx,
-            paths: &self.settings.paths,
             mounts: self.settings.walk.into(),
             targets: &targets,
             log: &log,

@@ -4,8 +4,9 @@ use std::str::Utf8Error;
 use thiserror::Error;
 
 use super::console::PromptError;
+use super::root::RootError;
 use super::session::PickKind;
-use crate::run::{RootError, elevated};
+use crate::run::elevated;
 use crate::{apps, config, fs, packs, plan, rules, scan};
 
 #[derive(Debug, Error)]

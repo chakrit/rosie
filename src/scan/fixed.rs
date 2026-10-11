@@ -17,7 +17,7 @@ use super::entry::{Entry, Mounts, NotAnEntry};
 use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
-use crate::fs::{self, Backend, Cleanup, EnterLinks, FsContext, FsOp, Paths};
+use crate::fs::{self, Backend, Cleanup, EnterLinks, FsContext, FsOp};
 use crate::plan::{Needs, WalkSkip};
 use crate::rules::{FixedPath, RuleId, RuleSet, Shape};
 use crate::tier::Tier;
@@ -30,19 +30,14 @@ pub(super) struct FixedTargets {
 }
 
 impl FixedTargets {
-    pub fn of<B: Backend>(
-        rules: &RuleSet,
-        paths: &Paths,
-        ctx: &FsContext<B>,
-        links: EnterLinks,
-    ) -> Self {
+    pub fn of<B: Backend>(rules: &RuleSet, ctx: &FsContext<B>, links: EnterLinks) -> Self {
         let mut written: BTreeMap<PathBuf, Vec<RuleMatch>> = BTreeMap::new();
         for (rule, tier, fixed) in fixed_paths(rules) {
             let matched = RuleMatch {
                 rule: rule.clone(),
                 tier,
             };
-            add(&mut written, fixed.resolve(paths), [matched]);
+            add(&mut written, fixed.resolve(ctx.paths()), [matched]);
         }
 
         let mut located: BTreeMap<PathBuf, Vec<RuleMatch>> = BTreeMap::new();
@@ -150,7 +145,6 @@ pub(super) fn by_path(
 /// counting from home for a path under home and from `/` otherwise.
 pub(super) struct FixedClaim<'a, B: Backend, P: Progress> {
     pub ctx: &'a FsContext<B>,
-    pub paths: &'a Paths,
     pub mounts: Mounts,
     pub targets: &'a Targets<'a, B, P>,
     pub log: &'a Log,
@@ -167,7 +161,7 @@ impl<B: Backend + Sync, P: Progress> FixedClaim<'_, B, P> {
             Err(NotAnEntry::Fs(error)) => return self.log.entry_failed(path, error),
         };
 
-        let closed = entry.is_behind_a_closed_mount(self.ctx, self.paths, self.mounts);
+        let closed = entry.is_behind_a_closed_mount(self.ctx, self.mounts);
         match closed {
             Ok(false) => self.targets.claim(scope, entry, rules),
             Ok(true) => self.log.skip(path, WalkSkip::Closed(Needs::MOUNTS)),

@@ -18,7 +18,7 @@ mod search;
 
 use std::path::PathBuf;
 
-use crate::fs::{Backend, FsContext, Paths};
+use crate::fs::{Backend, FsContext};
 
 pub use app::scan_app;
 pub use bundle::is_app_path;
@@ -29,10 +29,10 @@ pub use orphans::scan_orphans;
 /// The installed apps the `app` picker offers: `.app` bundles in `/Applications` and
 /// `~/Applications` (`docs/spec/cli.md#pickers`), sorted. A folder rosie may not list
 /// fails the listing, which would otherwise be incomplete.
-pub fn picker_apps<B: Backend>(ctx: &FsContext<B>, paths: &Paths) -> Result<Vec<PathBuf>, Error> {
+pub fn picker_apps<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<PathBuf>, Error> {
     let folders = [
         PathBuf::from("/Applications"),
-        paths.home().join("Applications"),
+        ctx.paths().home().join("Applications"),
     ];
     let found = bundle::bundles_in(ctx, &folders)?;
     match found.unlistable.into_iter().next() {

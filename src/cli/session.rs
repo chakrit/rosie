@@ -6,12 +6,12 @@ use std::path::{Path, PathBuf};
 
 use super::args::UserCommand;
 use super::console::Console;
+use super::root::refuse_root;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
 use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, UserInput};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
 use crate::rules::{Name, RuleLayers, RuleSet};
-use crate::run::refuse_root;
 
 /// Proof that stdin and stdout are terminals, which [`Session::pick`] takes: only
 /// [`Session::picker`] makes one.
@@ -74,7 +74,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     ) -> Result<Self, Error> {
         let probe = FsContext::new(backend, env.paths.bounds(Vec::new(), ROOT_UID))?;
         refuse_root(&probe, env.pid, typed)?;
-        let user_uid = UserInput::lstat(env.paths.home()).perform(&probe)?.uid;
+        let user_uid = UserInput::home_owner().perform(&probe)?;
 
         let own = FsContext::new(backend, env.paths.bounds(Vec::new(), user_uid))?;
         Ok(Session {

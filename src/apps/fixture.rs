@@ -6,8 +6,11 @@ use std::path::{Path, PathBuf};
 use super::app::pkgs_argv;
 use super::bundle::{extract_argv, info_plist};
 use super::claims::{launch_jobs_argv, system_jobs_argv};
+use crate::config::Walk;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{Bounds, CommandOutput, Exit, FsContext, Paths};
+use crate::fs::{CommandOutput, Exit, FsContext, Paths};
+use crate::plan::AggressiveItems;
+use crate::scan::Settings;
 
 pub(super) const HOME: &str = "/Users/me";
 
@@ -21,16 +24,26 @@ pub(super) const ALL_ROOTS: [&str; 5] = [
 ];
 
 pub(super) fn ctx<'a>(fake: &'a FakeBackend, roots: &[&str]) -> FsContext<&'a FakeBackend> {
-    let bounds = Bounds {
-        roots: roots.iter().map(PathBuf::from).collect(),
-        paths: paths(),
-        user_uid: USER_UID,
-    };
-    FsContext::new(fake, bounds).expect("absolute bounds")
+    ctx_at_home(fake, roots, HOME)
 }
 
-pub(super) fn paths() -> Paths {
-    Paths::new(Path::new(HOME)).expect("absolute paths")
+/// A context for the user whose home is `home`, spelled as given.
+pub(super) fn ctx_at_home<'a>(
+    fake: &'a FakeBackend,
+    roots: &[&str],
+    home: &str,
+) -> FsContext<&'a FakeBackend> {
+    let paths = Paths::new(Path::new(home)).expect("absolute home");
+    let roots = roots.iter().map(PathBuf::from).collect();
+    FsContext::new(fake, paths.bounds(roots, USER_UID)).expect("absolute bounds")
+}
+
+/// The settings of a scan with the default walk.
+pub(super) fn settings(aggressive: AggressiveItems) -> Settings {
+    Settings {
+        walk: Walk::default(),
+        aggressive,
+    }
 }
 
 pub(super) fn succeeded(stdout: &str) -> CommandOutput {

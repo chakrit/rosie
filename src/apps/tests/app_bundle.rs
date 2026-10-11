@@ -19,9 +19,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
         &ctx(fake, &ALL_ROOTS),
         Path::new(app),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     )
 }
 

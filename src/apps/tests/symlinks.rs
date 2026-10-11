@@ -21,9 +21,7 @@ fn refuses_an_app_argument_through_a_symlink() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new("/Users/me/Bar.app"),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
 
     assert!(
@@ -54,16 +52,9 @@ fn a_symlinked_info_plist_is_refused_by_app_and_orphan_scans() {
     let app = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     );
-    let orphans = scan_orphans(
-        &ctx(&fake, &ALL_ROOTS),
-        &paths(),
-        AggressiveItems::Keep,
-        Mounts::Skip,
-    );
+    let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep));
 
     assert!(
         matches!(app, Err(Error::Fs(fs::Error::Symlink { .. }))),
@@ -85,19 +76,12 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
         &ctx(fake, &ALL_ROOTS),
         Path::new(app),
-        &paths(),
-        AggressiveItems::Keep,
-        Walk::default(),
+        &settings(AggressiveItems::Keep),
     )
 }
 
 fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {
-    scan_orphans(
-        &ctx(fake, &ALL_ROOTS),
-        &paths(),
-        AggressiveItems::Keep,
-        Mounts::Skip,
-    )
+    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(AggressiveItems::Keep))
 }
 
 #[test]
@@ -147,7 +131,7 @@ fn a_symlinked_app_folder_fails_every_installed_app_listing() {
 
     let app = app_scan(&fake, BAR);
     let orphans = orphan_scan(&fake);
-    let picker = picker_apps(&ctx(&fake, &ALL_ROOTS), &paths());
+    let picker = picker_apps(&ctx(&fake, &ALL_ROOTS));
 
     assert!(is_symlink_refusal(&app), "{app:?}");
     assert!(is_symlink_refusal(&orphans), "{orphans:?}");

@@ -97,7 +97,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let path = self.typed_root(path);
         let dir = self.env.paths.config_dir();
 
-        roots::add(&self.own, &dir, &self.env.paths, file, &path)?;
+        roots::add(&self.own, &dir, file, &path)?;
         self.say(&format!("added {}", path.display()))?;
         Ok(ExitStatus::Success)
     }
@@ -120,7 +120,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         let dir = self.env.paths.config_dir();
 
-        roots::remove(&self.own, &dir, &self.env.paths, file, &path)?;
+        roots::remove(&self.own, &dir, file, &path)?;
         self.say(&format!("removed {}", path.display()))?;
         Ok(ExitStatus::Success)
     }

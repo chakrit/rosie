@@ -79,10 +79,9 @@ impl Entry {
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
         ctx: &FsContext<B>,
-        paths: &Paths,
         mounts: Mounts,
     ) -> Result<bool, fs::Error> {
-        behind_a_closed_mount(ctx, &self.path, self.meta, paths, mounts)
+        behind_a_closed_mount(ctx, &self.path, self.meta, mounts)
     }
 
     pub(super) fn into_path(self) -> PathBuf {
@@ -187,10 +186,9 @@ impl Folder {
     pub fn is_behind_a_closed_mount<B: Backend>(
         &self,
         ctx: &FsContext<B>,
-        paths: &Paths,
         mounts: Mounts,
     ) -> Result<bool, fs::Error> {
-        behind_a_closed_mount(ctx, &self.path, self.meta, paths, mounts)
+        behind_a_closed_mount(ctx, &self.path, self.meta, mounts)
     }
 
     /// `lstat`s the entry `name` of this folder's listing and tells what it is as the
@@ -270,14 +268,13 @@ fn behind_a_closed_mount<B: Backend>(
     ctx: &FsContext<B>,
     path: &Path,
     meta: Metadata,
-    paths: &Paths,
     mounts: Mounts,
 ) -> Result<bool, fs::Error> {
     if mounts == Mounts::Enter {
         return Ok(false);
     }
 
-    let anchor = anchor(path, paths);
+    let anchor = anchor(path, ctx.paths());
     let folders = path
         .ancestors()
         .skip(1)

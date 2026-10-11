@@ -9,6 +9,7 @@ mod links;
 mod ops;
 mod paths;
 mod real;
+mod shell_command;
 
 pub use backend::{
     Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS, SystemArgv,
@@ -20,3 +21,4 @@ pub use links::EnterLinks;
 pub use ops::{Cleanup, FsOp, LinkTarget, Rosie, UserInput};
 pub use paths::Paths;
 pub use real::RealBackend;
+pub use shell_command::{InvalidCommand, ShellCommand};

@@ -13,7 +13,7 @@ use super::lua::compile;
 use super::rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape, Twin,
 };
-use crate::fs::Argv;
+use crate::fs::ShellCommand;
 
 /// One rule table from a file, keyed as written: a plain name or a qualified override.
 pub(super) struct Parsed {
@@ -63,10 +63,12 @@ struct RawRule {
     paths_aggressive: Option<Vec<String>>,
     cmd: Option<String>,
     cmd_aggressive: Option<String>,
+    shell: Option<String>,
+    env: Option<BTreeMap<String, String>>,
 }
 
 impl RawRule {
-    fn present_fields(&self) -> [(&'static str, bool); 10] {
+    fn present_fields(&self) -> [(&'static str, bool); 12] {
         [
             ("target", self.target.is_some()),
             ("target_aggressive", self.target_aggressive.is_some()),
@@ -78,6 +80,8 @@ impl RawRule {
             ("paths_aggressive", self.paths_aggressive.is_some()),
             ("cmd", self.cmd.is_some()),
             ("cmd_aggressive", self.cmd_aggressive.is_some()),
+            ("shell", self.shell.is_some()),
+            ("env", self.env.is_some()),
         ]
     }
 }
@@ -120,7 +124,7 @@ impl Strategy {
             Strategy::Marker => &["target", "target_aggressive", "marker", "inside"],
             Strategy::Lua => &["target", "target_aggressive", "expr", "script"],
             Strategy::Path => &["paths", "paths_aggressive"],
-            Strategy::Tool => &["cmd", "cmd_aggressive"],
+            Strategy::Tool => &["cmd", "cmd_aggressive", "shell", "env"],
         }
     }
 }
@@ -214,14 +218,24 @@ fn paths(raw: &RawRule) -> Result<Shape, Problem> {
 }
 
 fn tool(raw: &RawRule) -> Result<Shape, Problem> {
+    let command = |field, text: &String| {
+        let shell = raw
+            .shell
+            .clone()
+            .unwrap_or_else(|| ShellCommand::DEFAULT_SHELL.to_owned());
+        let env = raw.env.clone().unwrap_or_default();
+        ShellCommand::new(shell, text.clone(), env)
+            .map_err(|source| Problem::BadCommand { field, source })
+    };
+
     let normal = raw
         .cmd
-        .as_deref()
+        .as_ref()
         .map(|text| command("cmd", text))
         .transpose()?;
     let aggressive = raw
         .cmd_aggressive
-        .as_deref()
+        .as_ref()
         .map(|text| command("cmd_aggressive", text))
         .transpose()?;
     let cmd = Twin::from_parts(normal, aggressive)
@@ -267,17 +281,6 @@ fn fixed_paths(field: &'static str, texts: &[String]) -> Result<FixedPaths, Prob
         });
     }
     FixedPaths::new(parsed).ok_or(Problem::EmptyList(field))
-}
-
-/// Splits a command on spaces into argv (`docs/spec/rules.md#tool-strategy`). It runs
-/// without a shell, so every other character is a literal part of its argument. This is
-/// the one parser of a rule's command: the plan takes the argv as is.
-fn command(field: &'static str, text: &str) -> Result<Argv, Problem> {
-    let mut words = text.split(' ').filter(|word| !word.is_empty());
-    let Some(program) = words.next() else {
-        return Err(Problem::EmptyCommand(field));
-    };
-    Ok(words.fold(Argv::new(program), Argv::arg))
 }
 
 #[cfg(test)]
@@ -406,7 +409,7 @@ mod tests {
     }
 
     #[test]
-    fn splits_tool_commands_into_argv() {
+    fn keeps_tool_commands_whole_for_the_default_shell() {
         let shape = only_shape(
             "[rules.r]\nstrategy = \"tool\"\ncmd = \"  docker system  prune --force \"\n\
              cmd_aggressive = \"docker system prune --all\"",
@@ -415,14 +418,40 @@ mod tests {
         let Shape::Tool(cmd) = shape else {
             panic!("expected a tool rule");
         };
-        let docker = Argv::new("docker").arg("system").arg("prune");
+        let command = |text: &str| {
+            ShellCommand::new("/bin/bash".into(), text.into(), BTreeMap::new()).expect("valid")
+        };
         assert_eq!(
             cmd,
             Twin::Both {
-                normal: docker.clone().arg("--force"),
-                aggressive: docker.arg("--all"),
+                normal: command("  docker system  prune --force "),
+                aggressive: command("docker system prune --all"),
             }
         );
+    }
+
+    #[test]
+    fn gives_both_twins_the_rules_shell_and_environment() {
+        let shape = only_shape(
+            "[rules.r]\nstrategy = \"tool\"\nshell = \"/bin/zsh\"\n\
+             cmd = \"brew cleanup\"\ncmd_aggressive = \"brew cleanup -s\"\n\
+             env = { HOMEBREW_NO_ENV_HINTS = \"1\" }",
+        );
+
+        let Shape::Tool(Twin::Both { normal, aggressive }) = shape else {
+            panic!("expected a tool rule with twins");
+        };
+        for command in [&normal, &aggressive] {
+            assert_eq!(command.shell(), Path::new("/bin/zsh"));
+            assert_eq!(
+                command
+                    .env()
+                    .get("HOMEBREW_NO_ENV_HINTS")
+                    .map(String::as_str),
+                Some("1")
+            );
+        }
+        assert_eq!(aggressive.cmd(), "brew cleanup -s");
     }
 
     #[test]
@@ -493,19 +522,33 @@ mod tests {
     }
 
     #[test]
-    fn passes_shell_characters_through_as_literal_arguments() {
-        let shape = only_shape(
-            "[rules.r]\nstrategy = \"tool\"\n\
-             cmd = \"sh -c 'rm $HOME/*' && é\"",
-        );
+    fn hands_shell_syntax_to_the_shell_unparsed() {
+        let text = "sh -c 'rm $HOME/*' && é";
+        let shape = only_shape(&format!("[rules.r]\nstrategy = \"tool\"\ncmd = {text:?}"));
 
-        let want = Argv::new("sh")
-            .arg("-c")
-            .arg("'rm")
-            .arg("$HOME/*'")
-            .arg("&&")
-            .arg("é");
-        assert_eq!(shape, Shape::Tool(Twin::Normal(want)));
+        let Shape::Tool(Twin::Normal(command)) = shape else {
+            panic!("expected a tool rule");
+        };
+        assert_eq!(command.cmd(), text);
+    }
+
+    #[test]
+    fn refuses_a_tool_command_no_shell_can_run() {
+        let cases = [
+            ("shell = \"bash\"\ncmd = \"x\"", "cmd"),
+            ("cmd = \"x\"\nenv = { \"-i\" = \"1\" }", "cmd"),
+            ("cmd_aggressive = \"  \"", "cmd_aggressive"),
+            ("cmd = \"\"", "cmd"),
+        ];
+
+        for (fields, want) in cases {
+            let text = format!("[rules.r]\nstrategy = \"tool\"\n{fields}");
+            let found = problem(&text);
+            assert!(
+                matches!(found, Problem::BadCommand { field, .. } if field == want),
+                "{text}: {found}"
+            );
+        }
     }
 
     #[test]
@@ -643,13 +686,6 @@ mod tests {
                 ..
             }
         ));
-        for cmd in ["", "   "] {
-            let text = format!("[rules.r]\nstrategy = \"tool\"\ncmd = {cmd:?}");
-            assert!(
-                matches!(problem(&text), Problem::EmptyCommand("cmd")),
-                "{cmd}"
-            );
-        }
     }
 
     #[test]

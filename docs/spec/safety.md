@@ -44,6 +44,8 @@ forced through it; there are no exceptions.
 - The roots check covers filesystem mutations only. Tool commands are outside it; the
   plan lists each for confirmation. Tools are safe by construction: rosie does not work
   their internals.
+- A tool rule's `cmd` runs through the rule's `shell`; rosie never parses it
+  ([rules.md](rules.md#tool-strategy)).
 
 ### Rosie's own data
 

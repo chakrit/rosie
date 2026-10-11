@@ -163,18 +163,18 @@ impl<B: Backend + Sync> Scanner<B> {
 
         let found = targets.finish();
         let mut builder = PlanBuilder::new(self.settings.aggressive);
-        self.add_tools(&mut builder, &log);
+        self.add_tools(&mut builder);
         Ok(self.assemble(builder, found, log))
     }
 
     // plan
 
-    fn add_tools(&self, builder: &mut PlanBuilder, log: &Log) {
+    fn add_tools(&self, builder: &mut PlanBuilder) {
         for rule in self.rules.iter() {
-            let Shape::Tool(argvs) = rule.shape() else {
+            let Shape::Tool(commands) = rule.shape() else {
                 continue;
             };
-            let cmds = match argvs {
+            let cmds = match commands {
                 Twin::Normal(cmd) => ToolCmds::Normal(cmd),
                 Twin::Aggressive(cmd) => ToolCmds::Aggressive(cmd),
                 Twin::Both { normal, aggressive } => ToolCmds::Twins {
@@ -183,10 +183,7 @@ impl<B: Backend + Sync> Scanner<B> {
                 },
             };
 
-            let id = rule.id().to_string();
-            if let Err(error) = builder.add_tool(&id, cmds) {
-                log.problem(Problem::Plan(error));
-            }
+            builder.add_tool(&rule.id().to_string(), cmds);
         }
     }
 

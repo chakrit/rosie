@@ -231,8 +231,8 @@ impl<B: Backend + Sync> Runner<B> {
 
     // commands
 
-    /// Runs one command, never through a shell, showing its last 3 output lines while
-    /// it runs and keeping them as its result.
+    /// Runs one argv as given, showing its last 3 output lines while it runs and keeping
+    /// them as its result.
     fn run_command<R: Reporter>(&self, argv: Argv, reporter: &mut R) -> ItemResult {
         reporter.command_started(&argv);
 

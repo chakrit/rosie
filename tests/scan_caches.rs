@@ -185,22 +185,22 @@ fn tool_rules_list_their_commands() {
          [rules.homebrew]\nstrategy = \"tool\"\ncmd = \"brew cleanup\"\n",
     );
 
-    let tools = |scan: &rosie::scan::Scan| -> Vec<(Vec<String>, String, Selection)> {
+    let tools = |scan: &rosie::scan::Scan| -> Vec<(String, String, Selection)> {
         scan.plan
             .tools()
             .iter()
             .map(|tool| {
-                let words: Vec<&str> = tool.command.words().collect();
-                (tool.rules.clone(), words.join(" "), tool.selection)
+                let cmd = tool.command.cmd().to_owned();
+                (tool.rule.clone(), cmd, tool.selection)
             })
             .collect()
     };
     let plain = caches(&fake);
     let flagged = caches_with(&fake, aggressive());
 
-    let docker = vec!["rosie/docker".to_owned()];
-    let gradle = vec!["rosie/gradle".to_owned()];
-    let homebrew = vec!["rosie/homebrew".to_owned()];
+    let docker = "rosie/docker".to_owned();
+    let gradle = "rosie/gradle".to_owned();
+    let homebrew = "rosie/homebrew".to_owned();
     assert_eq!(
         tools(&plain),
         [

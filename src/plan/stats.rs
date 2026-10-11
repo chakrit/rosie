@@ -534,13 +534,13 @@ mod tests {
         for found in matches {
             builder.add_path(found).expect("valid match");
         }
+        let prune = crate::plan::tool_command("docker system prune --force");
+        let prune_all = crate::plan::tool_command("docker system prune --all --force");
         let docker = ToolCmds::Twins {
-            cmd: &crate::plan::argv("docker system prune --force"),
-            cmd_aggressive: &crate::plan::argv("docker system prune --all --force"),
+            cmd: &prune,
+            cmd_aggressive: &prune_all,
         };
-        builder
-            .add_tool("rosie/docker", docker)
-            .expect("valid command");
+        builder.add_tool("rosie/docker", docker);
         builder
             .add_receipt("com.x.pkg", Twin::Normal)
             .expect("valid");

@@ -16,7 +16,7 @@ strategy has its own fields:
 | `marker`   | `target`, `marker` and/or `inside`       | cleans folders whose markers match    |
 | `lua`      | `target`, exactly one of `expr`/`script` | cleans folders the Lua code accepts   |
 | `path`     | `paths`                                  | cleans fixed paths                    |
-| `tool`     | `cmd`, `cmd_aggressive`                  | runs the tool's own cleanup command   |
+| `tool`     | `cmd`, `cmd_aggressive`, `shell`, `env`  | runs the tool's own cleanup command   |
 
 - `target` is one exact folder name.
 - `paths` lists fixed paths, used by caches rules.
@@ -48,9 +48,21 @@ internals:
 strategy = "tool"
 cmd = "docker system prune --force"
 cmd_aggressive = "docker system prune --all --volumes --force"
+
+[rules.homebrew]
+strategy = "tool"
+shell = "/bin/zsh"
+cmd = "brew cleanup"
+env = { HOMEBREW_NO_ENV_HINTS = "1" }
 ```
 
-- `cmd` is split into argv and never run through a shell.
+- `cmd` and `cmd_aggressive` are strings. Rosie runs each as `<shell> -c <cmd>`, with
+  `env` added to its environment.
+- Rosie never parses or splits `cmd`.
+- `shell` is an absolute path; it defaults to `/bin/bash`.
+- `env` is a table of variables. Names are letters, digits, and `_`, not starting with
+  a digit.
+- `shell` and `env` apply to both `cmd` and `cmd_aggressive`.
 - A missing tool fails normally and is reported.
 
 ### Aggressive twins

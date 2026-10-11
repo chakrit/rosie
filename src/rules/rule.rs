@@ -7,7 +7,7 @@ use std::path::PathBuf;
 
 use super::glob::Glob;
 use super::name::RuleId;
-use crate::fs::{Argv, Paths};
+use crate::fs::{Paths, ShellCommand};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {
@@ -47,8 +47,8 @@ pub enum Shape {
     Folder(FolderRule),
     /// The `path` strategy.
     Paths(Twin<FixedPaths>),
-    /// The `tool` strategy.
-    Tool(Twin<Argv>),
+    /// The `tool` strategy: `cmd` and `cmd_aggressive` share the rule's `shell` and `env`.
+    Tool(Twin<ShellCommand>),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

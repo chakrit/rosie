@@ -18,11 +18,10 @@ mod size;
 mod stats;
 mod trim;
 
-use std::ffi::OsString;
 use std::fmt;
 use std::path::{Path, PathBuf};
 
-use crate::fs::{Argv, FileKind, SystemArgv, SystemTool};
+use crate::fs::{Argv, FileKind, ShellCommand, SystemArgv, SystemTool};
 use crate::shell;
 
 use deletes::Deletes;
@@ -304,12 +303,13 @@ impl Bootout {
     }
 }
 
-/// A tool's own cleanup command, outside the roots gate. Its size is unknown.
+/// One tool rule's own cleanup action, outside the roots gate. Its size is unknown.
+/// Rosie never compares two tools' commands: each entry is its rule's own action
+/// (`docs/spec/plan.md#plan-file`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Tool {
-    /// Every rule whose command has this argv.
-    pub rules: Vec<String>,
-    pub command: Command,
+    pub rule: String,
+    pub command: ShellCommand,
     pub selection: Selection,
 }
 
@@ -403,56 +403,6 @@ impl Package {
 
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-}
-
-/// A program and its arguments, never run through a shell. Never empty.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Command {
-    program: String,
-    args: Vec<String>,
-}
-
-impl Command {
-    /// A command from an argv, such as a tool rule's `cmd` as the rule parser split it
-    /// (`docs/spec/rules.md#tool-strategy`). A plan file holds UTF-8 text, so an
-    /// argument that is not UTF-8 is refused.
-    pub fn from_argv(argv: &Argv) -> Result<Self, Error> {
-        let words = std::iter::once(argv.program())
-            .chain(argv.args().iter().map(OsString::as_os_str))
-            .map(|word| {
-                word.to_str()
-                    .map(str::to_owned)
-                    .ok_or_else(|| Error::NonUtf8Word {
-                        word: word.to_string_lossy().into_owned(),
-                    })
-            })
-            .collect::<Result<Vec<_>, _>>()?;
-        Command::from_words(words)
-    }
-
-    /// A command from an argv list, such as one read back from a plan file.
-    pub fn from_words(words: Vec<String>) -> Result<Self, Error> {
-        for word in &words {
-            refuse_nul(word)?;
-        }
-
-        let mut words = words.into_iter();
-        let program = words.next().ok_or(Error::EmptyArgv)?;
-        Ok(Command {
-            program,
-            args: words.collect(),
-        })
-    }
-
-    pub fn words(&self) -> impl Iterator<Item = &str> {
-        std::iter::once(self.program.as_str()).chain(self.args.iter().map(String::as_str))
-    }
-
-    pub fn argv(&self) -> Argv {
-        self.args
-            .iter()
-            .fold(Argv::new(&self.program), |argv, arg| argv.arg(arg))
     }
 }
 
@@ -572,10 +522,11 @@ impl fmt::Display for LaunchDomain {
     }
 }
 
-/// `text` split on spaces, as the rule parser splits a `cmd`, for tests.
+/// `text` as a tool rule's `cmd` for the default shell, with no added environment, for
+/// tests.
 #[cfg(test)]
-fn argv(text: &str) -> Argv {
-    let mut words = text.split(' ');
-    let program = words.next().unwrap_or_default();
-    words.fold(Argv::new(program), Argv::arg)
+fn tool_command(text: &str) -> ShellCommand {
+    let shell = ShellCommand::DEFAULT_SHELL.to_owned();
+    ShellCommand::new(shell, text.to_owned(), std::collections::BTreeMap::new())
+        .expect("a valid test command")
 }

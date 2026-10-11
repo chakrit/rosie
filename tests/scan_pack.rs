@@ -129,7 +129,7 @@ fn a_caches_scan_takes_the_packs_fixed_paths_and_tools() {
         .plan
         .tools()
         .iter()
-        .map(|tool| tool.command.words().collect::<Vec<_>>().join(" "))
+        .map(|tool| tool.command.cmd().to_owned())
         .collect();
     assert!(
         commands.contains(&"docker system prune --force".to_owned()),

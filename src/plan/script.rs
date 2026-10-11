@@ -19,6 +19,10 @@ use super::{Error, Plan, Status, blocked_hint};
 use crate::fs::Argv;
 use crate::shell;
 
+/// Adds a tool's environment; by its absolute path, so the script's `PATH` cannot swap
+/// it.
+const ENV_PROGRAM: &str = "/usr/bin/env";
+
 /// `:` keeps `main` valid bash when every entry in it is commented out.
 const HEADER: &str = "\
 #!/bin/bash
@@ -61,7 +65,7 @@ impl Plan {
             script.push_str(&line.render(&command_line(&delete_argv(&delete.path))));
         }
         for tool in &self.tools {
-            let note = format!("size unknown · {}", rules_text(&tool.rules));
+            let note = format!("size unknown · {}", shell::comment_text(&tool.rule));
             let line = Line::unblocked(tool.selection.into(), note);
             script.push_str(&line.render(&command_line(&tool.command.argv())));
         }
@@ -117,12 +121,29 @@ impl Line {
 }
 
 /// An argv as one line that runs exactly that argv, reading no input:
-/// `( exec -- <quoted words> ) </dev/null`.
+/// `( exec -- <quoted words> ) </dev/null`, or, with an added environment,
+/// `( exec -- /usr/bin/env NAME=value … <quoted words> ) </dev/null`.
 ///
 /// As arguments to `exec`, the words are never read as a builtin, a function, a reserved
 /// word, a job, or an assignment. The subshell keeps `exec` from replacing the script.
 fn command_line(argv: &Argv) -> String {
-    let words = std::iter::once(argv.program())
+    let assignments = argv.envs().iter().map(|(name, value)| {
+        let mut assignment = name.clone();
+        assignment.push("=");
+        assignment.push(value);
+        assignment
+    });
+    let env_prefix = match argv.envs().is_empty() {
+        true => Vec::new(),
+        false => std::iter::once(ENV_PROGRAM.into())
+            .chain(assignments)
+            .collect(),
+    };
+
+    let words = env_prefix
+        .iter()
+        .map(|word| word.as_os_str())
+        .chain(std::iter::once(argv.program()))
         .chain(argv.args().iter().map(|arg| arg.as_os_str()))
         .map(|word| shell::quote_word(&word.to_string_lossy()))
         .collect::<Vec<_>>()
@@ -150,9 +171,10 @@ mod tests {
     use tempfile::TempDir;
 
     use super::*;
+    use crate::fs::ShellCommand;
     use crate::plan::{
         AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
-        Size, ToolCmds, Twin,
+        Size, ToolCmds, Twin, tool_command,
     };
 
     const HOSTILE: &str = "/w/it's \"$HOME\"`id`\nrm -rf ~ #";
@@ -189,18 +211,14 @@ mod tests {
                 LaunchDomain::System,
             )
             .expect("valid");
-        builder
-            .add_tool(
-                "rosie/docker",
-                ToolCmds::Normal(&crate::plan::argv("docker system prune --force")),
-            )
-            .expect("valid");
-        builder
-            .add_tool(
-                "rosie/tool",
-                ToolCmds::Aggressive(&crate::plan::argv("tool clean --dir=/tmp/x$y")),
-            )
-            .expect("valid");
+        builder.add_tool(
+            "rosie/docker",
+            ToolCmds::Normal(&tool_command("docker system prune --force")),
+        );
+        builder.add_tool(
+            "rosie/tool",
+            ToolCmds::Aggressive(&tool_command("tool clean --dir=/tmp/x$y")),
+        );
         builder
             .add_receipt("com.x.pkg", Twin::Normal)
             .expect("valid");
@@ -354,7 +372,7 @@ mod tests {
                     .to_owned(),
                 "( exec -- rm -rfx -- /Library/LaunchDaemons/com.x.plist ) </dev/null".to_owned(),
                 format!("( exec -- rm -rfx -- {} ) </dev/null", shell::quote_word(HOSTILE)),
-                "( exec -- docker system prune --force ) </dev/null".to_owned(),
+                "( exec -- /bin/bash -c 'docker system prune --force' ) </dev/null".to_owned(),
                 "( exec -- pkgutil --forget com.x.pkg ) </dev/null".to_owned(),
             ],
             "{script}"
@@ -380,7 +398,8 @@ mod tests {
             "{script}"
         );
         assert!(
-            script.contains("\n# ( exec -- tool clean '--dir=/tmp/x$y' ) </dev/null\n"),
+            script
+                .contains("\n# ( exec -- /bin/bash -c 'tool clean --dir=/tmp/x$y' ) </dev/null\n"),
             "{script}"
         );
         assert!(script.contains("rosie roots add "), "{script}");
@@ -451,17 +470,38 @@ mod tests {
     /// What bash prints for a command's exported line, run with `PATH` holding only
     /// `bin`.
     fn run_exported_line(words: &[&str], bin: &Path) -> std::process::Output {
-        let words = words.iter().copied().map(str::to_owned).collect();
-        let command = crate::plan::Command::from_words(words).expect("valid");
-        let line = command_line(&command.argv());
+        let (program, args) = words.split_first().expect("a program");
+        let argv = args
+            .iter()
+            .fold(Argv::new(program), |argv, arg| argv.arg(arg));
+        run_line(&command_line(&argv), bin)
+    }
 
+    fn run_line(line: &str, bin: &Path) -> std::process::Output {
         Command::new("/bin/bash")
             .arg("-c")
-            .arg(&line)
+            .arg(line)
             .env_clear()
             .env("PATH", bin)
             .output()
             .expect("run /bin/bash")
+    }
+
+    /// A tool's exported line hands its `cmd` whole to its shell, with its environment.
+    #[test]
+    fn an_exported_tool_runs_its_cmd_through_its_shell_with_its_env() {
+        let bin = tempfile::tempdir().expect("temp folder");
+        let tool = ShellCommand::new(
+            "/bin/sh".to_owned(),
+            "printf '%s|%s' \"$GREETING\" \"$(echo inner)\"".to_owned(),
+            [("GREETING".to_owned(), "it's \"here\" $HOME".to_owned())].into(),
+        )
+        .expect("valid");
+
+        let output = run_line(&command_line(&tool.argv()), bin.path());
+
+        assert!(output.status.success(), "{output:?}");
+        assert_eq!(output.stdout, b"it's \"here\" $HOME|inner");
     }
 
     /// A `PATH` folder whose only program is a link named `program` to

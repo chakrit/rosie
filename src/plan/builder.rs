@@ -3,7 +3,7 @@
 //! - Path entries are keyed by path and list every rule that matched that path.
 //! - Nested matches collapse into the outer one, which takes over their launch-job
 //!   bootouts and runs elevated when any of them would.
-//! - Tool rules with an identical argv dedupe into one entry.
+//! - Each tool rule's command is its own entry: tool commands are never compared.
 //! - Aggressive items are unticked unless `--aggressive` is given, which also makes a
 //!   rule's `cmd_aggressive` replace its `cmd`; items outside the roots are blocked.
 //! - Rules that disagree on the tier of a path, or of paths nested in it, make the entry
@@ -15,10 +15,10 @@ use std::path::{Path, PathBuf};
 use super::conflict::{Tiers, Verdict};
 use super::deletes::{Found, Located};
 use super::{
-    Bootout, Command, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
-    Report, RunAs, Selection, Size, Status, Tool, check_path,
+    Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
+    Selection, Size, Status, Tool, check_path,
 };
-use crate::fs::Argv;
+use crate::fs::ShellCommand;
 
 /// Whether `--aggressive` was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -34,15 +34,14 @@ pub enum Twin {
     Aggressive,
 }
 
-/// A tool rule's commands, as its `cmd` and `cmd_aggressive` fields give them, split
-/// into argv by the rule parser.
+/// A tool rule's commands, as its `cmd` and `cmd_aggressive` fields give them.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolCmds<'a> {
-    Normal(&'a Argv),
-    Aggressive(&'a Argv),
+    Normal(&'a ShellCommand),
+    Aggressive(&'a ShellCommand),
     Twins {
-        cmd: &'a Argv,
-        cmd_aggressive: &'a Argv,
+        cmd: &'a ShellCommand,
+        cmd_aggressive: &'a ShellCommand,
     },
 }
 
@@ -115,11 +114,10 @@ impl PlanBuilder {
         Ok(())
     }
 
-    /// Adds a tool rule's commands. Without `--aggressive` its `cmd` is ticked and its
-    /// `cmd_aggressive` listed unticked; with it, `cmd_aggressive` replaces `cmd`. A
-    /// command whose argv an earlier rule already added gains the rule instead of a
-    /// second entry.
-    pub fn add_tool(&mut self, rule: &str, cmds: ToolCmds<'_>) -> Result<(), Error> {
+    /// Adds a tool rule's commands, each its own entry keyed by the rule. Without
+    /// `--aggressive` its `cmd` is ticked and its `cmd_aggressive` listed unticked; with
+    /// it, `cmd_aggressive` replaces `cmd`.
+    pub fn add_tool(&mut self, rule: &str, cmds: ToolCmds<'_>) {
         let fields = match (cmds, self.aggressive) {
             (ToolCmds::Normal(cmd), _) => vec![(cmd, Twin::Normal)],
             (ToolCmds::Aggressive(cmd), _) => vec![(cmd, Twin::Aggressive)],
@@ -135,15 +133,15 @@ impl PlanBuilder {
             ) => vec![(cmd, Twin::Normal), (cmd_aggressive, Twin::Aggressive)],
         };
 
-        let commands = fields
+        let tools: Vec<Tool> = fields
             .into_iter()
-            .map(|(argv, twin)| Command::from_argv(argv).map(|command| (command, twin)))
-            .collect::<Result<Vec<_>, _>>()?;
-
-        for (command, twin) in commands {
-            self.add_command(rule, command, twin);
-        }
-        Ok(())
+            .map(|(command, twin)| Tool {
+                rule: rule.to_owned(),
+                command: command.clone(),
+                selection: self.selection(twin),
+            })
+            .collect();
+        self.tools.extend(tools);
     }
 
     pub fn add_receipt(&mut self, package: &str, twin: Twin) -> Result<(), Error> {
@@ -193,24 +191,6 @@ impl PlanBuilder {
             entry.rules.sort();
         }
         Ok(entry)
-    }
-
-    fn add_command(&mut self, rule: &str, command: Command, twin: Twin) {
-        let selection = self.selection(twin);
-
-        if let Some(tool) = self.tools.iter_mut().find(|tool| tool.command == command) {
-            tool.selection = strongest_selection(tool.selection, selection);
-            if !tool.rules.iter().any(|seen| seen == rule) {
-                tool.rules.push(rule.to_owned());
-            }
-            return;
-        }
-
-        self.tools.push(Tool {
-            rules: vec![rule.to_owned()],
-            command,
-            selection,
-        });
     }
 
     // ticking
@@ -284,17 +264,10 @@ impl Found for FoundPath {
     }
 }
 
-fn strongest_selection(current: Selection, added: Selection) -> Selection {
-    match (current, added) {
-        (Selection::Ticked, _) | (_, Selection::Ticked) => Selection::Ticked,
-        (Selection::Unticked, Selection::Unticked) => Selection::Unticked,
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::plan::{Runnable, argv};
+    use crate::plan::{Runnable, tool_command};
 
     fn found(path: &str, rule: &str, twin: Twin) -> PathMatch {
         PathMatch {
@@ -343,16 +316,10 @@ mod tests {
             .collect()
     }
 
-    fn tool_summary(plan: &Plan) -> Vec<(Vec<String>, Vec<&str>, Selection)> {
+    fn tool_summary(plan: &Plan) -> Vec<(&str, &str, Selection)> {
         plan.tools()
             .iter()
-            .map(|tool| {
-                (
-                    tool.rules.clone(),
-                    tool.command.words().collect(),
-                    tool.selection,
-                )
-            })
+            .map(|tool| (tool.rule.as_str(), tool.command.cmd(), tool.selection))
             .collect()
     }
 
@@ -607,14 +574,6 @@ mod tests {
                 found("/w/x\0.plist", "rosie/launch", Twin::Normal),
                 LaunchDomain::System,
             ),
-            builder.add_tool("rosie/tool", ToolCmds::Normal(&argv("tool clean\0 --all"))),
-            builder.add_tool(
-                "rosie/tool",
-                ToolCmds::Twins {
-                    cmd: &argv("tool clean"),
-                    cmd_aggressive: &argv("tool\0 clean --all"),
-                },
-            ),
             builder.add_receipt("com.x\0.pkg", Twin::Normal),
         ];
 
@@ -761,12 +720,14 @@ mod tests {
 
     // tools
 
+    /// Rosie never compares tool commands (`docs/spec/plan.md#plan-file`): two rules
+    /// with byte-identical commands are two actions, each with its own tick.
     #[test]
-    fn tools_with_the_same_argv_dedupe_into_one_entry() {
+    fn each_rules_command_is_its_own_entry_even_when_identical() {
         let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
-        let prune = argv("docker system prune --force");
-        let prune_all = argv("docker system prune --all --force");
-        let cleanup = argv("brew cleanup");
+        let prune = tool_command("docker system prune --force");
+        let prune_all = tool_command("docker system prune --all --force");
+        let cleanup = tool_command("brew cleanup");
         let adds = [
             (
                 "rosie/docker",
@@ -775,11 +736,11 @@ mod tests {
                     cmd_aggressive: &prune_all,
                 },
             ),
-            ("user/docker", ToolCmds::Normal(&prune)),
+            ("alice/docker", ToolCmds::Aggressive(&prune)),
             ("rosie/brew", ToolCmds::Normal(&cleanup)),
         ];
         for (rule, cmds) in adds {
-            builder.add_tool(rule, cmds).expect("valid command");
+            builder.add_tool(rule, cmds);
         }
 
         let plan = builder.build();
@@ -788,20 +749,21 @@ mod tests {
             tool_summary(&plan),
             [
                 (
-                    rules(&["rosie/docker", "user/docker"]),
-                    vec!["docker", "system", "prune", "--force"],
-                    Selection::Ticked,
+                    "rosie/docker",
+                    "docker system prune --force",
+                    Selection::Ticked
                 ),
                 (
-                    rules(&["rosie/docker"]),
-                    vec!["docker", "system", "prune", "--all", "--force"],
+                    "rosie/docker",
+                    "docker system prune --all --force",
                     Selection::Unticked,
                 ),
                 (
-                    rules(&["rosie/brew"]),
-                    vec!["brew", "cleanup"],
-                    Selection::Ticked
+                    "alice/docker",
+                    "docker system prune --force",
+                    Selection::Unticked
                 ),
+                ("rosie/brew", "brew cleanup", Selection::Ticked),
             ]
         );
     }
@@ -809,14 +771,15 @@ mod tests {
     #[test]
     fn with_aggressive_cmd_aggressive_replaces_cmd() {
         let mut builder = PlanBuilder::new(AggressiveItems::Ticked);
+        let prune = tool_command("docker system prune --force");
+        let prune_all = tool_command("docker system prune --all --force");
+        let cleanup = tool_command("brew cleanup");
         let twins = ToolCmds::Twins {
-            cmd: &argv("docker system prune --force"),
-            cmd_aggressive: &argv("docker system prune --all --force"),
+            cmd: &prune,
+            cmd_aggressive: &prune_all,
         };
-        builder.add_tool("rosie/docker", twins).expect("valid");
-        builder
-            .add_tool("rosie/brew", ToolCmds::Normal(&argv("brew cleanup")))
-            .expect("valid");
+        builder.add_tool("rosie/docker", twins);
+        builder.add_tool("rosie/brew", ToolCmds::Normal(&cleanup));
 
         let plan = builder.build();
 
@@ -824,15 +787,11 @@ mod tests {
             tool_summary(&plan),
             [
                 (
-                    rules(&["rosie/docker"]),
-                    vec!["docker", "system", "prune", "--all", "--force"],
+                    "rosie/docker",
+                    "docker system prune --all --force",
                     Selection::Ticked,
                 ),
-                (
-                    rules(&["rosie/brew"]),
-                    vec!["brew", "cleanup"],
-                    Selection::Ticked
-                ),
+                ("rosie/brew", "brew cleanup", Selection::Ticked),
             ]
         );
     }

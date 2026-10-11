@@ -13,7 +13,7 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use super::error::{Error, Stray};
 use super::source::Source;
 use crate::fs::{Backend, FileKind, FsContext, FsOp, Rosie};
-use crate::rules::Name;
+use crate::rules::PackName;
 
 const PACKS_FOLDER: &str = "packs";
 const PULLED_FILE: &str = ".pulled";
@@ -244,7 +244,7 @@ impl<'g, B: Backend> Store<'g, B> {
 /// What an entry of the packs folder is.
 enum TopEntry {
     /// An owner's folder, holding that owner's packs.
-    Owner(Name),
+    Owner(PackName),
     /// A plain file, such as `.DS_Store`, passed over.
     File,
 }
@@ -267,9 +267,9 @@ fn top_entry(path: &Path, kind: FileKind) -> Result<TopEntry, Error> {
 }
 
 /// A copy is known by its name, whatever its kind, so settling can clear it.
-fn owner_entry(owner: &Name, path: &Path, kind: FileKind) -> Result<OwnerEntry, Error> {
+fn owner_entry(owner: &PackName, path: &Path, kind: FileKind) -> Result<OwnerEntry, Error> {
     if let Some(repo) = copied_repo(path) {
-        let repo = Name::parse(repo).map_err(|error| stray(path, Stray::BadName(error)))?;
+        let repo = PackName::parse(repo).map_err(|error| stray(path, Stray::BadName(error)))?;
         return source_in(owner, path, repo).map(OwnerEntry::Copy);
     }
 
@@ -289,15 +289,15 @@ fn copied_repo(path: &Path) -> Option<&str> {
 }
 
 /// The entry's own name as a pack or owner name.
-fn entry_name(path: &Path) -> Result<Name, Error> {
+fn entry_name(path: &Path) -> Result<PackName, Error> {
     let text = path
         .file_name()
         .and_then(OsStr::to_str)
         .ok_or_else(|| stray(path, Stray::NotUtf8))?;
-    Name::parse(text).map_err(|error| stray(path, Stray::BadName(error)))
+    PackName::parse(text).map_err(|error| stray(path, Stray::BadName(error)))
 }
 
-fn source_in(owner: &Name, path: &Path, repo: Name) -> Result<Source, Error> {
+fn source_in(owner: &PackName, path: &Path, repo: PackName) -> Result<Source, Error> {
     Source::from_valid_names(owner.clone(), repo).map_err(|_| stray(path, Stray::ReservedName))
 }
 

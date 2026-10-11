@@ -63,8 +63,9 @@ pub fn pull<B: Backend, N: Network>(
 ) -> Result<Pulled, Error> {
     let settled = SettlePacks.run(store)?;
     let installed = settled.sources()?;
-    let source = installed_spelling(&installed, requested);
-    refuse_name_taken(&installed, source)?;
+    let replaced = installed.iter().position(|other| other == requested);
+    let source = replaced.map_or(requested, |at| &installed[at]);
+    refuse_name_taken(&installed, replaced, source)?;
 
     let archive = DownloadArchive { source }.run(network)?;
     install(&settled, source, &archive, now)
@@ -127,12 +128,20 @@ fn install<B: Backend>(
 }
 
 /// Two packs with one name would give their rules the same `pack/rule` identities, so a
-/// source is refused when another installed source has its pack name.
-fn refuse_name_taken(installed: &[Source], source: &Source) -> Result<(), Error> {
-    let taken = installed.iter().find(|other| {
-        let same_name = other.pack().matches_ignoring_case(source.pack().as_str());
-        same_name && *other != source
-    });
+/// source is refused when an installed folder other than the one at `replaced` has its
+/// pack name. On a case-sensitive volume that includes a second spelling of the same
+/// repository, which the pull would leave in place.
+fn refuse_name_taken(
+    installed: &[Source],
+    replaced: Option<usize>,
+    source: &Source,
+) -> Result<(), Error> {
+    let taken = installed
+        .iter()
+        .enumerate()
+        .filter(|&(at, _)| Some(at) != replaced)
+        .map(|(_, other)| other)
+        .find(|other| other.pack() == source.pack());
 
     match taken {
         Some(other) => Err(Error::PackNameTaken {
@@ -140,15 +149,5 @@ fn refuse_name_taken(installed: &[Source], source: &Source) -> Result<(), Error>
             installed: other.clone(),
         }),
         None => Ok(()),
-    }
-}
-
-/// The installed source naming the same repository as `requested`, or `requested` when
-/// none does.
-fn installed_spelling<'a>(installed: &'a [Source], requested: &'a Source) -> &'a Source {
-    let same_repo = installed.iter().find(|other| other.is_same_repo(requested));
-    match same_repo {
-        Some(installed) => installed,
-        None => requested,
     }
 }

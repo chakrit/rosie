@@ -4,6 +4,7 @@ use crate::fs::{Backend, FsOp, Rosie};
 use crate::packs::error::Error;
 use crate::packs::source::Source;
 use crate::packs::store::Store;
+use crate::rules::PackName;
 
 /// Removes an installed pack by its pack name, including `rosie`
 /// (`docs/spec/rules.md#packs`).
@@ -37,16 +38,20 @@ impl RemovePack {
     }
 
     fn find<B: Backend>(&self, settled: &Settled<B>) -> Result<Source, Error> {
+        let not_installed = || Error::NotInstalled {
+            pack: self.pack.clone(),
+        };
+        // Text that is not a valid pack name names no installed pack.
+        let wanted = PackName::parse(&self.pack).map_err(|_| not_installed())?;
+
         let matching: Vec<Source> = settled
             .sources()?
             .into_iter()
-            .filter(|source| source.pack().matches_ignoring_case(&self.pack))
+            .filter(|source| *source.pack() == wanted)
             .collect();
 
         match matching.as_slice() {
-            [] => Err(Error::NotInstalled {
-                pack: self.pack.clone(),
-            }),
+            [] => Err(not_installed()),
             [source] => Ok(source.clone()),
             _ => Err(Error::Ambiguous {
                 pack: self.pack.clone(),

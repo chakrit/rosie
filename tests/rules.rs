@@ -261,6 +261,21 @@ fn refuses_rules_and_packs_defined_twice() {
     ));
 }
 
+/// Pack names compare ignoring ASCII case (`docs/spec/rules.md#packs`).
+#[test]
+fn refuses_hand_placed_packs_whose_names_differ_only_in_case() {
+    let fake = FakeBackend::new();
+    fake.add_dir(ROSIE_PACK);
+    fake.add_dir(format!("{PACKS}/fork/Rosie"));
+
+    let error = load(&fake).err();
+
+    assert!(
+        matches!(&error, Some(Error::DuplicatePack { pack, .. }) if pack.eq_ignore_ascii_case("rosie")),
+        "got {error:?}"
+    );
+}
+
 #[test]
 fn refuses_invalid_rule_names() {
     let bad_rule = FakeBackend::new();

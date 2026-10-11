@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 
 use super::error::{Error, Problem};
 use super::lua::new_parser_state;
-use super::name::{Name, NameError, RuleId};
+use super::name::{Name, NameError, PackName, RuleId};
 use super::pack::load_pack;
 use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
@@ -18,7 +18,7 @@ use crate::fs::{Backend, FileKind, FsContext, FsOp, Rosie};
 /// A pulled pack's name and the folder holding its `*.toml` rule files.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PackFolder {
-    pub name: Name,
+    pub name: PackName,
     pub folder: PathBuf,
 }
 
@@ -73,9 +73,9 @@ pub(super) fn load<B: Backend>(
 /// Two pulled packs with one name, or one named `user`, would give their rules the same
 /// `pack/rule` identities.
 fn refuse_duplicate_packs(layers: &RuleLayers) -> Result<(), Error> {
-    let mut seen: BTreeMap<&Name, &Path> = BTreeMap::new();
+    let mut seen: BTreeMap<&PackName, &Path> = BTreeMap::new();
     for pack in &layers.packs {
-        let first = match pack.name.is_user_pack() {
+        let first = match pack.name.is_user() {
             true => Some(layers.user.as_path()),
             false => seen.get(&pack.name).copied(),
         };
@@ -137,12 +137,12 @@ fn user_rule_identity(
 
     if !key.contains('/') {
         let rule = Name::parse(key).map_err(name_problem)?;
-        let pack = Name::user_pack();
+        let pack = PackName::user();
         return Ok((RuleId { pack, rule }, Source::Pack));
     }
 
     let id = RuleId::parse_qualified(key).map_err(name_problem)?;
-    let from_a_pack = !id.pack.is_user_pack() && loaded.contains_key(&id);
+    let from_a_pack = !id.pack.is_user() && loaded.contains_key(&id);
     match from_a_pack {
         true => Ok((id, Source::UserOverride)),
         false => Err(Error::UnknownOverride {

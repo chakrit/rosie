@@ -456,7 +456,7 @@ mod tests {
     use crate::fs::Op;
     use crate::fs::fake::{FakeBackend, USER_UID};
     use crate::fs::{Bounds, Paths};
-    use crate::rules::name::Name;
+    use crate::rules::name::{Name, PackName};
     use std::io::ErrorKind;
 
     const APP: &str = "/Users/me/code/app/build";
@@ -472,7 +472,7 @@ mod tests {
 
     fn rule() -> RuleId {
         RuleId {
-            pack: Name::parse("test").expect("name"),
+            pack: PackName::parse("test").expect("name"),
             rule: Name::parse("build").expect("name"),
         }
     }

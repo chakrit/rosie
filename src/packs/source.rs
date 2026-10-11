@@ -4,17 +4,18 @@ use std::fmt;
 use std::str::FromStr;
 
 use super::error::Error;
-use crate::rules::Name;
+use crate::rules::PackName;
 
 const DEFAULT_OWNER: &str = "chakrit";
 const DEFAULT_REPO: &str = "rosie";
 
 /// A GitHub repository holding a pack in its `rules/` folder. Both names are valid pack
-/// names, so each is one plain path component, and the pack is never named `user`.
+/// names, so each is one plain path component, and the pack is never named `user`. Two
+/// sources are equal when they name one GitHub repository, ignoring ASCII case.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Source {
-    owner: Name,
-    repo: Name,
+    owner: PackName,
+    repo: PackName,
 }
 
 impl Source {
@@ -23,15 +24,8 @@ impl Source {
     }
 
     /// The pack name, which is the repository name.
-    pub fn pack(&self) -> &Name {
+    pub fn pack(&self) -> &PackName {
         &self.repo
-    }
-
-    /// Whether both name one GitHub repository, whose owner and repository names compare
-    /// ignoring ASCII case.
-    pub fn is_same_repo(&self, other: &Source) -> bool {
-        self.owner.matches_ignoring_case(other.owner())
-            && self.repo.matches_ignoring_case(other.pack().as_str())
     }
 
     /// The repository's default-branch tarball.
@@ -43,15 +37,18 @@ impl Source {
     }
 
     pub(super) fn from_names(owner: &str, repo: &str) -> Option<Source> {
-        let owner = Name::parse(owner).ok()?;
-        let repo = Name::parse(repo).ok()?;
+        let owner = PackName::parse(owner).ok()?;
+        let repo = PackName::parse(repo).ok()?;
         Source::from_valid_names(owner, repo).ok()
     }
 
     /// A source from names already parsed, refused when the pack name is the reserved
     /// `user`.
-    pub(super) fn from_valid_names(owner: Name, repo: Name) -> Result<Source, ReservedPackName> {
-        match repo.is_user_pack() {
+    pub(super) fn from_valid_names(
+        owner: PackName,
+        repo: PackName,
+    ) -> Result<Source, ReservedPackName> {
+        match repo.is_user() {
             true => Err(ReservedPackName),
             false => Ok(Source { owner, repo }),
         }
@@ -66,8 +63,8 @@ pub(super) struct ReservedPackName;
 impl Default for Source {
     fn default() -> Self {
         Source {
-            owner: Name::parse(DEFAULT_OWNER).expect("the default owner is a valid name"),
-            repo: Name::parse(DEFAULT_REPO).expect("the default repo is a valid name"),
+            owner: PackName::parse(DEFAULT_OWNER).expect("the default owner is a valid name"),
+            repo: PackName::parse(DEFAULT_REPO).expect("the default repo is a valid name"),
         }
     }
 }
@@ -81,7 +78,7 @@ impl FromStr for Source {
         };
 
         let (owner, repo) = text.split_once('/').ok_or_else(bad_source)?;
-        if Name::user_pack().matches_ignoring_case(repo) {
+        if PackName::parse(repo).is_ok_and(|repo| repo.is_user()) {
             return Err(Error::ReservedPack {
                 text: text.to_owned(),
             });

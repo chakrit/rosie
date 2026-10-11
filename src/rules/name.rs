@@ -1,13 +1,15 @@
 //! Pack and rule names, and the `pack/rule` identity (`docs/spec/rules.md#names`).
 
+use std::cmp::Ordering;
 use std::fmt;
+use std::hash::{Hash, Hasher};
 
 use thiserror::Error;
 
 /// The longest pack or rule name, in characters.
 const MAX_CHARS: usize = 64;
 
-/// A valid pack or rule name.
+/// A valid rule name, compared as written.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct Name(Box<str>);
 
@@ -15,37 +17,7 @@ impl Name {
     /// Accepts an ASCII letter first, then ASCII letters, digits, `_`, or `-`, at most 64
     /// characters in all.
     pub fn parse(text: &str) -> Result<Name, NameError> {
-        let mut chars = text.chars();
-        let Some(first) = chars.next() else {
-            return Err(NameError::Empty);
-        };
-        if !first.is_ascii_alphabetic() {
-            return Err(NameError::BadFirst(first));
-        }
-        if let Some(bad) = chars.find(|&c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
-            return Err(NameError::BadChar(bad));
-        }
-
-        let length = text.len();
-        match length > MAX_CHARS {
-            true => Err(NameError::TooLong(length)),
-            false => Ok(Name(text.into())),
-        }
-    }
-
-    /// The pack the user's own rules belong to.
-    pub fn user_pack() -> Name {
-        Name(USER_PACK.into())
-    }
-
-    pub fn is_user_pack(&self) -> bool {
-        self.matches_ignoring_case(USER_PACK)
-    }
-
-    /// Pack names compare ignoring ASCII case, as GitHub's repository names do
-    /// (`docs/spec/rules.md#packs`).
-    pub fn matches_ignoring_case(&self, text: &str) -> bool {
-        self.0.eq_ignore_ascii_case(text)
+        valid(text).map(Name)
     }
 
     pub fn as_str(&self) -> &str {
@@ -53,18 +25,101 @@ impl Name {
     }
 }
 
-const USER_PACK: &str = "user";
-
 impl fmt::Display for Name {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.0)
     }
 }
 
+/// A valid pack name, or a pack source's owner name. It is spelled as written, and
+/// compares, orders, and hashes ignoring ASCII case, as GitHub's names do
+/// (`docs/spec/rules.md#packs`).
+#[derive(Debug, Clone)]
+pub struct PackName(Box<str>);
+
+impl PackName {
+    /// Accepts what [`Name::parse`] accepts.
+    pub fn parse(text: &str) -> Result<PackName, NameError> {
+        valid(text).map(PackName)
+    }
+
+    /// The pack the user's own rules belong to.
+    pub fn user() -> PackName {
+        PackName(USER_PACK.into())
+    }
+
+    pub fn is_user(&self) -> bool {
+        *self == PackName::user()
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    fn folded(&self) -> impl Iterator<Item = u8> + '_ {
+        self.0.bytes().map(|byte| byte.to_ascii_lowercase())
+    }
+}
+
+const USER_PACK: &str = "user";
+
+impl PartialEq for PackName {
+    fn eq(&self, other: &PackName) -> bool {
+        self.0.eq_ignore_ascii_case(&other.0)
+    }
+}
+
+impl Eq for PackName {}
+
+impl Ord for PackName {
+    fn cmp(&self, other: &PackName) -> Ordering {
+        self.folded().cmp(other.folded())
+    }
+}
+
+impl PartialOrd for PackName {
+    fn partial_cmp(&self, other: &PackName) -> Option<Ordering> {
+        Some(self.cmp(other))
+    }
+}
+
+impl Hash for PackName {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        self.folded().for_each(|byte| state.write_u8(byte));
+        state.write_usize(self.0.len());
+    }
+}
+
+impl fmt::Display for PackName {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+/// The text of a valid pack or rule name (`docs/spec/rules.md#names`).
+fn valid(text: &str) -> Result<Box<str>, NameError> {
+    let mut chars = text.chars();
+    let Some(first) = chars.next() else {
+        return Err(NameError::Empty);
+    };
+    if !first.is_ascii_alphabetic() {
+        return Err(NameError::BadFirst(first));
+    }
+    if let Some(bad) = chars.find(|&c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
+        return Err(NameError::BadChar(bad));
+    }
+
+    let length = text.len();
+    match length > MAX_CHARS {
+        true => Err(NameError::TooLong(length)),
+        false => Ok(text.into()),
+    }
+}
+
 /// A rule's identity: the pack it belongs to and its name within the pack.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
 pub struct RuleId {
-    pub pack: Name,
+    pub pack: PackName,
     pub rule: Name,
 }
 
@@ -74,7 +129,7 @@ impl RuleId {
         let Some((pack, rule)) = text.split_once('/') else {
             return Err(NameError::Unqualified);
         };
-        let pack = Name::parse(pack)?;
+        let pack = PackName::parse(pack)?;
         let rule = Name::parse(rule)?;
         Ok(RuleId { pack, rule })
     }

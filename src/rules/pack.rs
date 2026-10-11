@@ -7,7 +7,7 @@ use std::path::Path;
 
 use super::error::{Error, Problem};
 use super::lua::new_parser_state;
-use super::name::{Name, RuleId};
+use super::name::{Name, PackName, RuleId};
 use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
 
@@ -15,7 +15,7 @@ use super::rule::{Rule, Source};
 /// messages) and contents, in rule name order. Every file must parse, every rule key
 /// must be a plain rule name, and no name may be defined twice across the files.
 pub fn load_pack<'a>(
-    pack: &Name,
+    pack: &PackName,
     files: impl IntoIterator<Item = (&'a Path, &'a [u8])>,
 ) -> Result<Vec<Rule>, Error> {
     let lua = new_parser_state()?;
@@ -33,7 +33,7 @@ pub fn load_pack<'a>(
 
 /// A rule of a pack, whose key must be a plain rule name: a pack cannot override
 /// another pack's rule.
-fn pack_rule(pack: &Name, parsed: Parsed, file: &Path) -> Result<Rule, Error> {
+fn pack_rule(pack: &PackName, parsed: Parsed, file: &Path) -> Result<Rule, Error> {
     let rule = Name::parse(&parsed.key).map_err(|error| {
         let problem = match parsed.key.contains('/') {
             true => Problem::OverrideInPack,
@@ -77,8 +77,8 @@ fn define<'a>(
 mod tests {
     use super::*;
 
-    fn pack() -> Name {
-        Name::parse("rosie").expect("valid pack name")
+    fn pack() -> PackName {
+        PackName::parse("rosie").expect("valid pack name")
     }
 
     #[test]

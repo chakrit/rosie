@@ -19,7 +19,6 @@ use super::progress::Progress;
 use super::skip::{Needs, WalkSkip};
 use super::targets::Targets;
 use crate::fs::{self, Backend, Cleanup, EnterLinks, FsContext, FsOp};
-
 use crate::rules::{FixedPath, RuleId, RuleSet, Shape};
 use crate::tier::Tier;
 

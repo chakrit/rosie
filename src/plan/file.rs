@@ -22,15 +22,15 @@ use crate::fs::ShellCommand;
 
 const FORMAT_VERSION: u32 = 1;
 
-const PREAMBLE: &str = "\
-# rosie plan. Only entries with status = \"clean\" run.
-# Delete any entry you do not want, then: rosie run <this file>
-";
-
 impl Plan {
     /// The plan as TOML, for `rosie scan` to print.
     pub fn to_toml(&self) -> Result<String, Error> {
-        let mut text = format!("{PREAMBLE}version = {FORMAT_VERSION}\n");
+        let clean = StatusKind::Clean.label();
+        let mut text = format!(
+            "# rosie plan. Only entries with status = \"{clean}\" run.\n\
+             # Delete any entry you do not want, then: rosie run <this file>\n\
+             version = {FORMAT_VERSION}\n"
+        );
 
         for delete in self.deletes.iter() {
             let note = match &delete.status {

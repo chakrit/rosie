@@ -26,7 +26,6 @@ use clap::error::ErrorKind;
 
 use crate::fs::{Backend, Paths, VersionCheck};
 use crate::packs::Network;
-
 use crate::run::RunStats;
 use crate::run::elevated::{self, Invocation};
 

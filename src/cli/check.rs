@@ -8,8 +8,9 @@
 //!
 //! An `.app` bundle the walk claims nothing at or above, and skips only as a closed
 //! bundle, is judged instead from the plan [`apps::scan_app`] makes for it, as `rosie
-//! scan app` would plan it; a process running from it makes it `in use`, and any other
-//! refusal or error of that scan makes it `skipped` with the error's text.
+//! scan app` would plan it; a process running from it makes it `in use`, any other
+//! refusal of the bundle, or a bundle that cannot be read, makes it `skipped` with the
+//! error's text, and any other error of that scan fails `check` as it fails `scan`.
 
 use std::path::Path;
 
@@ -88,29 +89,44 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             return Ok(line(&verdict, path, &shown));
         }
 
-        let app_line = self.app_line(scanner.ctx(), path, app_mode);
-        Ok(app_line.unwrap_or_else(|| line(&verdict, path, &shown)))
+        self.app_line(scanner.ctx(), path, app_mode, &verdict)
     }
 
     /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it:
     /// `in use` when that scan refuses the bundle for a process running from it, and
     /// `skipped` with the error's text when it refuses or cannot read the bundle for any
-    /// other reason. `None` when the path is not an app after all.
-    fn app_line(&self, ctx: &FsContext<&'a B>, path: &Path, app_mode: Settings) -> Option<Line> {
+    /// other reason. The walk's `verdict` decides when the path is not an app after all;
+    /// any other error of that scan is not about the bundle and propagates.
+    fn app_line(
+        &self,
+        ctx: &FsContext<&'a B>,
+        path: &Path,
+        app_mode: Settings,
+        verdict: &PathVerdict,
+    ) -> Result<Line, Error> {
         let shown = self.tilde();
 
         let scanned = apps::scan_app(ctx, path, &app_mode);
 
         let (word, reason) = match scanned {
-            Ok(scan) => return Some(line(&scan.verdict(path), path, &shown)),
-            Err(apps::Error::NotAnApp { .. }) => return None,
+            Ok(scan) => return Ok(line(&scan.verdict(path), path, &shown)),
+            Err(apps::Error::NotAnApp { .. }) => return Ok(line(verdict, path, &shown)),
             Err(apps::Error::Refused {
                 source: fs::Error::Running { pid, program, .. },
                 ..
             }) => (Word::InUse, running(&program, pid)),
-            Err(error) => (Word::Skipped, error.to_string()),
+            Err(
+                error @ (apps::Error::Refused { .. }
+                | apps::Error::UnreadableApp { .. }
+                | apps::Error::NoInfoPlist { .. }
+                | apps::Error::MissingKey { .. }
+                | apps::Error::InvalidBundleId { .. }
+                | apps::Error::Placeholder { .. }
+                | apps::Error::Mount { .. }),
+            ) => (Word::Skipped, error.to_string()),
+            Err(error) => return Err(error.into()),
         };
-        Some(Line {
+        Ok(Line {
             word,
             path: shown.path(path),
             reason,

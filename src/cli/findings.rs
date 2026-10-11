@@ -1,5 +1,6 @@
-//! The lines the CLI prints about a scan besides the plan, from any mode. Every skip
-//! names its path or subject and briefly why (`docs/spec/plan.md`).
+//! The lines the CLI prints about a scan besides the plan, from any mode, and the stats
+//! lines that end a scan or a run. Every skip names its path or subject and briefly why
+//! (`docs/spec/plan.md`).
 
 use std::fmt;
 

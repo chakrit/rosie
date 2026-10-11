@@ -12,6 +12,10 @@ use std::path::{Path, PathBuf};
 /// disk. Opening it triggers a download.
 pub const SF_DATALESS: u32 = 0x4000_0000;
 
+/// `ELOOP` from `<sys/errno.h>` on macOS: a path walk met more symlinks than the kernel
+/// follows, as a loop of links does.
+pub const ELOOP: i32 = 62;
+
 /// Filesystem, command, and metadata primitives.
 ///
 /// No `Send` or `Sync` bound: only parallel functions add `where B: Sync`.

@@ -173,7 +173,7 @@ fn config_shows_every_key_and_value() {
     assert_eq!(
         ran.stdout,
         format!(
-            "roots =\n  {HOME}\nwalk.enter_bundles = false\nwalk.enter_mounts = false\nwalk.enter_placeholders = false\n"
+            "roots =\n  {HOME}\nwalk.enter_bundles = false\nwalk.enter_mounts = false\nwalk.enter_placeholders = false\nwalk.enter_links = none\n"
         )
     );
 }
@@ -204,12 +204,25 @@ fn config_set_without_arguments_offers_the_keys_then_their_values() {
     assert_eq!(
         ran.asked,
         [
-            "Choose a key: walk.enter_bundles | walk.enter_mounts | walk.enter_placeholders",
+            "Choose a key: walk.enter_bundles | walk.enter_mounts | walk.enter_placeholders | walk.enter_links",
             "Choose a value: true | false",
         ]
     );
     let got = sandbox.run(&["config", "get", "walk.enter_mounts"]);
     assert_eq!(got.stdout, "true\n");
+}
+
+#[test]
+fn config_set_offers_the_enter_links_levels() {
+    let sandbox = Sandbox::new();
+    let script = Script::terminal().pick(3).pick(2);
+
+    let ran = sandbox.run_with(script, &["config", "set"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(ran.asked[1], "Choose a value: none | roots | all");
+    let got = sandbox.run(&["config", "get", "walk.enter_links"]);
+    assert_eq!(got.stdout, "all\n");
 }
 
 #[test]

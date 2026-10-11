@@ -62,6 +62,12 @@ pub enum Error {
     )]
     Placeholder { path: PathBuf },
 
+    #[error("{path} is a symlink to nothing", path = path.display())]
+    LinkDangling { path: PathBuf },
+
+    #[error("{path} is a symlink in a loop of links", path = path.display())]
+    LinkLoop { path: PathBuf },
+
     #[error("process {pid} runs {program}", program = program.display())]
     Running {
         path: PathBuf,

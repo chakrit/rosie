@@ -11,11 +11,10 @@ use std::io::{self, ErrorKind};
 use std::path::{Path, PathBuf};
 
 use super::{Body, State};
+use crate::fs::backend::ELOOP;
 
 /// The kernel's limit on symlinks followed in one path walk (`MAXSYMLINKS`).
 const MAX_SYMLINK_HOPS: usize = 32;
-/// macOS `ELOOP`, so a loop fails with the same OS error as on the machine.
-const ELOOP: i32 = 62;
 
 /// Whether a path walk follows a symlink in the final component, as `stat` does, or
 /// stops at the link, as `lstat` does. Links before the final component are always

@@ -7,8 +7,9 @@ use std::io;
 use std::path::{Component, Path, PathBuf};
 
 use super::{FsContext, resolve_dots};
-use crate::fs::backend::{Backend, FileKind, Metadata};
+use crate::fs::backend::{Backend, ELOOP, FileKind, Metadata};
 use crate::fs::error::{Error, Op, RealPath};
+use crate::fs::links::EnterLinks;
 
 /// What the disk makes of a path that rosie normalized by text.
 enum Canonical {
@@ -44,6 +45,42 @@ impl<B: Backend> FsContext<B> {
                 })
             }
         }
+    }
+
+    /// Where a path rosie is given is on disk. With `links` allowing a symlink in it, a
+    /// path whose canonical form differs only by passing through one is taken to its
+    /// real location; anything else is [`FsContext::check_real`].
+    pub(in crate::fs) fn locate(&self, path: &Path, links: EnterLinks) -> Result<PathBuf, Error> {
+        if !links.allows_given_links() {
+            return self.check_real(path);
+        }
+
+        match self.check_real(path) {
+            Err(Error::Symlink {
+                real: RealPath::Resolved(real),
+                ..
+            }) => Ok(real),
+            checked => checked,
+        }
+    }
+
+    /// Where the symlink at `path` leads, through every link on the way, and the
+    /// `lstat` of what is there. A link to nothing is [`Error::LinkDangling`]; a chain
+    /// of links that never ends is [`Error::LinkLoop`].
+    pub(in crate::fs) fn follow_link(&self, path: &Path) -> Result<(PathBuf, Metadata), Error> {
+        let path = resolve_dots(path)?;
+        let real = match self.backend.canonicalize(&path) {
+            Ok(real) => real,
+            Err(source) if source.kind() == io::ErrorKind::NotFound => {
+                return Err(Error::LinkDangling { path });
+            }
+            Err(source) if source.raw_os_error() == Some(ELOOP) => {
+                return Err(Error::LinkLoop { path });
+            }
+            Err(source) => return self.io(Op::Canonicalize, &path, Err(source)),
+        };
+        let meta = self.io(Op::Lstat, &real, self.backend.lstat(&real))?;
+        Ok((real, meta))
     }
 
     /// `lstat`s a resolved path after [`FsContext::check_real`] accepts it; a missing path is

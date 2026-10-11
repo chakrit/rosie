@@ -2,12 +2,13 @@
 //! (`docs/spec/safety.md#cleanup-targets`).
 
 use std::ffi::OsString;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use super::{FsOp, sealed};
 use crate::fs::backend::{Backend, Metadata};
 use crate::fs::context::FsContext;
 use crate::fs::error::Error;
+use crate::fs::links::EnterLinks;
 
 /// The owner of every op on scanned trees and cleanup targets.
 pub enum Cleanup {}
@@ -36,6 +37,19 @@ impl Cleanup {
         ReadFile { path }
     }
 
+    /// Where a symlink the walk meets leads, with `enter_links = "all"`
+    /// (`docs/spec/safety.md#enter_links`). Only finding the target follows the link;
+    /// the walk goes on from the target's own path.
+    pub fn follow(path: &Path) -> Follow<'_> {
+        Follow { path }
+    }
+
+    /// Where an absolute rule fixed path is on disk, as [`crate::fs::UserInput::path`]
+    /// locates a typed one: a symlink in it is refused unless `links` allows one.
+    pub fn locate(path: &Path, links: EnterLinks) -> Locate<'_> {
+        Locate { path, links }
+    }
+
     /// Deletes a file, folder tree, or other entry. Performing it refuses the item while
     /// a process runs a program from inside it, outside the roots, through a symlink, or
     /// on a mount point, and then deletes it as whoever the context acts as.
@@ -50,6 +64,22 @@ pub struct ReadDir<'p> {
 
 pub struct Lstat<'p> {
     path: &'p Path,
+}
+
+pub struct Locate<'p> {
+    path: &'p Path,
+    links: EnterLinks,
+}
+
+pub struct Follow<'p> {
+    path: &'p Path,
+}
+
+/// What a symlink leads to: the real path at the end of its chain, and its `lstat`.
+#[derive(Debug, Clone)]
+pub struct LinkTarget {
+    pub path: PathBuf,
+    pub meta: Metadata,
 }
 
 pub struct LstatLinkFree<'p> {
@@ -77,6 +107,8 @@ impl sealed::Sealed for ReadDir<'_> {}
 impl sealed::Sealed for Lstat<'_> {}
 impl sealed::Sealed for LstatLinkFree<'_> {}
 impl sealed::Sealed for ReadFile<'_> {}
+impl sealed::Sealed for Locate<'_> {}
+impl sealed::Sealed for Follow<'_> {}
 impl sealed::Sealed for Delete<'_> {}
 
 impl<B: Backend> FsOp<B> for ReadDir<'_> {
@@ -108,6 +140,23 @@ impl<B: Backend> FsOp<B> for ReadFile<'_> {
 
     fn perform(self, ctx: &FsContext<B>) -> Result<Vec<u8>, Error> {
         ctx.read_file(self.path)
+    }
+}
+
+impl<B: Backend> FsOp<B> for Locate<'_> {
+    type Output = PathBuf;
+
+    fn perform(self, ctx: &FsContext<B>) -> Result<PathBuf, Error> {
+        ctx.locate(self.path, self.links)
+    }
+}
+
+impl<B: Backend> FsOp<B> for Follow<'_> {
+    type Output = LinkTarget;
+
+    fn perform(self, ctx: &FsContext<B>) -> Result<LinkTarget, Error> {
+        let (path, meta) = ctx.follow_link(self.path)?;
+        Ok(LinkTarget { path, meta })
     }
 }
 

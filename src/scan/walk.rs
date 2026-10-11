@@ -5,11 +5,19 @@
 //! entry is `lstat`ed through the context before anything else happens to it, and a
 //! folder is only ever listed after its own `lstat` said it is a folder, not a
 //! symlink: every path the walk builds is free of links by construction.
+//!
+//! With `enter_links = "all"`, a symlink to a folder inside the roots is followed
+//! (`docs/spec/safety.md#enter_links`): its target is looked up at its own real path,
+//! as if the walk had found it there, so the paths the walk builds stay free of links.
+//! Links can bring the walk to one folder twice, so then it keeps the real paths it has
+//! entered or claimed, and goes no further on a second arrival.
 
 use std::cell::RefCell;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::ffi::{OsStr, OsString};
+
 use std::path::{Path, PathBuf};
+use std::sync::Mutex;
 
 use rayon::Scope;
 
@@ -19,7 +27,7 @@ use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::targets::Targets;
 use crate::config::Walk;
-use crate::fs::{Backend, Cleanup, FileKind, FsContext, FsOp, Metadata};
+use crate::fs::{self, Backend, Cleanup, EnterLinks, FileKind, FsContext, FsOp, Metadata};
 use crate::plan::{Needs, WalkSetting, WalkSkip};
 use crate::rules::{self, Candidate, LuaSandbox, RuleSet};
 
@@ -49,14 +57,48 @@ pub(super) struct TreeWalk<'a, B: Backend, P: Progress> {
     pub flags: Walk,
     pub targets: &'a Targets<'a, B, P>,
     pub log: &'a Log,
+    pub walked: Walked,
+}
+
+/// The real paths the walk has entered or claimed. Kept only when links can bring the
+/// walk to one path twice; otherwise every path is new by construction.
+pub(super) enum Walked {
+    Untracked,
+    Tracked(Mutex<HashSet<PathBuf>>),
+}
+
+impl Walked {
+    /// Tracking for a walk under `links`, with the start folder already entered.
+    pub fn starting_at(root: &Path, links: EnterLinks) -> Walked {
+        match links.follows_in_walk() {
+            true => Walked::Tracked(Mutex::new(HashSet::from([root.to_path_buf()]))),
+            false => Walked::Untracked,
+        }
+    }
+
+    /// Records `path` as entered or claimed; `false` when it already was.
+    fn first_time(&self, path: &Path) -> bool {
+        match self {
+            Walked::Untracked => true,
+            Walked::Tracked(seen) => seen
+                .lock()
+                .expect("no walk worker panics while recording a folder")
+                .insert(path.to_path_buf()),
+        }
+    }
 }
 
 /// What the walk does with one entry.
 enum Step<'p> {
     Pass,
     Skip(WalkSkip),
+    /// A skip named by another path than the entry's, such as a link's target.
+    SkipAt(PathBuf, WalkSkip),
+    Failed(fs::Error),
     Claim(Entry, Vec<RuleMatch>),
     Descend(Readable<'p>),
+    /// A symlink the walk follows to the folder at `path`.
+    Follow(PathBuf, Metadata),
 }
 
 impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
@@ -79,15 +121,100 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
                 }
             };
 
-            match self.step(&path, name, meta, &names, folder_meta) {
-                Step::Pass => {}
-                Step::Skip(reason) => self.log.skip(path, reason),
-                Step::Claim(entry, rules) => self.targets.claim(scope, entry, rules),
-                Step::Descend(readable) => {
-                    let inside = readable.path().to_path_buf();
-                    scope.spawn(move |scope| self.visit(scope, inside, meta));
+            let step = self.step(&path, name, meta, &names, folder_meta);
+            self.take(scope, &path, meta, step, None);
+        }
+    }
+
+    /// Acts on the step for the entry at `path`, whose `lstat` gave `meta`. `link` is
+    /// the symlink the walk followed to reach it, if any: arriving at an entry already
+    /// entered or claimed is a skip of that link, and nothing on a plain arrival, which
+    /// only a link could have beaten.
+    fn take<'s>(
+        &'s self,
+        scope: &Scope<'s>,
+        path: &Path,
+        meta: Metadata,
+        step: Step,
+        link: Option<&Path>,
+    ) {
+        match step {
+            Step::Pass => {}
+            Step::Skip(reason) => self.log.skip(path.to_path_buf(), reason),
+            Step::SkipAt(at, reason) => self.log.skip(at, reason),
+            Step::Failed(error) => self.log.entry_failed(path.to_path_buf(), error),
+            Step::Claim(entry, rules) => match self.walked.first_time(entry.path()) {
+                true => self.targets.claim(scope, entry, rules),
+                false => self.arrived_again(link),
+            },
+            Step::Descend(readable) => {
+                let inside = readable.path().to_path_buf();
+                match self.walked.first_time(&inside) {
+                    true => scope.spawn(move |scope| self.visit(scope, inside, meta)),
+                    false => self.arrived_again(link),
                 }
             }
+            Step::Follow(target, target_meta) => self.follow(scope, path, target, target_meta),
+        }
+    }
+
+    fn arrived_again(&self, link: Option<&Path>) {
+        if let Some(link) = link {
+            self.log.skip(link.to_path_buf(), WalkSkip::LinkWalked);
+        }
+    }
+
+    /// Looks at the folder a followed `link` leads to as if the walk had found it at
+    /// its own `target` path: matched against the rules beside its own siblings, and
+    /// entered on the same terms as any entry of its folder. `/` has no folder and no
+    /// name for a rule to match, so a link to it, with `/` among the roots, is entered.
+    fn follow<'s>(&'s self, scope: &Scope<'s>, link: &Path, target: PathBuf, meta: Metadata) {
+        let (Some(folder), Some(name)) = (target.parent(), target.file_name()) else {
+            return match self.walked.first_time(&target) {
+                true => scope.spawn(move |scope| self.visit(scope, target, meta)),
+                false => self.arrived_again(Some(link)),
+            };
+        };
+        let folder_meta = match Cleanup::lstat(folder).perform(self.ctx) {
+            Ok(folder_meta) => folder_meta,
+            Err(error) => return self.log.entry_failed(folder.to_path_buf(), error),
+        };
+        let siblings = match Cleanup::read_dir(folder).perform(self.ctx) {
+            Ok(siblings) => siblings,
+            Err(error) => return self.log.entry_failed(folder.to_path_buf(), error),
+        };
+
+        let step = self.step(&target, name, meta, &siblings, folder_meta);
+        self.take(scope, &target, meta, step, Some(link));
+    }
+
+    /// What the walk does with the symlink at `path` in the folder `folder_meta`
+    /// describes. Only with `enter_links = "all"` does it look past the link: a link to
+    /// a folder inside the roots is followed, on the same volume or with
+    /// `enter_mounts`; a link to a folder outside them is a skip naming that folder; a
+    /// link to nothing, or in a loop of links, is a skip; a link to anything else is
+    /// passed over (`docs/spec/safety.md#enter_links`).
+    fn link_step<'p>(&self, path: &Path, folder_meta: Metadata) -> Step<'p> {
+        if !self.flags.enter_links.follows_in_walk() {
+            return Step::Pass;
+        }
+        let target = match Cleanup::follow(path).perform(self.ctx) {
+            Ok(target) => target,
+            Err(error) => return unfollowed(error),
+        };
+        if target.meta.kind != FileKind::Dir {
+            return Step::Pass;
+        }
+
+        let inside = match self.ctx.within_roots(&target.path) {
+            Ok(inside) => inside,
+            Err(error) => return Step::Failed(error),
+        };
+        let crosses = target.meta.dev != folder_meta.dev && !self.flags.enter_mounts;
+        match (inside, crosses) {
+            (false, _) => Step::SkipAt(target.path, WalkSkip::LinkOutsideRoots),
+            (true, true) => Step::Skip(WalkSkip::Closed(Needs::MOUNTS)),
+            (true, false) => Step::Follow(target.path, target.meta),
         }
     }
 
@@ -116,7 +243,7 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         folder_meta: Metadata,
     ) -> Step<'p> {
         let claim = match InFolder::of(path, meta, folder_meta) {
-            InFolder::Symlink => return Step::Pass,
+            InFolder::Symlink => return self.link_step(path, folder_meta),
             InFolder::Sealed(_, sealed) => Err(sealed),
             InFolder::Entry(entry) => Ok(entry),
         };
@@ -233,6 +360,16 @@ fn matched_step<'p>(claim: Result<Entry, Sealed>, rules: Vec<RuleMatch>) -> Step
     match claim {
         Ok(entry) => Step::Claim(entry, rules),
         Err(sealed) => Step::Skip(sealed.skip()),
+    }
+}
+
+/// The skip for a link the walk could not follow: one to nothing or in a loop of links.
+/// Any other failure is reported as the link's own.
+fn unfollowed<'p>(error: fs::Error) -> Step<'p> {
+    match error {
+        fs::Error::LinkDangling { .. } => Step::Skip(WalkSkip::LinkDangling),
+        fs::Error::LinkLoop { .. } => Step::Skip(WalkSkip::LinkLoop),
+        error => Step::Failed(error),
     }
 }
 

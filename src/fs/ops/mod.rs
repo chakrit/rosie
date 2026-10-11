@@ -18,7 +18,7 @@ use super::backend::Backend;
 use super::context::FsContext;
 use super::error::Error;
 
-pub use cleanup::Cleanup;
+pub use cleanup::{Cleanup, LinkTarget};
 pub use rosie::Rosie;
 pub use user_input::UserInput;
 

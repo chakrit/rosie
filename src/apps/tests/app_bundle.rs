@@ -21,7 +21,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
         Path::new(app),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     )
 }
 

@@ -103,6 +103,38 @@ fn a_matched_mount_root_names_no_flag_to_try() {
     assert!(!ran.stdout.contains(&node_modules), "{}", ran.stdout);
 }
 
+/// `--enter-links=all` follows a link into the roots; a link out of them is a skip that
+/// names the folder and the `roots add` that would let it in
+/// (`docs/spec/safety.md#enter_links`).
+#[test]
+fn enter_links_all_follows_links_and_suggests_roots_add_for_one_outside() {
+    let sandbox = Sandbox::with_roots(&[CWD]);
+    sandbox.node_project("/Users/me/elsewhere/app");
+    sandbox
+        .fake
+        .add_symlink(format!("{CWD}/linked"), "/Users/me/elsewhere");
+    sandbox.node_project(&format!("{CWD}/mine"));
+    sandbox
+        .fake
+        .add_symlink(format!("{CWD}/alias"), format!("{CWD}/mine"));
+
+    let without = sandbox.run(&["scan", "tree", "."]);
+    let with = sandbox.run(&["scan", "tree", ".", "--enter-links=all"]);
+    let invalid = sandbox.run(&["scan", "tree", ".", "--enter-links=yes"]);
+
+    let line = "skipped /Users/me/elsewhere: linked to from the roots, but outside them \
+                (to clean it: rosie roots add /Users/me/elsewhere)";
+    assert!(!without.stderr.contains(line), "{}", without.stderr);
+    assert!(
+        with.stderr.lines().any(|shown| shown == line),
+        "{line}\n{}",
+        with.stderr
+    );
+    assert!(with.stdout.contains(&format!("{CWD}/mine/node_modules")));
+    assert!(!with.stdout.contains("/Users/me/elsewhere/app/node_modules"));
+    invalid.assert_status(ExitStatus::Usage);
+}
+
 #[test]
 fn each_walk_flag_enters_what_it_names() {
     let cases = [

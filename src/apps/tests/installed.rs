@@ -205,7 +205,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
         Path::new(NPLAYER),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     )
     .expect("app scan");
 
@@ -231,7 +231,7 @@ fn a_wrapper_holding_several_apps_has_no_info_plist() {
         Path::new(NPLAYER),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(
@@ -337,7 +337,7 @@ fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scan, Error> {
         Path::new(NPLAYER),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     )
 }
 

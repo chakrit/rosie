@@ -38,7 +38,7 @@ pub use sizing::{Measure, Sizer};
 
 use fixed::{FixedClaim, FixedTargets};
 use targets::Targets;
-use walk::TreeWalk;
+use walk::{TreeWalk, Walked};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -106,16 +106,16 @@ impl<B: Backend + Sync> Scanner<B> {
     /// walk looks at everything below it. A folder that is a dataless placeholder is
     /// not opened unless the walk may enter placeholders.
     pub fn tree<P: Progress>(&self, dir: &Path, progress: &P) -> Result<Scan, Error> {
-        let root = UserInput::path(dir).perform(&self.ctx)?;
+        let root = UserInput::path(dir, self.settings.walk.enter_links).perform(&self.ctx)?;
         let root_meta = Cleanup::lstat(&root).perform(&self.ctx)?;
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }
         self.ctx.snapshot_running()?;
         let log = Log::default();
-        let fixed = FixedTargets::of(&self.rules, &self.settings.paths).under(&root);
-        fixed.report_symlinked(&self.ctx, &log);
-        let fixed = fixed.into_map();
+        let links = self.settings.walk.enter_links;
+        let fixed = FixedTargets::of(&self.rules, &self.settings.paths, &self.ctx, links);
+        let fixed = fixed::by_path(fixed.under(&root).report_refused(&log));
 
         let targets = Targets::new(&self.ctx, &log, progress);
         let walk = TreeWalk {
@@ -125,6 +125,7 @@ impl<B: Backend + Sync> Scanner<B> {
             flags: self.settings.walk,
             targets: &targets,
             log: &log,
+            walked: Walked::starting_at(&root, links),
         };
         match root_meta.is_dataless() && !self.settings.walk.enter_placeholders {
             true => log.skip(root, WalkSkip::Closed(Needs::PLACEHOLDERS)),
@@ -141,7 +142,9 @@ impl<B: Backend + Sync> Scanner<B> {
     pub fn caches<P: Progress>(&self, progress: &P) -> Result<Scan, Error> {
         self.ctx.snapshot_running()?;
         let log = Log::default();
-        let fixed = FixedTargets::of(&self.rules, &self.settings.paths).outermost();
+        let links = self.settings.walk.enter_links;
+        let fixed = FixedTargets::of(&self.rules, &self.settings.paths, &self.ctx, links);
+        let fixed = fixed.outermost().report_refused(&log);
 
         let targets = Targets::new(&self.ctx, &log, progress);
         let claim = FixedClaim {

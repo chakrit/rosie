@@ -12,6 +12,7 @@ use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
 use super::matching::{claimed_by_other, claims_by_id, claims_by_name};
 use super::search::{Candidate, Search};
+use crate::config::Walk;
 use crate::fs::{
     Backend, Cleanup, FileKind, FsContext, FsOp, Paths, SystemArgv, SystemTool, UserInput,
 };
@@ -40,12 +41,13 @@ pub fn scan_app<B>(
     app: &Path,
     paths: &Paths,
     aggressive: AggressiveItems,
-    mounts: Mounts,
+    walk: Walk,
 ) -> Result<Scan, Error>
 where
     B: Backend + Sync,
 {
-    let path = UserInput::path(app).perform(ctx)?;
+    let mounts = Mounts::from(walk);
+    let path = UserInput::path(app, walk.enter_links).perform(ctx)?;
     let entry = Entry::lstat(ctx, &path)?;
     let name = path
         .file_name()

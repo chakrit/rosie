@@ -52,7 +52,7 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(
@@ -83,7 +83,7 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
         Path::new(BAR),
         &paths(),
         AggressiveItems::Unticked,
-        Mounts::Skip,
+        Walk::default(),
     );
 
     assert!(
@@ -119,7 +119,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
             Path::new(BAR),
             &paths(),
             AggressiveItems::Unticked,
-            Mounts::Skip,
+            Walk::default(),
         )
     };
 
@@ -196,13 +196,16 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
         fake.mount("/Library", 5);
         fake
     };
-    let scan = |fake: &FakeBackend, mounts: Mounts| {
+    let scan = |fake: &FakeBackend, enter_mounts: bool| {
         scan_app(
             &ctx(fake, &ALL_ROOTS),
             Path::new(BAR),
             &paths(),
             AggressiveItems::Unticked,
-            mounts,
+            Walk {
+                enter_mounts,
+                ..Walk::default()
+            },
         )
         .expect("app scan")
     };
@@ -214,8 +217,8 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
     };
 
     let closed_fake = scenario();
-    let closed = scan(&closed_fake, Mounts::Skip);
-    let crossed = scan(&scenario(), Mounts::Enter);
+    let closed = scan(&closed_fake, false);
+    let crossed = scan(&scenario(), true);
 
     assert_eq!(deletes(&closed), [(BAR.to_owned(), Status::Ticked)]);
     assert_eq!(

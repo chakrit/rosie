@@ -104,7 +104,10 @@ detects links: `canonicalize` and other link-resolving calls are the detector.
 
 ### `enter_links`
 
-`[walk] enter_links` relaxes the ban in named levels; CLI `--enter-links=<level>`.
+`[walk] enter_links` relaxes the ban in named levels; CLI `--enter-links=<level>`. At
+`"roots"` and `"all"`, a path given through a link is worked on at its real location:
+the roots check, the plan, and the delete all use the real location. Only `config.toml`
+keeps the `roots` entry as written.
 
 | Level              | Effect                                                            |
 |--------------------|-------------------------------------------------------------------|

@@ -20,6 +20,10 @@ Thumbs.db
 .opencode/commands
 .opencode/rules
 .opencode/skills
+.pi/agents
+.pi/commands
+.pi/rules
+.pi/skills
 ace.local.toml
 # end ACE
 

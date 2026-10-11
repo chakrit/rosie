@@ -228,6 +228,68 @@ fn pull_refuses_a_pack_name_already_installed_from_another_owner() {
     assert!(!fake.exists(format!("{DATA}/packs/someone")));
 }
 
+/// GitHub treats owner and repository names without regard to case, so pack sources and
+/// names compare ignoring ASCII case (`docs/spec/rules.md#packs`).
+#[test]
+fn pull_replaces_a_pack_requested_in_another_case_under_its_installed_spelling() {
+    for requested in ["chakrit/Rosie", "Chakrit/ROSIE"] {
+        let fake = fake_home();
+        let ctx = ctx(&fake);
+        let store = Store::new(&ctx, &paths(), Path::new(DATA));
+        let first = Tarball::pack(&[("old.toml", "# old")]).gzip();
+        let second = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
+        packs::pull(
+            &store,
+            &Canned::serving(ROSIE_URL, first),
+            &Source::default(),
+            at(1),
+        )
+        .expect("first pull");
+
+        let network = Canned::serving(ROSIE_URL, second.clone()).and(&url_of(requested), second);
+        let pulled = packs::pull(&store, &network, &source(requested), at(2))
+            .unwrap_or_else(|error| panic!("{requested}: {error:?}"));
+
+        assert_eq!(pulled.source, Source::default(), "{requested}");
+        assert_eq!(pulled.conflicts, vec![], "{requested}");
+        assert_eq!(listing(&fake, &format!("{DATA}/packs")), vec!["chakrit"]);
+        assert_eq!(
+            listing(&fake, &format!("{DATA}/packs/chakrit")),
+            vec!["rosie"]
+        );
+        assert!(
+            !fake.exists(format!("{ROSIE_PACK}/old.toml")),
+            "{requested}"
+        );
+        assert_eq!(
+            installed(&fake),
+            vec![Installed {
+                source: Source::default(),
+                pulled_at: at(2),
+            }]
+        );
+    }
+}
+
+#[test]
+fn pull_refuses_a_pack_name_installed_from_another_owner_in_another_case() {
+    let fake = fake_home();
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
+    let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
+    let network =
+        Canned::serving(ROSIE_URL, tarball.clone()).and(&url_of("someone/Rosie"), tarball);
+    packs::pull(&store, &network, &Source::default(), at(1)).expect("first pull");
+
+    let result = packs::pull(&store, &network, &source("someone/Rosie"), at(2));
+
+    assert!(
+        matches!(&result, Err(Error::PackNameTaken { installed, .. }) if *installed == Source::default()),
+        "got {result:?}"
+    );
+    assert!(!fake.exists(format!("{DATA}/packs/someone")));
+}
+
 #[test]
 fn pull_warns_about_rules_that_duplicate_another_packs_rules() {
     let fake = fake_home();
@@ -716,6 +778,30 @@ fn removes_any_pack_including_rosie() {
 
     assert_eq!(removed, Source::default());
     assert!(!fake.exists(ROSIE_PACK));
+    assert_eq!(installed(&fake), vec![]);
+}
+
+#[test]
+fn removes_a_pack_named_in_another_case() {
+    let fake = fake_home();
+    let ctx = ctx(&fake);
+    let store = Store::new(&ctx, &paths(), Path::new(DATA));
+    let tarball = Tarball::pack(&[("node.toml", NODE_RULE)]).gzip();
+    packs::pull(
+        &store,
+        &Canned::serving(ROSIE_URL, tarball),
+        &Source::default(),
+        at(1),
+    )
+    .expect("pull");
+
+    let removed = RemovePack {
+        pack: "Rosie".to_owned(),
+    }
+    .run(&store)
+    .expect("remove Rosie");
+
+    assert_eq!(removed, Source::default());
     assert_eq!(installed(&fake), vec![]);
 }
 

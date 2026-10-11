@@ -105,6 +105,7 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
 - `rosie rules pull [<source>]` takes a GitHub `owner/repo` and downloads the pack as a
   tarball over HTTPS; git is not needed. Unpacking follows
   [safety.md](safety.md#rosies-own-data).
+- Pack sources and names compare ignoring ASCII case.
 - Pull is HTTPS only, with a 30 s total timeout and caps on download and unpacked size.
   Files are written create-new, and the install is crash-safe.
 - Pull refuses a pack whose rules fail the loader the rule layers use.

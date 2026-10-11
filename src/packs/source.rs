@@ -27,6 +27,13 @@ impl Source {
         &self.repo
     }
 
+    /// Whether both name one GitHub repository, whose owner and repository names compare
+    /// ignoring ASCII case.
+    pub fn is_same_repo(&self, other: &Source) -> bool {
+        self.owner.matches_ignoring_case(other.owner())
+            && self.repo.matches_ignoring_case(other.pack().as_str())
+    }
+
     /// The repository's default-branch tarball.
     pub fn tarball_url(&self) -> String {
         format!(
@@ -74,7 +81,7 @@ impl FromStr for Source {
         };
 
         let (owner, repo) = text.split_once('/').ok_or_else(bad_source)?;
-        if repo == Name::user_pack().as_str() {
+        if Name::user_pack().matches_ignoring_case(repo) {
             return Err(Error::ReservedPack {
                 text: text.to_owned(),
             });
@@ -124,12 +131,14 @@ mod tests {
     /// `docs/spec/rules.md#layers-and-overrides` names the user-rules layer's pack `user`.
     #[test]
     fn refuses_a_pack_named_user() {
-        let parsed = "someone/user".parse::<Source>();
+        for text in ["someone/user", "someone/User"] {
+            let parsed = text.parse::<Source>();
 
-        assert!(
-            matches!(parsed, Err(Error::ReservedPack { .. })),
-            "got {parsed:?}"
-        );
+            assert!(
+                matches!(parsed, Err(Error::ReservedPack { .. })),
+                "{text:?}: got {parsed:?}"
+            );
+        }
     }
 
     #[test]

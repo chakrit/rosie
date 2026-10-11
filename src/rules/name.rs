@@ -39,7 +39,13 @@ impl Name {
     }
 
     pub fn is_user_pack(&self) -> bool {
-        &*self.0 == USER_PACK
+        self.matches_ignoring_case(USER_PACK)
+    }
+
+    /// Pack names compare ignoring ASCII case, as GitHub's repository names do
+    /// (`docs/spec/rules.md#packs`).
+    pub fn matches_ignoring_case(&self, text: &str) -> bool {
+        self.0.eq_ignore_ascii_case(text)
     }
 
     pub fn as_str(&self) -> &str {

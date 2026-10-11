@@ -190,7 +190,7 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         match step {
             Step::Pass => {}
             Step::Skip(reason) => self.log.skip(path.to_path_buf(), reason),
-            Step::SkipAt(at, reason) => self.log.skip(at, reason),
+            Step::SkipAt(at, reason) => self.log.skip_named(path.to_path_buf(), at, reason),
             Step::Failed(error) => self.log.entry_failed(path.to_path_buf(), error),
             Step::Claim(entry, rules) => match self.walked.first_time(entry.path()) {
                 true => self.targets.claim(scope, entry, rules),

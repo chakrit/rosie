@@ -256,7 +256,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
         let kept = match self
             .console
-            .checklist("Untick what to keep:", plan.clean_entries())
+            .checklist("Uncheck what to keep:", plan.clean_entries())
         {
             Ok(kept) => kept,
             Err(PromptError::Cancelled) => return Ok(plan),

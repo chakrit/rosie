@@ -267,6 +267,29 @@ fn a_folder_holding_only_refused_or_skipped_items_says_what_is_inside() {
     );
 }
 
+/// A link out of the roots is skipped where it sits in the folder, though the skip names
+/// the folder it leads to.
+#[test]
+fn a_folder_holding_a_link_out_of_the_roots_counts_the_skip() {
+    let sandbox = Sandbox::with_roots(&[CWD]);
+    sandbox.fake.add_dir(format!("{HOME}/elsewhere"));
+    sandbox
+        .fake
+        .add_symlink(format!("{CWD}/proj/linked"), format!("{HOME}/elsewhere"));
+
+    let ran = check(&sandbox, &["proj", "--enter-links=all"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert_eq!(
+        line_for(&ran, "~/src/proj"),
+        line(
+            "skipped",
+            "~/src/proj",
+            "contains 1 skipped; see rosie scan tree ~/src/proj"
+        )
+    );
+}
+
 // scan report words otherwise
 
 #[test]

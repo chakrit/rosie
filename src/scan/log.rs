@@ -13,7 +13,11 @@ use crate::rules;
 /// A path the scan did not enter, and why.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Skipped {
+    /// The path the skip names: for a link out of the roots, the folder it leads to.
     pub path: PathBuf,
+    /// Where the walk met the skip: for a link out of the roots, the link itself; for
+    /// any other skip, `path`.
+    pub met_at: PathBuf,
     pub reason: WalkSkip,
 }
 
@@ -45,7 +49,18 @@ pub struct Log {
 
 impl Log {
     pub fn skip(&self, path: PathBuf, reason: WalkSkip) {
-        lock(&self.skipped).push(Skipped { path, reason });
+        let met_at = path.clone();
+        self.skip_named(met_at, path, reason);
+    }
+
+    /// Records a skip the walk met at `met_at` that names another path, such as a
+    /// link's target.
+    pub fn skip_named(&self, met_at: PathBuf, path: PathBuf, reason: WalkSkip) {
+        lock(&self.skipped).push(Skipped {
+            path,
+            met_at,
+            reason,
+        });
     }
 
     pub fn problem(&self, problem: Problem) {

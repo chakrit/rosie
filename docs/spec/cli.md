@@ -56,17 +56,24 @@ Bare `rosie` is `rosie clean tree .`.
 - Same flags as `scan`.
 - Walks each given folder's subtree so its verdict equals the plan's.
 - A folder containing targets gets a one-line summary pointing to `rosie scan`.
+- A summary line's status is the most consequential inside: conflict, clean, keep.
 - Exit 0 if any path would be cleaned, else 1.
 
 Approved example:
 
 ```text
+$ rosie check ~/src/app/node_modules ~/src/app/node_modules/react \
+    ~/Library/Developer/Xcode/DerivedData ~/src/old/.venv \
+    ~/Library/Caches/com.foo.Bar ~/src/api/target ~/src/api/target/debug ~/src/web \
+    ~/Applications/Slack.app ~/.cargo/registry /Volumes/Backup/build \
+    ~/src/app/src ~/Downloads/missing
 clean          ~/src/app/node_modules                 rosie/node-modules (normal)
 clean          ~/src/app/node_modules/react           inside ~/src/app/node_modules (rosie/node-modules)
 clean          ~/Library/Developer/Xcode/DerivedData  rosie/xcode-derived-data (normal); needs sudo
 keep           ~/src/old/.venv                        rosie/python-venv (aggressive); --aggressive cleans it
 outside-roots  ~/Library/Caches/com.foo.Bar           to allow it: rosie roots add ~/Library/Caches
 conflict       ~/src/api/target                       rosie/cargo-target (normal) vs alice/rust (aggressive, on target/debug); choose clean or keep in the plan
+conflict       ~/src/api/target/debug                 rosie/cargo-target (normal, on ~/src/api/target) vs alice/rust (aggressive); choose clean or keep in the plan
 clean          ~/src/web                              contains 3 items: 2 clean (1.4 GB), 1 keep (210 MB); see rosie scan tree ~/src/web
 in use         ~/Applications/Slack.app               running: Slack (pid 4123)
 skipped        ~/.cargo/registry                      through symlink ~/.cargo → ~/dotfiles/cargo; enter_links = "roots" allows it
@@ -93,18 +100,20 @@ no rule        ~/Downloads/missing                    does not exist
   *(agent-inferred)*
 - `; needs sudo` ends every line about an entry not owned by the user, inside lines
   included. *(agent-inferred)*
-- An `outside-roots` hint names the entry's path, as the plan's hint does.
-  *(agent-inferred)*
-- A conflict found by a `tree` walk is at one path, so neither side names an
-  `on <path>`. *(agent-inferred)*
-- A summary's status is the most consequential inside: `conflict`, `clean`, `keep`,
-  `outside-roots`. Its counts list those plan statuses, in that order.
+- An `outside-roots` hint names the entry's path, as the plan's hint does, not a parent
+  as in the example's `~/Library/Caches/com.foo.Bar` line. *(agent-inferred)*
+- A conflict found by a `tree` or `caches` walk is at one path, so neither side names an
+  `on <path>`, and a conflict nested in another, as in the example's `~/src/api/target`
+  and `~/src/api/target/debug` lines, does not arise. *(agent-inferred)*
+- After `keep`, a summary's status is `outside-roots`. Its counts list those plan statuses, in that order.
   *(agent-inferred)*
 - A folder with no plan entry inside but items refused or skipped inside is `in use`
   when any item runs, else `skipped`: `contains N in use, M skipped; see rosie scan tree
   <path>`. It is never `no rule`. *(agent-inferred)*
-- An item inside the path that a process runs from reads `inside <item> (<rules>);
-  running: <program> (pid <pid>)`. *(agent-inferred)*
+- A link out of the roots that the walk skips sits where the link is, not where it
+  leads. *(agent-inferred)*
+- A path inside an item a process runs from reads `inside <item> (<rules>); running:
+  <program> (pid <pid>)`. *(agent-inferred)*
 - A skip names every flag that would enter it: `--a and --b enter it`.
   *(agent-inferred)*
 - A refused typed path is `skipped` with the refusal's own text; one through a symlink

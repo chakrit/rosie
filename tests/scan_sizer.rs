@@ -106,6 +106,7 @@ fn a_sizer_built_from_outside_scan_logs_a_denied_subfolder_as_a_walk_skip() {
         skipped,
         [Skipped {
             path: PathBuf::from(format!("{HOME}/target/locked")),
+            met_at: PathBuf::from(format!("{HOME}/target/locked")),
             reason: WalkSkip::Denied,
         }]
     );

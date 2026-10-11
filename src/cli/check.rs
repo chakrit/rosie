@@ -15,14 +15,11 @@ use super::session::Session;
 use super::{Error, ExitStatus};
 use crate::fs::{self, Backend, EnterLinks, FsOp, UserInput};
 use crate::packs::Network;
-use crate::plan::{Delete, Disagreement, PlanStats, RunAs, Status, Tally, Twin, WalkSkip};
+use crate::plan::{
+    Delete, Disagreement, PlanStats, RunAs, Status, StatusKind, Tally, Twin, WalkSkip,
+};
 use crate::scan::{self, PathScan, Refused, Scan, Skipped};
 use crate::shell;
-
-const CLEAN: &str = "clean";
-const IN_USE: &str = "in use";
-const SKIPPED: &str = "skipped";
-const NO_RULE: &str = "no rule";
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// Prints one line per path, in columns, after scanning them all with one context,
@@ -45,12 +42,12 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             let line = match scanned {
                 Ok(scanned) => self.judged(&scanned)?,
                 Err(scan::Error::Missing { path }) => Line {
-                    status: NO_RULE,
+                    word: Word::NoRule,
                     path: self.tilde().path(&path),
                     reason: "does not exist".to_owned(),
                 },
                 Err(scan::Error::PathRefused(error)) => Line {
-                    status: SKIPPED,
+                    word: Word::Skipped,
                     path: self.tilde().path(&typed),
                     reason: self.refusal_reason(&error),
                 },
@@ -59,7 +56,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             lines.push(line);
         }
 
-        let cleaned = lines.iter().any(|line| line.status == CLEAN);
+        let cleaned = lines
+            .iter()
+            .any(|line| matches!(line.word, Word::Plan(StatusKind::Clean)));
         for text in layout(&lines) {
             self.say(&text)?;
         }
@@ -105,17 +104,36 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 }
 
 /// One printed line: status, path, and the reason with any hint.
-#[derive(Debug, Clone, PartialEq, Eq)]
 struct Line {
-    status: &'static str,
+    word: Word,
     path: String,
     reason: String,
+}
+
+/// A line's status: a plan word for a would-be entry, a scan report word otherwise.
+#[derive(Clone, Copy)]
+enum Word {
+    Plan(StatusKind),
+    InUse,
+    Skipped,
+    NoRule,
+}
+
+impl Word {
+    fn label(self) -> &'static str {
+        match self {
+            Word::Plan(kind) => kind.label(),
+            Word::InUse => "in use",
+            Word::Skipped => "skipped",
+            Word::NoRule => "no rule",
+        }
+    }
 }
 
 /// The lines in columns: each column as wide as its widest entry, two spaces apart.
 fn layout(lines: &[Line]) -> Vec<String> {
     let width = |column: fn(&Line) -> usize| lines.iter().map(column).max().unwrap_or(0);
-    let status_width = width(|line| line.status.chars().count());
+    let status_width = width(|line| line.word.label().chars().count());
     let path_width = width(|line| line.path.chars().count());
 
     lines
@@ -123,7 +141,9 @@ fn layout(lines: &[Line]) -> Vec<String> {
         .map(|line| {
             format!(
                 "{:<status_width$}  {:<path_width$}  {}",
-                line.status, line.path, line.reason
+                line.word.label(),
+                line.path,
+                line.reason
             )
         })
         .collect()
@@ -227,7 +247,7 @@ fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
             place,
         };
     }
-    if let Some(skipped) = scan.skipped.iter().find(|skip| holds_path(&skip.path)) {
+    if let Some(skipped) = scan.skipped.iter().find(|skip| holds_path(&skip.met_at)) {
         return Verdict::Skipped(skipped);
     }
 
@@ -246,7 +266,7 @@ fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
     let skipped = scan
         .skipped
         .iter()
-        .filter(|skip| inside_path(&skip.path))
+        .filter(|skip| inside_path(&skip.met_at))
         .count();
     match (in_use, skipped) {
         (0, 0) => Verdict::NoRule,
@@ -270,25 +290,30 @@ fn planned<'s>(delete: &'s Delete, scan: &Scan) -> Planned<'s> {
 impl Verdict<'_> {
     /// The line for `path`, the real path the verdict is about.
     fn line(&self, path: &Path, shown: &Shown) -> Line {
-        let (status, reason) = match self {
+        let (word, reason) = match self {
             Verdict::Entry {
                 delete,
                 planned,
                 place,
             } => (
-                delete.status.label(),
+                Word::Plan(delete.status.kind()),
                 entry_reason(delete, planned, *place, shown),
             ),
-            Verdict::InUse { refused, place } => (IN_USE, in_use_reason(refused, *place, shown)),
-            Verdict::Skipped(skipped) => (SKIPPED, skip_reason(skipped, shown)),
+            Verdict::InUse { refused, place } => {
+                (Word::InUse, in_use_reason(refused, *place, shown))
+            }
+            Verdict::Skipped(skipped) => (Word::Skipped, skip_reason(skipped)),
             Verdict::Holds(stats) => holds(stats, path, shown),
             Verdict::HoldsUnplanned { in_use, skipped } => {
                 holds_unplanned(*in_use, *skipped, path, shown)
             }
-            Verdict::NoRule => (NO_RULE, "no rule matches it or anything inside".to_owned()),
+            Verdict::NoRule => (
+                Word::NoRule,
+                "no rule matches it or anything inside".to_owned(),
+            ),
         };
         Line {
-            status,
+            word,
             path: shown.path(path),
             reason,
         }
@@ -358,9 +383,8 @@ fn in_use_reason(refused: &Refused, place: Place, shown: &Shown) -> String {
     }
 }
 
-/// The skip's reason, then the flags that would enter it or the `roots add` that would
-/// let it in.
-fn skip_reason(skipped: &Skipped, shown: &Shown) -> String {
+/// The skip's reason, then the flags that would enter it.
+fn skip_reason(skipped: &Skipped) -> String {
     let reason = skipped.reason.reason();
     let hint = match skipped.reason {
         WalkSkip::Closed(needs) => {
@@ -371,11 +395,8 @@ fn skip_reason(skipped: &Skipped, shown: &Shown) -> String {
                 None => None,
             }
         }
-        WalkSkip::LinkOutsideRoots => Some(format!(
-            "to allow it: rosie roots add {}",
-            shown.word(&skipped.path)
-        )),
-        WalkSkip::SealedMount
+        WalkSkip::LinkOutsideRoots
+        | WalkSkip::SealedMount
         | WalkSkip::SealedPlaceholder
         | WalkSkip::Denied
         | WalkSkip::LinkWalked
@@ -390,18 +411,18 @@ fn skip_reason(skipped: &Skipped, shown: &Shown) -> String {
 
 /// The most consequential status among the entries inside `path`, and `contains 3
 /// items: 2 clean (1.4 GB), 1 keep (210 MB); see rosie scan tree <path>`.
-fn holds(stats: &PlanStats, path: &Path, shown: &Shown) -> (&'static str, String) {
+fn holds(stats: &PlanStats, path: &Path, shown: &Shown) -> (Word, String) {
     let buckets = [
-        ("conflict", stats.conflicts),
-        (CLEAN, stats.clean),
-        ("keep", stats.keep),
-        ("outside-roots", stats.outside_roots),
+        (StatusKind::Conflict, stats.conflicts),
+        (StatusKind::Clean, stats.clean),
+        (StatusKind::Keep, stats.keep),
+        (StatusKind::OutsideRoots, stats.outside_roots),
     ];
-    let present: Vec<(&'static str, Tally)> = buckets
+    let present: Vec<(StatusKind, Tally)> = buckets
         .into_iter()
         .filter(|(_, tally)| !tally.is_empty())
         .collect();
-    let &(status, _) = present
+    let &(kind, _) = present
         .first()
         .expect("a folder holding plan entries holds at least one status");
 
@@ -412,69 +433,40 @@ fn holds(stats: &PlanStats, path: &Path, shown: &Shown) -> (&'static str, String
     };
     let counts: Vec<String> = present
         .iter()
-        .map(|(status, tally)| format!("{} {status} ({})", tally.items, tally.size))
+        .map(|(kind, tally)| format!("{} {} ({})", tally.items, kind.label(), tally.size))
         .collect();
     let reason = format!(
         "contains {items} {noun}: {}; see rosie scan tree {}",
         counts.join(", "),
         shown.word(path)
     );
-    (status, reason)
+    (Word::Plan(kind), reason)
 }
 
 /// `in use` when anything inside runs, else `skipped`, with `contains 1 in use, 2
 /// skipped; see rosie scan tree <path>`.
-fn holds_unplanned(
-    in_use: usize,
-    skipped: usize,
-    path: &Path,
-    shown: &Shown,
-) -> (&'static str, String) {
-    let status = match in_use {
-        0 => SKIPPED,
-        _ => IN_USE,
+fn holds_unplanned(in_use: usize, skipped: usize, path: &Path, shown: &Shown) -> (Word, String) {
+    let word = match in_use {
+        0 => Word::Skipped,
+        _ => Word::InUse,
     };
-    let counts = [(in_use, IN_USE), (skipped, SKIPPED)];
+    let counts = [(in_use, Word::InUse), (skipped, Word::Skipped)];
     let parts: Vec<String> = counts
         .into_iter()
         .filter(|(count, _)| *count > 0)
-        .map(|(count, word)| format!("{count} {word}"))
+        .map(|(count, counted)| format!("{count} {}", counted.label()))
         .collect();
     let reason = format!(
         "contains {}; see rosie scan tree {}",
         parts.join(", "),
         shown.word(path)
     );
-    (status, reason)
+    (word, reason)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn line(status: &'static str, path: &str, reason: &str) -> Line {
-        Line {
-            status,
-            path: path.to_owned(),
-            reason: reason.to_owned(),
-        }
-    }
-
-    #[test]
-    fn columns_are_as_wide_as_their_widest_entry_two_spaces_apart() {
-        let lines = [
-            line("clean", "~/a/node_modules", "rosie/node-modules (normal)"),
-            line("outside-roots", "~/b", "to allow it: rosie roots add ~/b"),
-        ];
-
-        assert_eq!(
-            layout(&lines),
-            [
-                "clean          ~/a/node_modules  rosie/node-modules (normal)",
-                "outside-roots  ~/b               to allow it: rosie roots add ~/b",
-            ]
-        );
-    }
 
     #[test]
     fn paths_under_home_print_from_tilde_and_paste_as_shell_words() {

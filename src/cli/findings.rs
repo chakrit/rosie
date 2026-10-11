@@ -100,6 +100,7 @@ mod tests {
             plan: Plan::default(),
             skipped: vec![Skipped {
                 path: "/Users/x/Library/Caches/com.gone.Tool".into(),
+                met_at: "/Users/x/Library/Caches/com.gone.Tool".into(),
                 reason: WalkSkip::Closed(Needs::PLACEHOLDERS),
             }],
             refused: Vec::new(),
@@ -119,6 +120,7 @@ mod tests {
             plan: Plan::default(),
             skipped: vec![Skipped {
                 path: "/Users/x/Library/Caches/com.gone.Tool".into(),
+                met_at: "/Users/x/Library/Caches/com.gone.Tool".into(),
                 reason: WalkSkip::Closed(Needs::PLACEHOLDERS),
             }],
             refused: Vec::new(),

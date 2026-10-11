@@ -449,16 +449,40 @@ pub enum Status {
 
 impl Status {
     pub fn label(&self) -> &'static str {
+        self.kind().label()
+    }
+
+    pub fn kind(&self) -> StatusKind {
         match self {
-            Status::Clean => "clean",
-            Status::Keep => "keep",
-            Status::OutsideRoots => "outside-roots",
-            Status::Conflict(_) => "conflict",
+            Status::Clean => StatusKind::Clean,
+            Status::Keep => StatusKind::Keep,
+            Status::OutsideRoots => StatusKind::OutsideRoots,
+            Status::Conflict(_) => StatusKind::Conflict,
         }
     }
 
     pub fn is_clean(&self) -> bool {
         *self == Status::Clean
+    }
+}
+
+/// A [`Status`] without what it carries: the kinds a plan's entries are counted by.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum StatusKind {
+    Clean,
+    Keep,
+    OutsideRoots,
+    Conflict,
+}
+
+impl StatusKind {
+    pub fn label(self) -> &'static str {
+        match self {
+            StatusKind::Clean => "clean",
+            StatusKind::Keep => "keep",
+            StatusKind::OutsideRoots => "outside-roots",
+            StatusKind::Conflict => "conflict",
+        }
     }
 }
 

@@ -120,8 +120,9 @@ no rule        ~/Downloads/missing                    does not exist
   names the link and where it leads. *(agent-inferred)*
 - A resolved path prints at its real location; a refused one prints as typed.
   *(agent-inferred)*
-- `check` covers `tree` and `caches` targets; `orphans` is not consulted.
-  *(agent-inferred)*
+- An `.app` path is judged as `rosie scan app` would plan it, when nothing at or above
+  it is claimed or skipped other than as a closed bundle; only the bundle's own line is
+  printed. `orphans` is not consulted. *(agent-inferred)*
 
 ## Management commands
 

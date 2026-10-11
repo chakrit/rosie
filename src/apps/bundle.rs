@@ -392,7 +392,8 @@ impl Found {
     }
 }
 
-pub(super) fn is_app_path(path: &Path) -> bool {
+/// Whether `path` is named as an app bundle, `<name>.app`.
+pub fn is_app_path(path: &Path) -> bool {
     path.extension() == Some(OsStr::new("app"))
 }
 

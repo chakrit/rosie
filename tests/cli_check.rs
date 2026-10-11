@@ -7,6 +7,7 @@ mod tarball;
 
 use cli_fixture::{CWD, HOME, Ran, Sandbox};
 use rosie::cli::ExitStatus;
+use rosie::fs::Argv;
 
 /// A rule that calls a Python project's `.venv` aggressive.
 const VENV_RULE: &str = "[rules.python-venv]\nstrategy = \"marker\"\n\
@@ -396,6 +397,88 @@ fn a_path_no_rule_reaches_is_no_rule_and_a_missing_one_does_not_exist() {
     assert_eq!(
         line_for(&ran, "~/Downloads/missing"),
         line("no rule", "~/Downloads/missing", "does not exist")
+    );
+}
+
+// an app bundle is judged as `rosie scan app` plans it
+
+const SLACK: &str = "/Users/me/Applications/Slack.app";
+
+/// An installed app with no leftovers, which `scan app` plans as one `clean` bundle.
+fn install_slack(sandbox: &Sandbox) {
+    let plist = format!("{SLACK}/Contents/Info.plist");
+    sandbox.fake.add_file(&plist, "<plist/>");
+    sandbox
+        .fake
+        .add_file(format!("{SLACK}/Contents/MacOS/Slack"), "x");
+    sandbox.respond(
+        extract(&plist, "CFBundleIdentifier"),
+        "com.tinyspeck.slackmacgap\n",
+    );
+    sandbox.respond(extract(&plist, "CFBundleName"), "Slack\n");
+    sandbox.respond(Argv::new("/usr/sbin/pkgutil").arg("--pkgs"), "");
+}
+
+fn extract(plist: &str, key: &str) -> Argv {
+    Argv::new("/usr/bin/plutil")
+        .arg("-extract")
+        .arg(key)
+        .arg("raw")
+        .arg("-o")
+        .arg("-")
+        .arg(plist)
+}
+
+#[test]
+fn an_app_not_running_takes_its_status_in_the_app_plan() {
+    let sandbox = Sandbox::new();
+    install_slack(&sandbox);
+
+    let ran = check(&sandbox, &[SLACK]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(
+        ran.stdout,
+        "clean  ~/Applications/Slack.app  app/com.tinyspeck.slackmacgap (normal)\n"
+    );
+}
+
+#[test]
+fn a_running_app_is_in_use_naming_the_program_and_pid() {
+    let sandbox = Sandbox::new();
+    install_slack(&sandbox);
+    sandbox
+        .fake
+        .respond_running(&[(4123, &format!("{SLACK}/Contents/MacOS/Slack"))]);
+
+    let ran = check(&sandbox, &[SLACK]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert_eq!(
+        line_for(&ran, "~/Applications/Slack.app"),
+        line(
+            "in use",
+            "~/Applications/Slack.app",
+            "running: Slack (pid 4123)"
+        )
+    );
+}
+
+/// App mode judges a bundle only when the tree walk claimed nothing above it.
+#[test]
+fn an_app_inside_a_plan_entry_takes_the_entry_s_status() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+    sandbox.fake.add_file(
+        format!("{CWD}/app/node_modules/Tool.app/Contents/Info.plist"),
+        "",
+    );
+
+    let ran = check(&sandbox, &["app/node_modules/Tool.app"]);
+
+    assert_eq!(
+        line_for(&ran, "~/src/app/node_modules/Tool.app").reason,
+        "inside ~/src/app/node_modules (rosie/node-modules)"
     );
 }
 

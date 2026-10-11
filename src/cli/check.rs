@@ -5,6 +5,10 @@
 //! through it as a `tree` walk does, so its verdict is the plan's. A path that would be
 //! an entry, or lies inside one, takes the plan's status word; any other takes a scan
 //! report word: `in use`, `skipped`, or `no rule`.
+//!
+//! An `.app` bundle the walk claims nothing at or above, and skips only as a closed
+//! bundle, is judged instead from the plan [`apps::scan_app`] makes for it, as `rosie
+//! scan app` would plan it; a process running from it makes it `in use`.
 
 use std::path::Path;
 
@@ -13,12 +17,15 @@ use super::console::{Console, Finish};
 use super::scan::{walk_with_rule_flags, walk_with_scan_flags};
 use super::session::Session;
 use super::{Error, ExitStatus};
-use crate::fs::{self, Backend, EnterLinks, FsOp, UserInput};
+use crate::apps;
+use crate::config::Walk;
+use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
 use crate::packs::Network;
 use crate::plan::{
-    Delete, Disagreement, PlanStats, RunAs, Status, StatusKind, Tally, Twin, WalkSkip,
+    AggressiveItems, Delete, Disagreement, Needs, PlanStats, RunAs, Status, StatusKind, Tally,
+    Twin, WalkSkip,
 };
-use crate::scan::{self, PathScan, Refused, Scan, Skipped};
+use crate::scan::{self, PathScan, Refused, Scan, Scanner, Skipped};
 use crate::shell;
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
@@ -27,11 +34,15 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// cleaned, else 1.
     pub fn check(&mut self, args: CheckArgs) -> Result<ExitStatus, Error> {
         let config = self.config()?;
-        let walk = walk_with_scan_flags(config.config().walk, &args.flags);
-        let walk = walk_with_rule_flags(walk, &args.rules);
+        let aggressive = args.flags.aggressive_items();
+        let app_mode = AppMode {
+            walk: walk_with_scan_flags(config.config().walk, &args.flags),
+            aggressive,
+        };
+        let walk = walk_with_rule_flags(app_mode.walk, &args.rules);
         let rules = self.rules(&args.rules.only)?;
         let ctx = self.roots_ctx(config.config())?;
-        let scanner = self.scanner(ctx, rules, walk, args.flags.aggressive_items());
+        let scanner = self.scanner(ctx, rules, walk, aggressive);
 
         let mut lines = Vec::new();
         for typed in &args.paths {
@@ -40,7 +51,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             let scanned = scanner.path(&typed, &progress);
             progress.finish()?;
             let line = match scanned {
-                Ok(scanned) => self.judged(&scanned)?,
+                Ok(scanned) => self.judged(&scanned, &scanner, app_mode)?,
                 Err(scan::Error::Missing { path }) => Line {
                     word: Word::NoRule,
                     path: self.tilde().path(&path),
@@ -65,16 +76,56 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         Ok(ExitStatus::failed_if(!cleaned))
     }
 
-    /// The line for a scanned path; the scan's problems go to stderr as `scan` prints
-    /// them.
-    fn judged(&mut self, scanned: &PathScan) -> Result<Line, Error> {
+    /// The line for a scanned path, from app mode when the walk leaves the path to it;
+    /// the scan's problems go to stderr as `scan` prints them.
+    fn judged(
+        &mut self,
+        scanned: &PathScan,
+        scanner: &Scanner<&'a B>,
+        app_mode: AppMode,
+    ) -> Result<Line, Error> {
         for problem in &scanned.scan.problems {
             self.note(&format!("problem: {problem}"))?;
         }
-
-        let verdict = judge(&scanned.path, &scanned.scan);
+        let path = &scanned.path;
+        let verdict = judge(path, &scanned.scan);
         let shown = self.tilde();
-        Ok(verdict.line(&scanned.path, &shown))
+        if !leaves_to_app_mode(&verdict, path) {
+            return Ok(verdict.line(path, &shown));
+        }
+
+        match self.app_line(scanner.ctx(), path, app_mode) {
+            Ok(line) => Ok(line),
+            Err(apps::Error::NotAnApp { .. }) => Ok(verdict.line(path, &shown)),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it, or
+    /// `in use` when that scan refuses the bundle for a process running from it.
+    fn app_line(
+        &self,
+        ctx: &FsContext<&'a B>,
+        path: &Path,
+        app_mode: AppMode,
+    ) -> Result<Line, apps::Error> {
+        let paths = &self.env.paths;
+        let shown = self.tilde();
+
+        let scanned = apps::scan_app(ctx, path, paths, app_mode.aggressive, app_mode.walk);
+
+        match scanned {
+            Ok(scan) => Ok(judge(path, &scan).line(path, &shown)),
+            Err(apps::Error::Refused {
+                source: fs::Error::Running { pid, program, .. },
+                ..
+            }) => Ok(Line {
+                word: Word::InUse,
+                path: shown.path(path),
+                reason: running(&program, pid),
+            }),
+            Err(error) => Err(error),
+        }
     }
 
     /// Why a typed path was refused. A path through a symlink names the link and where
@@ -101,6 +152,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             home: self.env.paths.home(),
         }
     }
+}
+
+/// The settings `rosie scan app` runs with under the same flags.
+#[derive(Clone, Copy)]
+struct AppMode {
+    walk: Walk,
+    aggressive: AggressiveItems,
 }
 
 /// One printed line: status, path, and the reason with any hint.
@@ -274,6 +332,20 @@ fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
     }
 }
 
+/// Whether the walk leaves `path` to app mode: it is named as an `.app`, nothing at or
+/// above it is a plan entry or in use, and the walk skipped nothing above it, nor it for
+/// any reason but that it is a closed bundle.
+fn leaves_to_app_mode(verdict: &Verdict, path: &Path) -> bool {
+    let unclaimed = match verdict {
+        Verdict::Entry { .. } | Verdict::InUse { .. } => false,
+        Verdict::Skipped(skipped) => {
+            skipped.met_at == path && skipped.reason == WalkSkip::Closed(Needs::BUNDLES)
+        }
+        Verdict::Holds(_) | Verdict::HoldsUnplanned { .. } | Verdict::NoRule => true,
+    };
+    unclaimed && apps::is_app_path(path)
+}
+
 /// `delete`'s status, with the tier its rules agree on when it is `clean`.
 fn planned<'s>(delete: &'s Delete, scan: &Scan) -> Planned<'s> {
     match &delete.status {
@@ -364,15 +436,7 @@ fn tier_label(tier: Twin) -> &'static str {
 
 /// `running: Slack (pid 4123)`, after `inside <item> (<rules>)` below the item.
 fn in_use_reason(refused: &Refused, place: Place, shown: &Shown) -> String {
-    let program = refused
-        .program
-        .file_name()
-        .unwrap_or(refused.program.as_os_str());
-    let running = format!(
-        "running: {} (pid {})",
-        program.to_string_lossy(),
-        refused.pid
-    );
+    let running = running(&refused.program, refused.pid);
     match place {
         Place::At => running,
         Place::Inside => format!(
@@ -381,6 +445,12 @@ fn in_use_reason(refused: &Refused, place: Place, shown: &Shown) -> String {
             refused.rules.join(", ")
         ),
     }
+}
+
+/// `running: Slack (pid 4123)`, naming the program by its file name.
+fn running(program: &Path, pid: u32) -> String {
+    let name = program.file_name().unwrap_or(program.as_os_str());
+    format!("running: {} (pid {pid})", name.to_string_lossy())
 }
 
 /// The skip's reason, then the flags that would enter it.

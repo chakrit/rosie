@@ -118,6 +118,12 @@ impl<B: Backend + Sync> Scanner<B> {
         }
     }
 
+    /// The context every scan of this scanner works through, with its one
+    /// running-program snapshot.
+    pub fn ctx(&self) -> &FsContext<B> {
+        &self.ctx
+    }
+
     /// Scans `dir`, a path the user typed: refused when it passes through a symlink or
     /// is spelled differently from the disk. The folder itself is never a target; the
     /// walk looks at everything below it. A folder that is a dataless placeholder is

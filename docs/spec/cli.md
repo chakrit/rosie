@@ -105,8 +105,8 @@ no rule        ~/Downloads/missing                    does not exist
 - A conflict found by a `tree` or `caches` walk is at one path, so neither side names an
   `on <path>`, and a conflict nested in another, as in the example's `~/src/api/target`
   and `~/src/api/target/debug` lines, does not arise. *(agent-inferred)*
-- After `keep`, a summary's status is `outside-roots`. Its counts list those plan statuses, in that order.
-  *(agent-inferred)*
+- After `keep`, a summary's status is `outside-roots`. Its counts list `conflict`,
+  `clean`, `keep`, and `outside-roots`, in that order. *(agent-inferred)*
 - A folder with no plan entry inside but items refused or skipped inside is `in use`
   when any item runs, else `skipped`: `contains N in use, M skipped; see rosie scan tree
   <path>`. It is never `no rule`. *(agent-inferred)*

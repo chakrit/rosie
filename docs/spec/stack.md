@@ -32,8 +32,10 @@ Status: accepted.
 | `tar` + `flate2`              | pack unpacking ([safety.md](safety.md#rosies-own-data))              |
 | `rayon`                       | parallel walk, sizing, and delete ([performance.md](performance.md)) |
 
-`ureq` uses native TLS (macOS Security framework, Keychain trust, no `ring`):
+`ureq` uses native TLS (macOS Security framework, Keychain trust, no `ring`). Rosie does
+not use `rustls` or another pure-Rust TLS stack, for macOS adherence, not for any TLS
+technicality:
 
 ```toml
-ureq = { version = "3", default-features = false, features = ["native-tls-no-default"] }
+ureq = { version = "3", default-features = false, features = ["native-tls"] }
 ```

@@ -21,7 +21,7 @@ use std::time::SystemTime;
 use clap::Parser;
 use clap::error::ErrorKind;
 
-use crate::fs::{Backend, Paths};
+use crate::fs::{Backend, Paths, VersionCheck};
 use crate::packs::Network;
 use crate::plan::RunStats;
 use crate::run::RootError;
@@ -72,8 +72,10 @@ impl ExitStatus {
     }
 }
 
+/// One process of rosie. Its backend checks each system tool's version before the first
+/// use (`docs/spec/safety.md#system-tool-versions`).
 pub struct App<B: Backend, N: Network, C: Console> {
-    backend: B,
+    backend: VersionCheck<B>,
     network: N,
     console: C,
 }
@@ -81,7 +83,7 @@ pub struct App<B: Backend, N: Network, C: Console> {
 impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     pub fn new(backend: B, network: N, console: C) -> Self {
         App {
-            backend,
+            backend: VersionCheck::new(backend),
             network,
             console,
         }
@@ -111,9 +113,24 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             Some(Command::User(command)) => self.command(&env, command, typed_args(&argv)),
             None => self.command(&env, UserCommand::default(), typed_args(&argv)),
         };
-        match outcome {
+        let status = match outcome {
             Ok(status) => status,
             Err(error) => self.show_error(&error),
+        };
+        self.show_version_warnings(status)
+    }
+
+    /// Prints the warnings of every system tool whose version rosie was not tested with;
+    /// the command has run regardless.
+    fn show_version_warnings(&mut self, status: ExitStatus) -> ExitStatus {
+        let written: Result<(), std::io::Error> = self
+            .backend
+            .take_warnings()
+            .iter()
+            .try_for_each(|warning| writeln!(self.console.stderr(), "{warning}"));
+        match written {
+            Ok(()) => status,
+            Err(_) => ExitStatus::Failed,
         }
     }
 

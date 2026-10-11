@@ -35,6 +35,27 @@ forced through it; there are no exceptions.
 - Roots (home, `/Library`, scan root, rosie's own folders) are injected, never read from
   `$HOME`.
 
+### System tool versions
+
+Before a process first runs a system tool, rosie reads the tool's version. A version
+rosie was not tested with draws a warning naming the tool, the version found, and the
+tested version; the command continues. Each tool is checked at most once per process,
+and only when that process runs it.
+
+| Tool                | Version read from                | Tested       |
+|---------------------|----------------------------------|--------------|
+| `/usr/sbin/lsof`    | `lsof -v`                        | 4.91         |
+| `/bin/launchctl`    | `launchctl version`              | 7.0.0        |
+| `/usr/bin/sudo`     | `sudo -V`                        | 1.9.17p2     |
+| `/bin/bash`         | `bash --version`                 | 3.2.57       |
+| `/bin/ps`           | macOS, `sw_vers -productVersion` | macOS 26.6.2 |
+| `/usr/bin/plutil`   | macOS, `sw_vers -productVersion` | macOS 26.6.2 |
+| `/usr/sbin/pkgutil` | macOS, `sw_vers -productVersion` | macOS 26.6.2 |
+| `/usr/bin/id`       | macOS, `sw_vers -productVersion` | macOS 26.6.2 |
+
+- A version that cannot be read draws a warning too.
+- A tool rule's `shell` other than `/bin/bash` is not version-checked.
+
 ### Cleanup targets
 
 - Every filesystem mutation of a cleanup target is refused unless its path lies within

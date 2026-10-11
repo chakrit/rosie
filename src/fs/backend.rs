@@ -234,35 +234,122 @@ impl std::fmt::Display for Argv {
 /// program in its place, in the elevated child least of all. Every tool is one of the
 /// constants below, and the constructor they share rejects a relative path while rosie
 /// compiles. A tool rule names its own shell ([`crate::fs::ShellCommand`]), whose command
-/// line is meant to use `PATH`.
+/// line is meant to use `PATH`; only the default one, bash, is a system tool.
+///
+/// Each tool carries where its version is read and the version rosie was tested with
+/// (`docs/spec/safety.md#system-tool-versions`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct SystemTool(&'static str);
+pub struct SystemTool {
+    path: &'static str,
+    version: VersionSource,
+}
 
 impl SystemTool {
-    pub const ID: SystemTool = SystemTool::at("/usr/bin/id");
-    pub const LAUNCHCTL: SystemTool = SystemTool::at("/bin/launchctl");
-    pub const LSOF: SystemTool = SystemTool::at("/usr/sbin/lsof");
-    pub const PKGUTIL: SystemTool = SystemTool::at("/usr/sbin/pkgutil");
-    pub const PLUTIL: SystemTool = SystemTool::at("/usr/bin/plutil");
-    pub const PS: SystemTool = SystemTool::at("/bin/ps");
-    pub const SUDO: SystemTool = SystemTool::at("/usr/bin/sudo");
+    pub const BASH: SystemTool = SystemTool::at(
+        "/bin/bash",
+        VersionSource::Own {
+            args: &["--version"],
+            format: VersionFormat::Bash,
+            tested: "3.2.57",
+        },
+    );
+    pub const ID: SystemTool = SystemTool::at("/usr/bin/id", VersionSource::MacOs);
+    pub const LAUNCHCTL: SystemTool = SystemTool::at(
+        "/bin/launchctl",
+        VersionSource::Own {
+            args: &["version"],
+            format: VersionFormat::Launchctl,
+            tested: "7.0.0",
+        },
+    );
+    pub const LSOF: SystemTool = SystemTool::at(
+        "/usr/sbin/lsof",
+        VersionSource::Own {
+            args: &["-v"],
+            format: VersionFormat::Lsof,
+            tested: "4.91",
+        },
+    );
+    pub const PKGUTIL: SystemTool = SystemTool::at("/usr/sbin/pkgutil", VersionSource::MacOs);
+    pub const PLUTIL: SystemTool = SystemTool::at("/usr/bin/plutil", VersionSource::MacOs);
+    pub const PS: SystemTool = SystemTool::at("/bin/ps", VersionSource::MacOs);
+    pub const SUDO: SystemTool = SystemTool::at(
+        "/usr/bin/sudo",
+        VersionSource::Own {
+            args: &["-V"],
+            format: VersionFormat::Sudo,
+            tested: "1.9.17p2",
+        },
+    );
+    pub const SW_VERS: SystemTool = SystemTool::at("/usr/bin/sw_vers", VersionSource::IsMacOs);
 
-    const fn at(path: &'static str) -> SystemTool {
+    const ALL: [SystemTool; 9] = [
+        SystemTool::BASH,
+        SystemTool::ID,
+        SystemTool::LAUNCHCTL,
+        SystemTool::LSOF,
+        SystemTool::PKGUTIL,
+        SystemTool::PLUTIL,
+        SystemTool::PS,
+        SystemTool::SUDO,
+        SystemTool::SW_VERS,
+    ];
+
+    const fn at(path: &'static str, version: VersionSource) -> SystemTool {
         assert!(
             matches!(path.as_bytes(), [b'/', ..]),
             "a system tool is named by its absolute path"
         );
-        SystemTool(path)
+        SystemTool { path, version }
     }
 
-    pub fn path(self) -> &'static str {
-        self.0
+    /// The system tool a program path names, if it names one.
+    pub fn at_path(program: &OsStr) -> Option<SystemTool> {
+        SystemTool::ALL
+            .into_iter()
+            .find(|tool| OsStr::new(tool.path) == program)
+    }
+
+    pub const fn path(self) -> &'static str {
+        self.path
+    }
+
+    pub fn version(self) -> VersionSource {
+        self.version
     }
 
     /// The tool's command line, with no arguments yet.
     pub fn argv(self) -> SystemArgv {
-        SystemArgv(Argv::new(self.0))
+        SystemArgv(Argv::new(self.path))
     }
+}
+
+/// Where a system tool's version is read.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VersionSource {
+    /// The tool reports its own version when run with `args`.
+    Own {
+        args: &'static [&'static str],
+        format: VersionFormat,
+        tested: &'static str,
+    },
+    /// The tool reports no version; the macOS version stands for it.
+    MacOs,
+    /// The tool that reports the macOS version.
+    IsMacOs,
+}
+
+/// How a tool's own version output reads.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum VersionFormat {
+    /// `GNU bash, version 3.2.57(1)-release …`
+    Bash,
+    /// `Darwin Bootstrapper Version 7.0.0: …`
+    Launchctl,
+    /// `lsof version information:` then `    revision: 4.91`
+    Lsof,
+    /// `Sudo version 1.9.17p2`
+    Sudo,
 }
 
 /// A command line whose program is a [`SystemTool`].

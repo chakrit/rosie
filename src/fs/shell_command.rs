@@ -8,7 +8,7 @@ use std::path::{Path, PathBuf};
 
 use thiserror::Error;
 
-use super::backend::Argv;
+use super::backend::{Argv, SystemTool};
 
 /// A command run as `<shell> -c <cmd>` with `env` added to rosie's environment. Checked
 /// once, when it is built: the shell is an absolute path, the command is not blank,
@@ -38,7 +38,7 @@ pub enum InvalidCommand {
 
 impl ShellCommand {
     /// The shell a tool rule runs when it names none.
-    pub const DEFAULT_SHELL: &'static str = "/bin/bash";
+    pub const DEFAULT_SHELL: &'static str = SystemTool::BASH.path();
 
     pub fn new(
         shell: String,

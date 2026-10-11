@@ -10,6 +10,7 @@ mod ops;
 mod paths;
 mod real;
 mod shell_command;
+mod versions;
 
 pub use backend::{
     Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS, SystemArgv,
@@ -22,3 +23,4 @@ pub use ops::{Cleanup, FsOp, LinkTarget, Rosie, UserInput};
 pub use paths::Paths;
 pub use real::RealBackend;
 pub use shell_command::{InvalidCommand, ShellCommand};
+pub use versions::{TESTED_MACOS, UntestedVersion, VersionCheck};

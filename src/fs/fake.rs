@@ -25,7 +25,7 @@ use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use super::backend::{
-    Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS,
+    Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS, SystemTool,
 };
 use super::context::running_argv;
 use super::error::Op;
@@ -123,7 +123,40 @@ impl FakeBackend {
             state: Mutex::new(state),
         };
         fake.respond_running(&[]);
+        fake.respond_tested_versions();
         fake
+    }
+
+    /// Answers every system tool's version probe with the version rosie was tested
+    /// with, as a new fake does.
+    fn respond_tested_versions(&self) {
+        let answers = [
+            (
+                SystemTool::BASH.argv().arg("--version"),
+                "GNU bash, version 3.2.57(1)-release (arm64-apple-darwin25)\n",
+            ),
+            (
+                SystemTool::LAUNCHCTL.argv().arg("version"),
+                "Darwin Bootstrapper Version 7.0.0: Fri Jul 31 21:16:41 PDT 2026\n",
+            ),
+            (
+                SystemTool::LSOF.argv().arg("-v"),
+                "lsof version information:\n    revision: 4.91\n",
+            ),
+            (SystemTool::SUDO.argv().arg("-V"), "Sudo version 1.9.17p2\n"),
+            (
+                SystemTool::SW_VERS.argv().arg("-productVersion"),
+                "26.6.2\n",
+            ),
+        ];
+        for (argv, text) in answers {
+            let output = CommandOutput {
+                exit: Exit::Code(0),
+                stdout: text.as_bytes().to_vec(),
+                stderr: Vec::new(),
+            };
+            self.respond(argv, output);
+        }
     }
 
     // injected behavior

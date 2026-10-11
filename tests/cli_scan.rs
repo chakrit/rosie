@@ -9,7 +9,7 @@ use std::io::ErrorKind;
 use cli_fixture::{CARGO_RULE, CONFIG_FILE, CWD, HOME, NOW, ROSIE_URL, Sandbox, Script, at};
 use pack_fixture::Canned;
 use rosie::cli::ExitStatus;
-use rosie::fs::Op;
+use rosie::fs::{CommandOutput, Exit, Op, SystemTool};
 use rosie::packs::MONTH;
 use tarball::{TOP, Tarball};
 
@@ -596,5 +596,38 @@ fn rules_six_months_old_draw_the_age_warning() {
             .contains("Your rules are 7 months old, consider rosie rules pull to update"),
         "{}",
         old.stderr
+    );
+}
+
+// system tool versions
+
+#[test]
+fn an_untested_tool_version_warns_and_the_scan_goes_on() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+    let lsof_version = SystemTool::LSOF.argv().arg("-v");
+    sandbox.fake.respond(
+        lsof_version,
+        CommandOutput {
+            exit: Exit::Code(0),
+            stdout: b"lsof version information:\n    revision: 4.99\n".to_vec(),
+            stderr: Vec::new(),
+        },
+    );
+
+    let ran = sandbox.run(&["scan", "tree", "."]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(ran.stdout.contains("node_modules"), "{}", ran.stdout);
+    let warnings: Vec<&str> = ran
+        .stderr
+        .lines()
+        .filter(|line| line.starts_with("warning:"))
+        .collect();
+    assert_eq!(
+        warnings,
+        ["warning: /usr/sbin/lsof is version 4.99; rosie was tested with 4.91"],
+        "{}",
+        ran.stderr
     );
 }

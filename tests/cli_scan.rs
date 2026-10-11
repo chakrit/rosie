@@ -454,7 +454,9 @@ fn aggressive_ticks_the_aggressive_command_in_place_of_the_normal_one() {
             .contains("unticked (aggressive, not run): 1 item")
     );
     assert!(
-        aggressive.stdout.contains("\"--all\""),
+        aggressive
+            .stdout
+            .contains("cmd = \"docker system prune --all --force\""),
         "{}",
         aggressive.stdout
     );

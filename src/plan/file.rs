@@ -8,16 +8,17 @@
 //! A `conflict` entry is refused too, so a plan read back always has every conflict
 //! resolved (`docs/spec/plan.md#rule-conflicts`).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
 use super::conflict::conflict_hint;
 use super::{
-    Bootout, Command, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
-    Report, RunAs, Selection, Size, Status, Tool, blocked_hint, check_path,
+    Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
+    Selection, Size, Status, Tool, blocked_hint, check_path,
 };
+use crate::fs::ShellCommand;
 
 const FORMAT_VERSION: u32 = 1;
 
@@ -135,9 +136,12 @@ struct BootoutTable {
 #[derive(Serialize, Deserialize, Default)]
 #[serde(default, deny_unknown_fields)]
 struct ToolTable {
-    rules: Vec<String>,
-    cmd: Vec<String>,
+    rule: String,
+    shell: String,
+    cmd: String,
     status: String,
+    #[serde(skip_serializing_if = "BTreeMap::is_empty")]
+    env: BTreeMap<String, String>,
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -179,9 +183,11 @@ impl PlanFile {
 
     fn tool(tool: &Tool) -> Self {
         let table = ToolTable {
-            rules: tool.rules.clone(),
-            cmd: tool.command.words().map(str::to_owned).collect(),
+            rule: tool.rule.clone(),
+            shell: path_text(tool.command.shell()),
+            cmd: tool.command.cmd().to_owned(),
             status: Status::from(tool.selection).label().to_owned(),
+            env: tool.command.env().clone(),
         };
         PlanFile {
             tool: vec![table],
@@ -332,10 +338,14 @@ fn refuse_repeated_plists(bootouts: &[Bootout]) -> Result<(), String> {
 
 impl ToolTable {
     fn into_tool(self) -> Result<Tool, String> {
-        let command = Command::from_words(self.cmd).map_err(|error| error.to_string())?;
+        if self.shell.is_empty() {
+            return Err("shell is missing".to_owned());
+        }
+        let command =
+            ShellCommand::new(self.shell, self.cmd, self.env).map_err(|error| error.to_string())?;
         let selection = selection(&self.status)?;
         Ok(Tool {
-            rules: self.rules,
+            rule: self.rule,
             command,
             selection,
         })
@@ -465,21 +475,20 @@ mod tests {
         builder
             .add_path(found("/w/app/support", Reach::InRoots, Twin::Aggressive))
             .expect("valid");
-        builder
-            .add_tool(
-                "rosie/docker",
-                ToolCmds::Twins {
-                    cmd: &crate::plan::argv("docker system prune --force"),
-                    cmd_aggressive: &crate::plan::argv("docker system prune --all --force"),
-                },
-            )
-            .expect("valid");
-        builder
-            .add_tool(
-                "user/docker",
-                ToolCmds::Normal(&crate::plan::argv("docker system prune --force")),
-            )
-            .expect("valid");
+        builder.add_tool(
+            "rosie/docker",
+            ToolCmds::Twins {
+                cmd: &crate::plan::tool_command("docker system prune --force"),
+                cmd_aggressive: &crate::plan::tool_command("docker system prune --all --force"),
+            },
+        );
+        let brew = ShellCommand::new(
+            "/bin/zsh".to_owned(),
+            "brew cleanup && echo 'done'".to_owned(),
+            BTreeMap::from([("HOMEBREW_NO_ENV_HINTS".to_owned(), "1".to_owned())]),
+        )
+        .expect("valid");
+        builder.add_tool("user/brew", ToolCmds::Normal(&brew));
         builder
             .add_receipt("com.x.pkg", Twin::Normal)
             .expect("valid");
@@ -634,7 +643,14 @@ mod tests {
             "{text}"
         );
         assert!(
-            text.contains("cmd = [\"docker\", \"system\", \"prune\", \"--force\"]"),
+            text.contains(
+                "[[tool]]\nrule = \"rosie/docker\"\nshell = \"/bin/bash\"\n\
+                 cmd = \"docker system prune --force\"\nstatus = \"ticked\"\n"
+            ),
+            "{text}"
+        );
+        assert!(
+            text.contains("[tool.env]\nHOMEBREW_NO_ENV_HINTS = \"1\"\n"),
             "{text}"
         );
         assert!(text.contains("domain = \"system\""), "{text}");
@@ -795,11 +811,23 @@ mod tests {
                 "[[delete]] entry 1: status \"conflict\" is a rule conflict; resolve it to ticked or unticked",
             ),
             (
-                "version = 1\n[[tool]]\ncmd = [\"a\"]\nstatus = \"ticked\"\n[[tool]]\ncmd = []\nstatus = \"ticked\"\n",
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"ticked\"\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \" \"\nstatus = \"ticked\"\n",
                 "[[tool]] entry 2: cmd is empty",
             ),
             (
-                "version = 1\n[[tool]]\ncmd = [\"a\"]\nstatus = \"blocked\"\n",
+                "version = 1\n[[tool]]\ncmd = \"a\"\nstatus = \"ticked\"\n",
+                "[[tool]] entry 1: shell is missing",
+            ),
+            (
+                "version = 1\n[[tool]]\nshell = \"bash\"\ncmd = \"a\"\nstatus = \"ticked\"\n",
+                "[[tool]] entry 1: shell \"bash\" is not an absolute path",
+            ),
+            (
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"ticked\"\n[tool.env]\n\"-i\" = \"1\"\n",
+                "[[tool]] entry 1: env name \"-i\" is not letters, digits, and `_`, starting with no digit",
+            ),
+            (
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"blocked\"\n",
                 "[[tool]] entry 1: status \"blocked\" is not one of ticked, unticked",
             ),
             (
@@ -819,8 +847,8 @@ mod tests {
                 "[[delete]] entry 1: bootout plist \"/L/x\\0.plist\" holds a NUL byte, which no path or argument can carry",
             ),
             (
-                "version = 1\n[[tool]]\ncmd = [\"tool\", \"a\\u0000b\"]\nstatus = \"ticked\"\n",
-                "[[tool]] entry 1: \"a\\0b\" holds a NUL byte, which no path or argument can carry",
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"tool a\\u0000b\"\nstatus = \"ticked\"\n",
+                "[[tool]] entry 1: \"tool a\\0b\" holds a NUL byte, which no command can carry",
             ),
             (
                 "version = 1\n[[forget]]\npackage = \"com.x\\u0000\"\nstatus = \"ticked\"\n",

@@ -360,10 +360,10 @@ fn refuses_a_sudo_ancestor_not_running_as_root() {
 #[test]
 fn refuses_piped_tool_commands_outright() {
     let fake = machine("0", SUDO_CHAIN);
-    let docker = Argv::new("docker").arg("system").arg("prune");
+    let docker = Argv::new("/bin/bash").arg("-c").arg("docker system prune");
     fake.respond(docker.clone(), output(""));
     let plan = format!(
-        "{}[[tool]]\nrules = [\"r\"]\ncmd = [\"docker\", \"system\", \"prune\"]\nstatus = \"ticked\"\n",
+        "{}[[tool]]\nrule = \"r\"\nshell = \"/bin/bash\"\ncmd = \"docker system prune\"\nstatus = \"ticked\"\n",
         items()
     );
 

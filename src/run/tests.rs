@@ -363,16 +363,26 @@ fn deletes_a_large_tree_completely() {
 
 // commands
 
+/// A ticked `[[tool]]` entry running `cmd` through `/bin/bash`.
+fn bash_tool(cmd: &str) -> String {
+    format!("[[tool]]\nrule = \"r\"\nshell = \"/bin/bash\"\ncmd = \"{cmd}\"\nstatus = \"ticked\"\n")
+}
+
+fn bash(cmd: &str) -> Argv {
+    Argv::new("/bin/bash").arg("-c").arg(cmd)
+}
+
 #[test]
-fn runs_tool_argv_directly_keeping_the_last_three_lines() {
+fn runs_tool_cmd_through_its_shell_with_its_env_keeping_the_last_three_lines() {
     let fake = FakeBackend::new();
-    let docker = Argv::new("docker")
-        .arg("system")
-        .arg("prune")
-        .arg("--force");
+    let docker = Argv::new("/bin/zsh")
+        .arg("-c")
+        .arg("docker system prune --force")
+        .env("DOCKER_CLI_HINTS", "false");
     fake.respond(docker.clone(), output(0, "one\ntwo\nthree\n", "four\n"));
     let plan = plan(
-        "[[tool]]\nrules = [\"r\"]\ncmd = [\"docker\", \"system\", \"prune\", \"--force\"]\nstatus = \"ticked\"\n",
+        "[[tool]]\nrule = \"r\"\nshell = \"/bin/zsh\"\ncmd = \"docker system prune --force\"\n\
+         status = \"ticked\"\n[tool.env]\nDOCKER_CLI_HINTS = \"false\"\n",
     );
 
     let (stats, recorder) = run(&fake, &[], &plan);
@@ -392,9 +402,8 @@ fn runs_tool_argv_directly_keeping_the_last_three_lines() {
 #[test]
 fn a_tool_absent_from_the_machine_fails_normally() {
     let fake = FakeBackend::new();
-    let gradle = Argv::new("gradle").arg("--stop");
-    let plan =
-        plan("[[tool]]\nrules = [\"r\"]\ncmd = [\"gradle\", \"--stop\"]\nstatus = \"ticked\"\n");
+    let gradle = bash("gradle --stop");
+    let plan = plan(&bash_tool("gradle --stop"));
 
     let (stats, recorder) = run(&fake, &[], &plan);
 
@@ -403,16 +412,17 @@ fn a_tool_absent_from_the_machine_fails_normally() {
     assert!(
         recorder.finished[0]
             .reason
-            .contains("cannot run `gradle --stop`")
+            .contains("cannot run `/bin/bash -c gradle --stop`"),
+        "{}",
+        recorder.finished[0].reason
     );
 }
 
 #[test]
 fn a_tool_exiting_non_zero_fails() {
     let fake = FakeBackend::new();
-    fake.respond(Argv::new("brew").arg("cleanup"), output(1, "", "locked\n"));
-    let plan =
-        plan("[[tool]]\nrules = [\"r\"]\ncmd = [\"brew\", \"cleanup\"]\nstatus = \"ticked\"\n");
+    fake.respond(bash("brew cleanup"), output(1, "", "locked\n"));
+    let plan = plan(&bash_tool("brew cleanup"));
 
     let (stats, recorder) = run(&fake, &[], &plan);
 

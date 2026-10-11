@@ -83,6 +83,7 @@ impl Backend for RealBackend {
     fn run(&self, argv: &Argv) -> io::Result<CommandOutput> {
         let output = Command::new(argv.program())
             .args(argv.args())
+            .envs(argv.envs().iter().map(|(name, value)| (name, value)))
             .stdin(Stdio::null())
             .output()?;
 
@@ -96,6 +97,7 @@ impl Backend for RealBackend {
     fn run_streaming<F: FnMut(&str)>(&self, argv: &Argv, mut on_line: F) -> io::Result<Exit> {
         let mut child = Command::new(argv.program())
             .args(argv.args())
+            .envs(argv.envs().iter().map(|(name, value)| (name, value)))
             .stdin(Stdio::null())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -121,6 +123,13 @@ impl Backend for RealBackend {
     }
 
     fn sudo(&self, argv: &Argv, stdin: &[u8]) -> io::Result<CommandOutput> {
+        // sudo resets the environment by policy, so variables set here would not reach
+        // the command; refuse rather than drop them.
+        if !argv.envs().is_empty() {
+            let message = "sudo does not pass an added environment on";
+            return Err(io::Error::new(io::ErrorKind::InvalidInput, message));
+        }
+
         let mut child = Command::new(SystemTool::SUDO.path())
             .arg(argv.program())
             .args(argv.args())
@@ -215,6 +224,32 @@ mod tests {
 
         assert_eq!(output.exit, Exit::Code(0));
         assert_eq!(output.stdout, b"$HOME; two words\n");
+    }
+
+    #[test]
+    fn adds_the_environment_to_the_command() {
+        let argv = Argv::new("/bin/sh")
+            .arg("-c")
+            .arg("echo \"$ROSIE_TEST_VALUE\"")
+            .env("ROSIE_TEST_VALUE", "set by the rule");
+        let mut lines = Vec::new();
+
+        let exit = RealBackend
+            .run_streaming(&argv, |line| lines.push(line.to_owned()))
+            .expect("run sh");
+
+        assert_eq!(exit, Exit::Code(0));
+        assert_eq!(lines, ["set by the rule"]);
+    }
+
+    #[test]
+    fn refuses_to_sudo_a_command_with_an_added_environment() {
+        let argv = Argv::new("/usr/bin/true").env("A", "1");
+
+        let result = RealBackend.sudo(&argv, b"");
+
+        let error = result.expect_err("refused before sudo runs");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidInput);
     }
 
     #[test]

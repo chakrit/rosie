@@ -175,11 +175,13 @@ impl FileKind {
     }
 }
 
-/// A program and its arguments, run without a shell.
+/// A program and its arguments, run without a shell, with variables added to rosie's
+/// environment.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Argv {
     program: OsString,
     args: Vec<OsString>,
+    envs: Vec<(OsString, OsString)>,
 }
 
 impl Argv {
@@ -187,11 +189,17 @@ impl Argv {
         Argv {
             program: program.into(),
             args: Vec::new(),
+            envs: Vec::new(),
         }
     }
 
     pub fn arg(mut self, arg: impl Into<OsString>) -> Self {
         self.args.push(arg.into());
+        self
+    }
+
+    pub fn env(mut self, name: impl Into<OsString>, value: impl Into<OsString>) -> Self {
+        self.envs.push((name.into(), value.into()));
         self
     }
 
@@ -202,10 +210,18 @@ impl Argv {
     pub fn args(&self) -> &[OsString] {
         &self.args
     }
+
+    pub fn envs(&self) -> &[(OsString, OsString)] {
+        &self.envs
+    }
 }
 
+/// `NAME=value program arg…`, as `env` would read it.
 impl std::fmt::Display for Argv {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        for (name, value) in &self.envs {
+            write!(f, "{}={} ", name.to_string_lossy(), value.to_string_lossy())?;
+        }
         write!(f, "{}", self.program.to_string_lossy())?;
         for arg in &self.args {
             write!(f, " {}", arg.to_string_lossy())?;
@@ -217,7 +233,8 @@ impl std::fmt::Display for Argv {
 /// A system tool rosie runs by its absolute path, so no `PATH` lookup can put another
 /// program in its place, in the elevated child least of all. Every tool is one of the
 /// constants below, and the constructor they share rejects a relative path while rosie
-/// compiles. A rule's tool command is a plain [`Argv`]: it is meant to use `PATH`.
+/// compiles. A tool rule names its own shell ([`crate::fs::ShellCommand`]), whose command
+/// line is meant to use `PATH`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct SystemTool(&'static str);
 

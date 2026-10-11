@@ -25,7 +25,7 @@ impl fmt::Display for Ticked<'_> {
             Ticked::Delete(delete) => {
                 write!(f, "delete {} ({})", delete.path.display(), delete.size)
             }
-            Ticked::Tool(tool) => write!(f, "run {}", tool.command.argv()),
+            Ticked::Tool(tool) => write!(f, "run {}", tool.command),
             Ticked::Receipt(receipt) => write!(f, "forget {}", receipt.package.as_str()),
         }
     }
@@ -155,8 +155,9 @@ rules = ["rosie/cargo"]
 status = "ticked"
 
 [[tool]]
-rules = ["rosie/docker"]
-cmd = ["docker", "system", "prune", "--force"]
+rule = "rosie/docker"
+shell = "/bin/bash"
+cmd = "docker system prune --force"
 status = "ticked"
 
 [[report]]

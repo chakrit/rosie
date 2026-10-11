@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use super::glob::GlobError;
 use super::name::{Name, NameError, RuleId};
-use crate::fs;
+use crate::fs::{self, InvalidCommand};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -133,8 +133,12 @@ pub enum Problem {
         source: GlobError,
     },
 
-    #[error("`{0}` is empty")]
-    EmptyCommand(&'static str),
+    #[error("`{field}`: {source}")]
+    BadCommand {
+        field: &'static str,
+        #[source]
+        source: InvalidCommand,
+    },
 
     #[error("Lua does not compile: {0}")]
     LuaSyntax(String),

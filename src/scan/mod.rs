@@ -19,6 +19,7 @@ mod refusal;
 mod sizing;
 mod skip;
 mod targets;
+mod verdict;
 mod walk;
 
 use std::path::{Path, PathBuf};
@@ -38,6 +39,7 @@ pub use refusal::Refused;
 pub(crate) use refusal::Screening;
 pub use sizing::{Measure, Sizer};
 pub use skip::{Needs, WalkSetting, WalkSkip, WalkSkips};
+pub use verdict::{PathVerdict, Place, Planned};
 
 use fixed::{FixedClaim, FixedTargets};
 use targets::Targets;

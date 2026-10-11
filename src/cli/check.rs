@@ -21,12 +21,12 @@ use super::{Error, ExitStatus};
 use crate::apps;
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
 use crate::packs::Network;
-use crate::plan::{Delete, Disagreement, PlanStats, RunAs, Status, StatusKind, Tally};
+use crate::plan::{Delete, Disagreement, PlanStats, RunAs, StatusKind, Tally};
 use crate::scan::{
-    self, Needs, PathScan, Problem, Refused, Scan, Scanner, Settings, Skipped, WalkSkip,
+    self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Scanner, Settings, Skipped,
+    WalkSkip,
 };
 use crate::shell;
-use crate::tier::Tier;
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// Prints one line per path, in columns, after scanning them all with one context,
@@ -82,14 +82,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             self.note(&problem_line(problem))?;
         }
         let path = &scanned.path;
-        let verdict = judge(path, &scanned.scan);
+        let verdict = scanned.scan.verdict(path);
         let shown = self.tilde();
         if !leaves_to_app_mode(&verdict, path) {
-            return Ok(verdict.line(path, &shown));
+            return Ok(line(&verdict, path, &shown));
         }
 
         let app_line = self.app_line(scanner.ctx(), path, app_mode);
-        Ok(app_line.unwrap_or_else(|| verdict.line(path, &shown)))
+        Ok(app_line.unwrap_or_else(|| line(&verdict, path, &shown)))
     }
 
     /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it:
@@ -102,7 +102,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let scanned = apps::scan_app(ctx, path, &app_mode);
 
         let (word, reason) = match scanned {
-            Ok(scan) => return Some(judge(path, &scan).line(path, &shown)),
+            Ok(scan) => return Some(line(&scan.verdict(path), path, &shown)),
             Err(apps::Error::NotAnApp { .. }) => return None,
             Err(apps::Error::Refused {
                 source: fs::Error::Running { pid, program, .. },
@@ -213,181 +213,49 @@ impl Shown<'_> {
     }
 }
 
-// verdicts
-
-/// What the plan would do with a path, judged from the scan of it.
-#[derive(Debug)]
-enum Verdict<'s> {
-    /// A plan entry at the path or holding it.
-    Entry {
-        delete: &'s Delete,
-        planned: Planned<'s>,
-        place: Place,
-    },
-    /// An item a process runs from, at the path or holding it.
-    InUse {
-        refused: &'s Refused,
-        place: Place,
-    },
-    /// A walk skip at the path or above it.
-    Skipped(&'s Skipped),
-    /// A failed read at the path or above it, so the walk never judged the path.
-    Unread(&'s Problem),
-    /// Plan entries strictly inside the path.
-    Holds(PlanStats),
-    /// No plan entry inside the path, but items refused, skipped, or unread inside it;
-    /// `skipped` counts the walk skips and the failed reads.
-    HoldsUnplanned {
-        in_use: usize,
-        skipped: usize,
-    },
-    NoRule,
-}
-
-/// A plan entry's status, with the tier its rules agree on where it shows.
-#[derive(Debug)]
-enum Planned<'s> {
-    Clean(Tier),
-    Keep,
-    OutsideRoots,
-    Conflict(&'s Disagreement),
-}
-
-/// Where the item a verdict names sits against the path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Place {
-    At,
-    Inside,
-}
-
-/// The verdict for `path`, a real path, from its scan, most telling first: an item a
-/// process runs from at or above it, a plan entry at or above it, a walk skip at or
-/// above it, a failed read at or above it, the plan entries inside it, the refused,
-/// skipped, and unread items inside it, and otherwise no rule.
-fn judge<'s>(path: &Path, scan: &'s Scan) -> Verdict<'s> {
-    let place = |at: &Path| match at == path {
-        true => Place::At,
-        false => Place::Inside,
-    };
-    let holds_path = |at: &Path| path.starts_with(at);
-    let inside_path = |at: &Path| at != path && at.starts_with(path);
-
-    let refused = scan
-        .refused
-        .iter()
-        .find(|refused| holds_path(&refused.path));
-    if let Some(refused) = refused {
-        let place = place(&refused.path);
-        return Verdict::InUse { refused, place };
-    }
-    let deletes = scan.plan.deletes();
-    if let Some(delete) = deletes.iter().find(|delete| holds_path(&delete.path)) {
-        let planned = planned(delete, scan);
-        let place = place(&delete.path);
-        return Verdict::Entry {
-            delete,
-            planned,
-            place,
-        };
-    }
-    if let Some(skipped) = scan.skipped.iter().find(|skip| holds_path(&skip.met_at)) {
-        return Verdict::Skipped(skipped);
-    }
-    let unread = scan
-        .problems
-        .iter()
-        .find(|problem| problem.met_at().is_some_and(holds_path));
-    if let Some(problem) = unread {
-        return Verdict::Unread(problem);
-    }
-
-    let inside: Vec<&Delete> = deletes
-        .iter()
-        .filter(|delete| inside_path(&delete.path))
-        .collect();
-    if !inside.is_empty() {
-        return Verdict::Holds(PlanStats::of_deletes(inside));
-    }
-    let in_use = scan
-        .refused
-        .iter()
-        .filter(|refused| inside_path(&refused.path))
-        .count();
-    let walk_skips = scan
-        .skipped
-        .iter()
-        .filter(|skip| inside_path(&skip.met_at))
-        .count();
-    let unread_inside = scan
-        .problems
-        .iter()
-        .filter(|problem| problem.met_at().is_some_and(inside_path))
-        .count();
-    let skipped = walk_skips + unread_inside;
-    match (in_use, skipped) {
-        (0, 0) => Verdict::NoRule,
-        _ => Verdict::HoldsUnplanned { in_use, skipped },
-    }
-}
-
 /// Whether the walk leaves `path` to app mode: it is named as an `.app`, nothing at or
 /// above it is a plan entry, in use, or unread, and the walk skipped nothing above it,
 /// nor it for any reason but that it is a closed bundle.
-fn leaves_to_app_mode(verdict: &Verdict, path: &Path) -> bool {
+fn leaves_to_app_mode(verdict: &PathVerdict, path: &Path) -> bool {
     let unclaimed = match verdict {
-        Verdict::Entry { .. } | Verdict::InUse { .. } | Verdict::Unread(_) => false,
-        Verdict::Skipped(skipped) => {
+        PathVerdict::Entry { .. } | PathVerdict::InUse { .. } | PathVerdict::Unread(_) => false,
+        PathVerdict::Skipped(skipped) => {
             skipped.met_at == path && skipped.reason == WalkSkip::Closed(Needs::BUNDLES)
         }
-        Verdict::Holds(_) | Verdict::HoldsUnplanned { .. } | Verdict::NoRule => true,
+        PathVerdict::Holds(_) | PathVerdict::HoldsUnplanned { .. } | PathVerdict::NoRule => true,
     };
     unclaimed && apps::is_app_path(path)
 }
 
-/// `delete`'s status, with the tier its rules agree on when it is `clean`.
-fn planned<'s>(delete: &'s Delete, scan: &Scan) -> Planned<'s> {
-    match &delete.status {
-        Status::Clean => {
-            let tier = scan.tiers.of(&delete.path);
-            Planned::Clean(tier.expect("the plan builder records the tier of each clean entry"))
+/// The line for `path`, the real path `verdict` is about.
+fn line(verdict: &PathVerdict, path: &Path, shown: &Shown) -> Line {
+    let (word, reason) = match verdict {
+        PathVerdict::Entry {
+            delete,
+            planned,
+            place,
+        } => (
+            Word::Plan(delete.status.kind()),
+            entry_reason(delete, planned, *place, shown),
+        ),
+        PathVerdict::InUse { refused, place } => {
+            (Word::InUse, in_use_reason(refused, *place, shown))
         }
-        Status::Keep => Planned::Keep,
-        Status::OutsideRoots => Planned::OutsideRoots,
-        Status::Conflict(disagreement) => Planned::Conflict(disagreement),
-    }
-}
-
-impl Verdict<'_> {
-    /// The line for `path`, the real path the verdict is about.
-    fn line(&self, path: &Path, shown: &Shown) -> Line {
-        let (word, reason) = match self {
-            Verdict::Entry {
-                delete,
-                planned,
-                place,
-            } => (
-                Word::Plan(delete.status.kind()),
-                entry_reason(delete, planned, *place, shown),
-            ),
-            Verdict::InUse { refused, place } => {
-                (Word::InUse, in_use_reason(refused, *place, shown))
-            }
-            Verdict::Skipped(skipped) => (Word::Skipped, skip_reason(skipped)),
-            Verdict::Unread(problem) => (Word::Skipped, problem.to_string()),
-            Verdict::Holds(stats) => holds(stats, path, shown),
-            Verdict::HoldsUnplanned { in_use, skipped } => {
-                holds_unplanned(*in_use, *skipped, path, shown)
-            }
-            Verdict::NoRule => (
-                Word::NoRule,
-                "no rule matches it or anything inside".to_owned(),
-            ),
-        };
-        Line {
-            word,
-            path: shown.path(path),
-            reason,
+        PathVerdict::Skipped(skipped) => (Word::Skipped, skip_reason(skipped)),
+        PathVerdict::Unread(problem) => (Word::Skipped, problem.to_string()),
+        PathVerdict::Holds(stats) => holds(stats, path, shown),
+        PathVerdict::HoldsUnplanned { in_use, skipped } => {
+            holds_unplanned(*in_use, *skipped, path, shown)
         }
+        PathVerdict::NoRule => (
+            Word::NoRule,
+            "no rule matches it or anything inside".to_owned(),
+        ),
+    };
+    Line {
+        word,
+        path: shown.path(path),
+        reason,
     }
 }
 

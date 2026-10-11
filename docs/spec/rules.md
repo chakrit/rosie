@@ -116,7 +116,6 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
   reason.
 - There is no auto-update. Pack age is the time since its pull; after 6 months rosie
   warns: "Your rules are x months old, consider rosie rules pull to update".
-- Pull warns about rules from different packs that share the same target and detection.
 - `rosie rules remove <pack>` removes any pack, including `rosie`. Removing the last
   pack means the next run auto-pulls `rosie` again.
 

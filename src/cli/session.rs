@@ -154,7 +154,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     pub fn store(&self) -> Store<'_, &'a B> {
-        Store::new(&self.own, &self.env.paths, &self.env.paths.data_dir())
+        Store::new(&self.own, &self.env.paths.data_dir())
     }
 
     // paths
@@ -183,11 +183,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let FirstRun::Pulled(pulled) = first_run else {
             return Ok(());
         };
-        self.note(&format!("no rule pack yet; pulled {}", pulled.source))?;
-        for conflict in &pulled.conflicts {
-            self.note(&format!("warning: {conflict}"))?;
-        }
-        Ok(())
+        self.note(&format!("no rule pack yet; pulled {}", pulled.source))
     }
 
     // pickers

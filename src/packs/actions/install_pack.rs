@@ -143,11 +143,7 @@ mod tests {
         fake.add_file(format!("{PACK}/.pulled"), "1");
         fake.fail_on(STAGING, Op::Rename, ErrorKind::PermissionDenied);
         let ctx = ctx(&fake);
-        let store = Store::new(
-            &ctx,
-            &Paths::new(Path::new(HOME)).expect("absolute home"),
-            Path::new(DATA),
-        );
+        let store = Store::new(&ctx, Path::new(DATA));
         let source = Source::default();
         let rules = [rule("new.toml", "new")];
 
@@ -177,11 +173,7 @@ mod tests {
         let fake = FakeBackend::new();
         fake.add_file(format!("{STAGING}/stale.toml"), "stale");
         let ctx = ctx(&fake);
-        let store = Store::new(
-            &ctx,
-            &Paths::new(Path::new(HOME)).expect("absolute home"),
-            Path::new(DATA),
-        );
+        let store = Store::new(&ctx, Path::new(DATA));
         let source = Source::default();
         let rules = [rule("new.toml", "new")];
 

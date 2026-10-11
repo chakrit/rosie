@@ -57,9 +57,6 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
         let pulled = packs::pull(&self.store(), self.network, &source, self.env.now)?;
         self.say(&format!("pulled {}", pulled.source))?;
-        for conflict in &pulled.conflicts {
-            self.note(&format!("warning: {conflict}"))?;
-        }
         Ok(ExitStatus::Success)
     }
 

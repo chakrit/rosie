@@ -2,15 +2,18 @@
 //! (`docs/spec/plan.md#plan-file`).
 //!
 //! Each entry is written as its own table. Every entry but a report sits under a comment
-//! with its size and, when it is blocked, the `rosie roots add` hint. A file is checked
-//! for its format version before anything else in it is read, and unknown keys are
-//! refused: a plan never carries roots.
+//! with its size and, when it is blocked, the `rosie roots add` hint, or, when it is a
+//! conflict, the rules on each side. A file is checked for its format version before
+//! anything else in it is read, and unknown keys are refused: a plan never carries roots.
+//! A `conflict` entry is refused too, so a plan read back always has every conflict
+//! resolved (`docs/spec/plan.md#rule-conflicts`).
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
+use super::conflict::conflict_hint;
 use super::{
     Bootout, Command, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
     Report, RunAs, Selection, Size, Status, Tool, blocked_hint, check_path,
@@ -29,8 +32,11 @@ impl Plan {
         let mut text = format!("{PREAMBLE}version = {FORMAT_VERSION}\n");
 
         for delete in self.deletes.iter() {
-            let note = match delete.status {
+            let note = match &delete.status {
                 Status::Blocked => format!("{}; {}", delete.size, blocked_hint(&delete.path)),
+                Status::Conflict(disagreement) => {
+                    format!("{}; {}", delete.size, conflict_hint(disagreement))
+                }
                 Status::Ticked | Status::Unticked => delete.size.to_string(),
             };
             push_entry(&mut text, Some(note), PlanFile::delete(delete))?;
@@ -363,8 +369,11 @@ fn status(text: &str) -> Result<Status, String> {
         "ticked" => Ok(Status::Ticked),
         "unticked" => Ok(Status::Unticked),
         "blocked" => Ok(Status::Blocked),
+        "conflict" => Err(
+            "status \"conflict\" is a rule conflict; resolve it to ticked or unticked".to_owned(),
+        ),
         other => Err(format!(
-            "status {other:?} is not one of ticked, unticked, blocked"
+            "status {other:?} is not one of ticked, unticked, blocked, conflict"
         )),
     }
 }
@@ -651,6 +660,48 @@ mod tests {
         );
     }
 
+    /// A plan with `/w/a` matched by two rules that disagree on its tier.
+    fn conflicted() -> Plan {
+        let mut builder = PlanBuilder::new(AggressiveItems::Unticked);
+        for (rule, twin) in [("rosie/a", Twin::Normal), ("alice/b", Twin::Aggressive)] {
+            let found = PathMatch {
+                rule: rule.to_owned(),
+                ..found("/w/a", Reach::InRoots, twin)
+            };
+            builder.add_path(found).expect("valid");
+        }
+        builder.build()
+    }
+
+    #[test]
+    fn a_conflict_is_written_naming_the_rules_on_each_side() {
+        let text = conflicted().to_toml().expect("serializable");
+
+        assert!(
+            text.contains(
+                "# 1.2 MB; conflict, rules disagree (normal: rosie/a; aggressive: alice/b). \
+                 Set status to ticked or unticked\n[[delete]]\npath = \"/w/a\""
+            ),
+            "{text}"
+        );
+        assert!(text.contains("status = \"conflict\"\n"), "{text}");
+    }
+
+    #[test]
+    fn a_written_conflict_cannot_be_read_back_until_it_is_resolved() {
+        let text = conflicted().to_toml().expect("serializable");
+        let resolved = text.replace("status = \"conflict\"", "status = \"unticked\"");
+
+        let refused = Plan::parse(&text);
+        let parsed = Plan::parse(&resolved).expect("resolved plan parses");
+
+        assert!(
+            matches!(&refused, Err(Error::InvalidEntry { problem, .. }) if problem.contains("rule conflict")),
+            "{refused:?}"
+        );
+        assert_eq!(parsed.deletes()[0].status, Status::Unticked);
+    }
+
     #[test]
     fn users_may_delete_entries() {
         let text = every_kind().to_toml().expect("serializable");
@@ -737,7 +788,11 @@ mod tests {
             ),
             (
                 "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\n",
-                "[[delete]] entry 1: status \"\" is not one of ticked, unticked, blocked",
+                "[[delete]] entry 1: status \"\" is not one of ticked, unticked, blocked, conflict",
+            ),
+            (
+                "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\nstatus = \"conflict\"\n",
+                "[[delete]] entry 1: status \"conflict\" is a rule conflict; resolve it to ticked or unticked",
             ),
             (
                 "version = 1\n[[tool]]\ncmd = [\"a\"]\nstatus = \"ticked\"\n[[tool]]\ncmd = []\nstatus = \"ticked\"\n",

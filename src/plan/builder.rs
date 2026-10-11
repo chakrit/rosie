@@ -6,10 +6,14 @@
 //! - Tool rules with an identical argv dedupe into one entry.
 //! - Aggressive items are unticked unless `--aggressive` is given, which also makes a
 //!   rule's `cmd_aggressive` replace its `cmd`; items outside the roots are blocked.
+//! - Rules that disagree on the tier of a path, or of paths nested in it, make the entry
+//!   a conflict (`docs/spec/plan.md#rule-conflicts`).
 
 use std::collections::BTreeMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
+use super::conflict::{Tiers, Verdict};
+use super::deletes::{Found, Located};
 use super::{
     Bootout, Command, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
     Report, RunAs, Selection, Size, Status, Tool, check_path,
@@ -63,7 +67,7 @@ pub struct PathMatch {
 
 pub struct PlanBuilder {
     aggressive: AggressiveItems,
-    deletes: BTreeMap<PathBuf, Delete>,
+    deletes: BTreeMap<PathBuf, FoundPath>,
     tools: Vec<Tool>,
     receipts: Vec<Receipt>,
     reports: Vec<Report>,
@@ -80,8 +84,7 @@ impl PlanBuilder {
         }
     }
 
-    /// Adds a matched file or folder. A path matched again gains the rule; it is ticked
-    /// when any of its matches is.
+    /// Adds a matched file or folder. A path matched again gains the rule.
     pub fn add_path(&mut self, found: PathMatch) -> Result<(), Error> {
         self.add_delete(found).map(|_| ())
     }
@@ -156,8 +159,11 @@ impl PlanBuilder {
     }
 
     pub fn build(self) -> Plan {
+        let aggressive = self.aggressive;
+        let deletes = Deletes::collapsing(self.deletes, |found| found.into_delete(aggressive));
+
         Plan {
-            deletes: Deletes::collapsing(self.deletes),
+            deletes,
             tools: self.tools,
             receipts: self.receipts,
             reports: self.reports,
@@ -166,22 +172,22 @@ impl PlanBuilder {
 
     // entries
 
-    fn add_delete(&mut self, found: PathMatch) -> Result<&mut Delete, Error> {
+    fn add_delete(&mut self, found: PathMatch) -> Result<&mut FoundPath, Error> {
         check_path(&found.path)?;
 
-        let status = self.path_status(found.reach, found.twin);
         let path = found.path;
-        let entry = self.deletes.entry(path.clone()).or_insert(Delete {
+        let entry = self.deletes.entry(path.clone()).or_insert(FoundPath {
             path,
             kind: found.kind,
             size: found.size,
             rules: Vec::new(),
-            status,
+            tiers: Tiers::of(found.rule.clone(), found.twin),
+            reach: found.reach,
             run_as: found.run_as,
             bootouts: Vec::new(),
         });
 
-        entry.status = strongest(entry.status, status);
+        entry.tiers.add(found.rule.clone(), found.twin);
         if !entry.rules.contains(&found.rule) {
             entry.rules.push(found.rule);
             entry.rules.sort();
@@ -209,15 +215,14 @@ impl PlanBuilder {
 
     // ticking
 
-    fn path_status(&self, reach: Reach, twin: Twin) -> Status {
-        match reach {
-            Reach::OutsideRoots => Status::Blocked,
-            Reach::InRoots => self.selection(twin).into(),
-        }
-    }
-
     fn selection(&self, twin: Twin) -> Selection {
-        match (twin, self.aggressive) {
+        self.aggressive.selection(twin)
+    }
+}
+
+impl AggressiveItems {
+    fn selection(self, twin: Twin) -> Selection {
+        match (twin, self) {
             (Twin::Normal, _) => Selection::Ticked,
             (Twin::Aggressive, AggressiveItems::Ticked) => Selection::Ticked,
             (Twin::Aggressive, AggressiveItems::Unticked) => Selection::Unticked,
@@ -225,13 +230,57 @@ impl PlanBuilder {
     }
 }
 
-/// The status of one path matched twice. Both matches share the path, so both are
-/// blocked or neither is.
-fn strongest(current: Status, added: Status) -> Status {
-    match (current, added) {
-        (Status::Blocked, _) | (_, Status::Blocked) => Status::Blocked,
-        (Status::Ticked, _) | (_, Status::Ticked) => Status::Ticked,
-        (Status::Unticked, Status::Unticked) => Status::Unticked,
+/// What a scan found at one path: the rules that matched it, and the tiers of those and
+/// of the rules matching paths nested in it.
+struct FoundPath {
+    path: PathBuf,
+    kind: ItemKind,
+    size: Size,
+    /// The rules that matched this path itself, sorted.
+    rules: Vec<String>,
+    tiers: Tiers,
+    reach: Reach,
+    run_as: RunAs,
+    bootouts: Vec<Bootout>,
+}
+
+impl FoundPath {
+    /// Blocked outside the roots; otherwise the tier its rules agree on, or a conflict.
+    fn into_delete(self, aggressive: AggressiveItems) -> Delete {
+        let status = match (self.reach, self.tiers.verdict()) {
+            (Reach::OutsideRoots, _) => Status::Blocked,
+            (Reach::InRoots, Verdict::Agreed(twin)) => aggressive.selection(twin).into(),
+            (Reach::InRoots, Verdict::Disagreed(disagreement)) => Status::Conflict(disagreement),
+        };
+
+        Delete {
+            path: self.path,
+            kind: self.kind,
+            size: self.size,
+            rules: self.rules,
+            status,
+            run_as: self.run_as,
+            bootouts: self.bootouts,
+        }
+    }
+}
+
+impl Located for FoundPath {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// The outer path keeps its own rules, size, and reach. It takes over the bootouts of
+/// the paths inside it, so their jobs are unloaded exactly when it is deleted, runs
+/// elevated when any of them would, and weighs their rules' tiers with its own.
+impl Found for FoundPath {
+    fn absorb(&mut self, inner: FoundPath) {
+        self.bootouts.extend(inner.bootouts);
+        if inner.run_as == RunAs::Sudo {
+            self.run_as = RunAs::Sudo;
+        }
+        self.tiers.absorb(inner.tiers);
     }
 }
 
@@ -348,8 +397,22 @@ mod tests {
         assert_eq!(plan.deletes()[0].rules, ["rosie/cargo"]);
     }
 
+    fn conflict(normal: &[&str], aggressive: &[&str]) -> (Vec<String>, Vec<String>) {
+        (rules(normal), rules(aggressive))
+    }
+
+    fn disagreement(status: &Status) -> (Vec<String>, Vec<String>) {
+        let Status::Conflict(disagreement) = status else {
+            panic!("expected a conflict, got {status:?}");
+        };
+        (
+            disagreement.normal().to_vec(),
+            disagreement.aggressive().to_vec(),
+        )
+    }
+
     #[test]
-    fn outer_aggressive_match_hides_a_normal_one_inside() {
+    fn rules_disagreeing_across_nested_paths_make_the_outer_entry_a_conflict() {
         let plan = built(
             AggressiveItems::Unticked,
             vec![
@@ -363,6 +426,22 @@ mod tests {
         );
 
         assert_eq!(paths(&plan), ["/w/app/.venv"]);
+        assert_eq!(
+            disagreement(&plan.deletes()[0].status),
+            conflict(&["rosie/pycache"], &["rosie/venv"])
+        );
+    }
+
+    #[test]
+    fn rules_agreeing_across_nested_paths_keep_their_tier() {
+        let plan = built(
+            AggressiveItems::Unticked,
+            vec![
+                found("/w/app/.venv", "rosie/venv", Twin::Aggressive),
+                found("/w/app/.venv/lib", "alice/venv", Twin::Aggressive),
+            ],
+        );
+
         assert_eq!(plan.deletes()[0].status, Status::Unticked);
     }
 
@@ -393,7 +472,10 @@ mod tests {
             ]
         };
         let statuses = |plan: Plan| -> Vec<Status> {
-            plan.deletes().iter().map(|delete| delete.status).collect()
+            plan.deletes()
+                .iter()
+                .map(|delete| delete.status.clone())
+                .collect()
         };
 
         let default = built(AggressiveItems::Unticked, matches());
@@ -404,16 +486,52 @@ mod tests {
     }
 
     #[test]
-    fn a_path_matched_normally_and_aggressively_is_ticked() {
+    fn rules_disagreeing_on_one_path_make_it_a_conflict_even_with_aggressive() {
+        for aggressive in [AggressiveItems::Unticked, AggressiveItems::Ticked] {
+            let plan = built(
+                aggressive,
+                vec![
+                    found("/w/a", "rosie/strict", Twin::Aggressive),
+                    found("/w/a", "rosie/plain", Twin::Normal),
+                ],
+            );
+
+            assert_eq!(
+                disagreement(&plan.deletes()[0].status),
+                conflict(&["rosie/plain"], &["rosie/strict"])
+            );
+        }
+    }
+
+    #[test]
+    fn one_rule_matching_a_path_at_both_tiers_is_not_a_conflict() {
         let plan = built(
             AggressiveItems::Unticked,
             vec![
-                found("/w/a", "rosie/strict", Twin::Aggressive),
-                found("/w/a", "rosie/plain", Twin::Normal),
+                found("/w/a", "rosie/a", Twin::Aggressive),
+                found("/w/a", "rosie/a", Twin::Normal),
             ],
         );
 
         assert_eq!(plan.deletes()[0].status, Status::Ticked);
+    }
+
+    #[test]
+    fn a_blocked_path_stays_blocked_whatever_its_rules_say() {
+        let outside = |rule, twin| PathMatch {
+            reach: Reach::OutsideRoots,
+            ..found("/elsewhere/cache", rule, twin)
+        };
+
+        let plan = built(
+            AggressiveItems::Unticked,
+            vec![
+                outside("rosie/a", Twin::Normal),
+                outside("alice/b", Twin::Aggressive),
+            ],
+        );
+
+        assert_eq!(plan.deletes()[0].status, Status::Blocked);
     }
 
     #[test]

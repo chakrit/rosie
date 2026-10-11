@@ -93,6 +93,90 @@ fn clean_answered_no_or_nothing_deletes_nothing() {
     }
 }
 
+// rule conflicts (`docs/spec/plan.md#rule-conflicts`)
+
+/// A second rule calling `node_modules` aggressive, beside the pack's normal one.
+const AGGRESSIVE_NODE_RULE: &str = "[rules.deps]\nstrategy = \"marker\"\n\
+    target_aggressive = \"node_modules\"\nmarker = [\"package.json\"]\n";
+
+fn conflicted_project() -> Sandbox {
+    let sandbox = Sandbox::new();
+    sandbox.add_rules("deps.toml", AGGRESSIVE_NODE_RULE);
+    sandbox.node_project(&format!("{CWD}/app"));
+    sandbox
+}
+
+#[test]
+fn clean_refuses_y_while_a_rule_conflict_remains() {
+    let sandbox = conflicted_project();
+    let script = Script::terminal().answer("y").answer("n");
+
+    let ran = sandbox.run_with(script, &["clean", "tree", "."]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(sandbox.removals().is_empty(), "{:?}", sandbox.removals());
+    assert!(
+        ran.stdout.contains("status = \"conflict\""),
+        "{}",
+        ran.stdout
+    );
+    assert!(
+        ran.stderr
+            .contains("1 rule conflict(s) must be resolved first"),
+        "{}",
+        ran.stderr
+    );
+}
+
+#[test]
+fn clean_edit_makes_the_user_choose_each_conflict() {
+    for (pick, cleaned) in [(0, true), (1, false)] {
+        let sandbox = conflicted_project();
+        let script = Script::terminal()
+            .answer("e")
+            .pick(pick)
+            .keep(&[0])
+            .answer("y");
+
+        let ran = sandbox.run_with(script, &["clean", "tree", "."]);
+
+        let node_modules = format!("{CWD}/app/node_modules");
+        assert!(
+            ran.asked[1].contains(&format!("Rules disagree on {node_modules}"))
+                && ran.asked[1].contains("normal: rosie/node-modules; aggressive: rosie/deps"),
+            "{:?}",
+            ran.asked
+        );
+        assert_eq!(
+            !sandbox.exists(&node_modules),
+            cleaned,
+            "pick {pick}: {ran:#?}"
+        );
+    }
+}
+
+#[test]
+fn run_refuses_a_saved_plan_with_a_conflict() {
+    let sandbox = conflicted_project();
+    let scanned = sandbox.run(&["scan", "tree", "."]);
+
+    let ran = sandbox.run_with(Script::piped().stdin(&scanned.stdout), &["run", "-"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert!(sandbox.removals().is_empty(), "{:?}", sandbox.removals());
+    assert!(ran.stderr.contains("rule conflict"), "{}", ran.stderr);
+}
+
+#[test]
+fn scan_sh_refuses_a_plan_with_a_conflict() {
+    let sandbox = conflicted_project();
+
+    let ran = sandbox.run(&["scan", "tree", ".", "--sh"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert!(ran.stderr.contains("1 rule conflict(s)"), "{}", ran.stderr);
+}
+
 #[test]
 fn clean_edit_removes_unticked_entries_reshows_the_plan_and_asks_again() {
     let sandbox = Sandbox::new();

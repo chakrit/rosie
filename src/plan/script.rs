@@ -9,10 +9,13 @@
 //!   nothing, and a command that reads its input cannot consume the rest of the script
 //!   and make bash resume inside a commented-out line. No command reads bash's input.
 //! - Unticked and blocked entries are commented out; report-only entries are comments.
+//! - A plan with an unresolved rule conflict is refused: only a TOML plan can be
+//!   resolved (`docs/spec/plan.md#rule-conflicts`).
 
 use std::path::Path;
 
-use super::{Plan, Status, blocked_hint};
+use super::conflict::conflict_hint;
+use super::{Error, Plan, Status, blocked_hint};
 use crate::fs::Argv;
 use crate::shell;
 
@@ -35,22 +38,26 @@ main \"$@\"; exit
 
 impl Plan {
     /// Bootouts come first, so every launch job is unloaded before its plist is deleted.
-    pub fn to_sh(&self) -> String {
-        let mut script = HEADER.to_owned();
+    pub fn to_sh(&self) -> Result<String, Error> {
+        let conflicts = self.conflicts().len();
+        if conflicts > 0 {
+            return Err(Error::UnresolvedConflicts { count: conflicts });
+        }
 
+        let mut script = HEADER.to_owned();
         for delete in self.deletes.iter() {
             for bootout in &delete.bootouts {
                 let note = format!(
                     "unload {}",
                     shell::comment_text(&bootout.domain.to_string())
                 );
-                let line = Line::of(delete.status, &delete.path, note);
+                let line = Line::of(delete.status.clone(), &delete.path, note);
                 script.push_str(&line.render(&command_line(&bootout.argv())));
             }
         }
         for delete in self.deletes.iter() {
             let note = format!("{} · {}", delete.size, rules_text(&delete.rules));
-            let line = Line::of(delete.status, &delete.path, note);
+            let line = Line::of(delete.status.clone(), &delete.path, note);
             script.push_str(&line.render(&command_line(&delete_argv(&delete.path))));
         }
         for tool in &self.tools {
@@ -74,7 +81,7 @@ impl Plan {
         }
 
         script.push_str(FOOTER);
-        script
+        Ok(script)
     }
 }
 
@@ -87,8 +94,9 @@ struct Line {
 impl Line {
     /// An entry with a path, whose blocked note carries the `rosie roots add` hint.
     fn of(status: Status, path: &Path, note: String) -> Self {
-        let note = match status {
+        let note = match &status {
             Status::Blocked => format!("{note}; {}", blocked_hint(path)),
+            Status::Conflict(disagreement) => format!("{note}; {}", conflict_hint(disagreement)),
             Status::Ticked | Status::Unticked => note,
         };
         Line { status, note }
@@ -100,10 +108,10 @@ impl Line {
     }
 
     fn render(&self, command: &str) -> String {
-        match self.status {
+        match &self.status {
             Status::Ticked => format!("\n# {}\n{command}\n", self.note),
             Status::Unticked => format!("\n# unticked: {}\n# {command}\n", self.note),
-            Status::Blocked => format!("\n# {}\n# {command}\n", self.note),
+            Status::Blocked | Status::Conflict(_) => format!("\n# {}\n# {command}\n", self.note),
         }
     }
 }
@@ -300,7 +308,11 @@ mod tests {
     fn piped_to_bash_only_ticked_entries_run() {
         let bin = stubs();
 
-        let log = run_bash(&[], plan().to_sh().as_bytes(), bin.path());
+        let log = run_bash(
+            &[],
+            plan().to_sh().expect("no conflicts").as_bytes(),
+            bin.path(),
+        );
 
         assert_eq!(log, TICKED_PROGRAMS);
     }
@@ -310,7 +322,7 @@ mod tests {
     fn exported_commands_read_no_input() {
         let bin = stubs();
         let script = bin.path().join("exported-commands-read-no-input.sh");
-        std::fs::write(&script, plan().to_sh()).expect("write script");
+        std::fs::write(&script, plan().to_sh().expect("no conflicts")).expect("write script");
 
         let log = run_bash(&[&script], b"y\ny\n", bin.path());
 
@@ -322,7 +334,7 @@ mod tests {
     #[test]
     fn a_truncated_script_runs_nothing() {
         let bin = stubs();
-        let script = plan().to_sh();
+        let script = plan().to_sh().expect("no conflicts");
         let first_command = script.find("( exec -- launchctl").expect("a bootout");
         let line_end = first_command + script[first_command..].find('\n').expect("line end");
 
@@ -333,7 +345,7 @@ mod tests {
 
     #[test]
     fn only_ticked_entries_are_executable_in_run_order() {
-        let script = plan().to_sh();
+        let script = plan().to_sh().expect("no conflicts");
 
         assert_eq!(
             executable_lines(&script),
@@ -351,7 +363,7 @@ mod tests {
 
     #[test]
     fn unticked_and_blocked_entries_are_commented_out() {
-        let script = plan().to_sh();
+        let script = plan().to_sh().expect("no conflicts");
 
         assert!(
             script.contains(&format!(
@@ -378,7 +390,7 @@ mod tests {
     fn is_valid_bash() {
         // A plan with nothing to run leaves `main` holding comments alone.
         for plan in [plan(), Plan::default()] {
-            let script = plan.to_sh();
+            let script = plan.to_sh().expect("no conflicts");
 
             let output = Command::new("/bin/bash")
                 .arg("-n")
@@ -390,6 +402,25 @@ mod tests {
 
             assert!(output.status.success(), "{script}");
         }
+    }
+
+    #[test]
+    fn refuses_a_plan_with_an_unresolved_conflict() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Ticked);
+        for (rule, twin) in [("rosie/a", Twin::Normal), ("alice/b", Twin::Aggressive)] {
+            let found = PathMatch {
+                rule: rule.to_owned(),
+                ..found("/w/a", Reach::InRoots, twin)
+            };
+            builder.add_path(found).expect("valid");
+        }
+
+        let refused = builder.build().to_sh();
+
+        assert!(
+            matches!(refused, Err(Error::UnresolvedConflicts { count: 1 })),
+            "{refused:?}"
+        );
     }
 
     #[test]
@@ -405,7 +436,7 @@ mod tests {
             .add_path(found("/w/app", Reach::InRoots, Twin::Normal))
             .expect("valid");
 
-        let script = builder.build().to_sh();
+        let script = builder.build().to_sh().expect("no conflicts");
 
         assert_eq!(
             executable_lines(&script),

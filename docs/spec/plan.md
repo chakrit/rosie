@@ -70,8 +70,8 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 | `[[forget]]`          | `package` for `pkgutil --forget`, `status`                         |
 | `[[report]]`          | `subject`, `steps`; report-only, never run                         |
 
-- `status` is `ticked`, `unticked`, or `blocked`; `[[tool]]` and `[[forget]]` are never
-  `blocked`.
+- `status` is `ticked`, `unticked`, `blocked`, or `conflict`; `[[tool]]` and
+  `[[forget]]` are never `blocked` or `conflict`.
 - Unknown keys are refused.
 
 - A plan carries a format version.
@@ -85,7 +85,7 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
   ([rules.md](rules.md#aggressive-twins)).
 - Items outside `roots` appear as blocked, with a `rosie roots add <path>` hint
   ([safety.md](safety.md#roots)).
-- Unticked and blocked entries are kept in the plan but not executed.
+- Unticked, blocked, and conflict entries are kept in the plan but not executed.
 - A plan never carries roots; run checks against the `roots` in `config.toml`.
 - Scan marks an item `sudo` when it is not owned by the user
   ([safety.md](safety.md#elevation)).
@@ -93,13 +93,23 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
   ([safety.md](safety.md#walk-skips)).
 - When things are being skipped, the log message briefly explains why.
 
+### Rule conflicts
+
+- An entry is `conflict` when two or more rules' scan matches overlap (the same path, or
+  one nested in another) and the rules disagree on tier. No rule's tier wins.
+- The entry's comment names the rules and their tiers.
+- `rosie run` and the interactive `y` refuse while any `conflict` entry remains.
+- The user resolves each conflict to `ticked` or `unticked`, by editing the plan or
+  through `e`.
+- `rosie scan … --sh` refuses while any `conflict` entry remains.
+
 ## Stats
 
 Plans and clean runs report saved space. Simple stats suffice. Stats are printed to
 stderr, never written into the plan TOML.
 
 - Scan and confirmation show the item count and total size of ticked items, unticked
-  aggressive items, and blocked items.
+  aggressive items, blocked items, and conflicts.
 - The end of a run shows the total freed and the items done, plus skipped and failed
   items (stale, running process, sudo refused, errors) with their sizes, and walk-skip
   counts per reason.
@@ -115,8 +125,9 @@ Users may delete entries from a plan before `rosie run`. Run never adds anything
 
 ## Interactive confirmation
 
-The interactive prompt is `[y/N/e]`. `e` opens a pre-ticked checklist; after the user
-edits it, rosie re-shows the trimmed plan and re-prompts.
+The interactive prompt is `[y/N/e]`. `e` first asks, for each `conflict` entry, whether
+to tick or untick it; the user must choose one. It then opens a pre-ticked checklist;
+after the user edits it, rosie re-shows the trimmed plan and re-prompts.
 
 ## Run
 

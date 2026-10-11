@@ -12,7 +12,7 @@ use crate::apps;
 use crate::config::{ConfigFile, Walk};
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::packs::Network;
-use crate::plan::{AggressiveItems, ItemSize, Outcome, Plan, SkipReason, WalkSkips};
+use crate::plan::{AggressiveItems, ItemSize, Outcome, Plan, Selection, SkipReason, WalkSkips};
 use crate::rules::RuleSet;
 use crate::run::{Elevation, Runner};
 use crate::scan::{Refused, Scan, Scanner, Settings};
@@ -57,6 +57,17 @@ impl Answer {
 
 const PROMPT: &str = "Clean the ticked items? [y/N/e]";
 
+/// The two choices for a rule conflict; the first ticks it.
+const TICK: &str = "tick: clean it";
+const UNTICK: &str = "untick: keep it";
+
+/// How resolving the rule conflicts ended.
+enum Resolved {
+    Plan(Plan),
+    /// The user cancelled a choice; the plan stays as it was.
+    Cancelled,
+}
+
 /// How the `clean` confirmation ended.
 enum Confirmation {
     /// The user answered `y`: run this plan, trimmed by any `e` edits.
@@ -78,7 +89,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
         let text = match format {
             Format::Toml => scan.plan.to_toml()?,
-            Format::Sh => scan.plan.to_sh(),
+            Format::Sh => scan.plan.to_sh()?,
         };
         self.say(text.trim_end())?;
         self.show_findings(&scan, &args.mode)?;
@@ -204,12 +215,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     // confirming and running
 
-    /// Shows the plan and asks until the user answers `y` or `N`, or nothing is ticked.
+    /// Shows the plan and asks until the user answers `y` or `N`, or nothing is ticked
+    /// and nothing awaits a choice. `y` is refused while a rule conflict remains.
     fn confirm(&mut self, mut plan: Plan, skips: WalkSkips) -> Result<Confirmation, Error> {
         loop {
             self.say(plan.to_toml()?.trim_end())?;
             self.show_stats(&plan, skips)?;
-            if plan.ticked().is_empty() {
+            let conflicts = plan.conflicts().len();
+            if plan.ticked().is_empty() && conflicts == 0 {
                 self.note("nothing to clean")?;
                 return Ok(Confirmation::NothingTicked);
             }
@@ -219,20 +232,31 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 Err(PromptError::Cancelled) => Answer::No,
                 Err(error) => return Err(error.into()),
             };
-            match answer {
-                Answer::Yes => return Ok(Confirmation::Run(plan)),
-                Answer::No => {
+            match (answer, conflicts) {
+                (Answer::Yes, 0) => return Ok(Confirmation::Run(plan)),
+                (Answer::Yes, _) => {
+                    self.note(&format!(
+                        "{conflicts} rule conflict(s) must be resolved first: answer e"
+                    ))?;
+                }
+                (Answer::No, _) => {
                     self.note("nothing cleaned")?;
                     return Ok(Confirmation::Declined);
                 }
-                Answer::Edit => plan = self.edit(plan)?,
+                (Answer::Edit, _) => plan = self.edit(plan)?,
             }
         }
     }
 
-    /// The pre-ticked checklist: entries the user unticks leave the plan. A cancelled
-    /// checklist leaves the plan as it was.
+    /// Asks the user to resolve each rule conflict, then shows the pre-ticked checklist:
+    /// entries the user unticks leave the plan. A cancelled prompt leaves the plan as it
+    /// was.
     fn edit(&mut self, plan: Plan) -> Result<Plan, Error> {
+        let plan = match self.resolve(&plan)? {
+            Resolved::Plan(resolved) => resolved,
+            Resolved::Cancelled => return Ok(plan),
+        };
+
         let kept = match self
             .console
             .checklist("Untick what to keep:", plan.ticked())
@@ -242,6 +266,30 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Err(error) => return Err(error.into()),
         };
         Ok(plan.keeping_ticked(&kept))
+    }
+
+    /// The plan with every conflict ticked or unticked as the user picks it, one at a
+    /// time (`docs/spec/plan.md#rule-conflicts`).
+    fn resolve(&mut self, plan: &Plan) -> Result<Resolved, Error> {
+        let options = [TICK.to_owned(), UNTICK.to_owned()];
+
+        let mut choices = Vec::new();
+        for (conflict, disagreement) in plan.conflicts() {
+            let prompt = format!(
+                "Rules disagree on {} ({}; {disagreement}):",
+                conflict.path.display(),
+                conflict.size,
+            );
+            let selection = match self.console.pick(&prompt, &options) {
+                Ok(0) => Selection::Ticked,
+                Ok(_) => Selection::Unticked,
+                Err(PromptError::Cancelled) => return Ok(Resolved::Cancelled),
+                Err(error) => return Err(error.into()),
+            };
+            choices.push((conflict, selection));
+        }
+
+        Ok(Resolved::Plan(plan.resolving(&choices)))
     }
 
     /// Runs the plan's ticked entries through a gate bounded by the config's roots, and

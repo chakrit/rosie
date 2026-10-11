@@ -13,6 +13,8 @@ use flate2::read::GzDecoder;
 use tar::{Entry, EntryType};
 
 use super::error::{Error, Refusal};
+use super::source::Source;
+use crate::rules;
 
 const RULES_FOLDER: &str = "rules";
 pub(super) const RULE_EXTENSION: &str = "toml";
@@ -66,6 +68,28 @@ impl Archive {
 
     pub fn rules(&self) -> &[RuleFile] {
         &self.rules
+    }
+
+    /// Loads every rule file with `rules::load_pack`, so a pack refused here is exactly a
+    /// pack the rule layers would refuse. Files are named `<source>/<file>` in errors.
+    pub fn check_rules(&self, source: &Source) -> Result<(), Error> {
+        let labeled: Vec<(PathBuf, &[u8])> = self
+            .rules
+            .iter()
+            .map(|file| {
+                let label = format!("{source}/{}", file.name().to_string_lossy());
+                (PathBuf::from(label), file.contents())
+            })
+            .collect();
+
+        rules::load_pack(
+            source.pack(),
+            labeled
+                .iter()
+                .map(|(label, bytes)| (label.as_path(), *bytes)),
+        )
+        .map_err(|source| Error::InvalidRules(Box::new(source)))?;
+        Ok(())
     }
 
     /// The root `config.toml`, used to seed a fresh user config.

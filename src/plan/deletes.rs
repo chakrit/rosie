@@ -10,34 +10,54 @@
 use std::collections::BTreeMap;
 use std::convert::Infallible;
 use std::ops::Deref;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use super::{Delete, Error, RunAs};
+use super::{Delete, Error, Status};
 
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub(super) struct Deletes(Vec<Delete>);
 
+/// Something with a path that nesting is judged by.
+pub(super) trait Located {
+    fn path(&self) -> &Path;
+}
+
+impl Located for Delete {
+    fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
+/// What a scan found at one path, before it becomes a [`Delete`].
+pub(super) trait Found: Located {
+    /// Takes over what this outer item needs from an item inside it.
+    fn absorb(&mut self, inner: Self);
+}
+
 impl Deletes {
-    /// Keeps only the outermost of nested paths. The outer entry keeps its own rules,
-    /// size, and status. It takes over the bootouts of the entries inside it, so their
-    /// jobs are unloaded exactly when it is deleted, and runs elevated when any of them
-    /// would. The map is keyed by each entry's own path, so it holds each path once.
-    pub(super) fn collapsing(deletes: BTreeMap<PathBuf, Delete>) -> Deletes {
-        let absorbed = outermost(deletes.into_values(), |outer, inner| {
-            absorb(outer, inner);
+    /// Keeps only the outermost of nested paths, each absorbing the items inside it, then
+    /// makes each a delete with `finish`. The map is keyed by each item's own path, so it
+    /// holds each path once.
+    pub(super) fn collapsing<F: Found>(
+        found: BTreeMap<PathBuf, F>,
+        finish: impl Fn(F) -> Delete,
+    ) -> Deletes {
+        let absorbed = outermost(found.into_values(), |outer: &mut F, inner| {
+            outer.absorb(inner);
             Ok::<(), Infallible>(())
         });
-        match absorbed {
-            Ok(deletes) => deletes,
+        let outermost = match absorbed {
+            Ok(outermost) => outermost,
             Err(never) => match never {},
-        }
+        };
+        Deletes(outermost.into_iter().map(finish).collect())
     }
 
     /// Refuses a path that repeats another or lies inside another.
     pub(super) fn refusing_nested(mut deletes: Vec<Delete>) -> Result<Deletes, Error> {
         deletes.sort_by(|a, b| a.path.cmp(&b.path));
 
-        outermost(deletes.into_iter(), |outer, inner| {
+        let outermost = outermost(deletes.into_iter(), |outer: &mut Delete, inner| {
             match inner.path == outer.path {
                 true => Err(Error::RepeatedDelete { path: inner.path }),
                 false => Err(Error::NestedDeletes {
@@ -45,12 +65,22 @@ impl Deletes {
                     inner: inner.path,
                 }),
             }
-        })
+        })?;
+        Ok(Deletes(outermost))
     }
 
     /// The entries `keep` admits. Dropping entries cannot nest the rest.
     pub(super) fn retaining(&self, keep: impl Fn(&Delete) -> bool) -> Deletes {
         Deletes(self.0.iter().filter(|d| keep(d)).cloned().collect())
+    }
+
+    /// The entries with the statuses `status` gives; their paths stay as they were.
+    pub(super) fn restatusing(&self, status: impl Fn(&Delete) -> Status) -> Deletes {
+        let restatused = self.0.iter().map(|delete| Delete {
+            status: status(delete),
+            ..delete.clone()
+        });
+        Deletes(restatused.collect())
     }
 }
 
@@ -66,25 +96,18 @@ impl Deref for Deletes {
 /// path to `nested`, together with that outer entry. `Path` orders by component, so every
 /// path inside another sorts after it with only paths inside the same outer one in
 /// between: one comparison with the last outermost entry finds every nesting.
-fn outermost<E>(
-    sorted: impl ExactSizeIterator<Item = Delete>,
-    mut nested: impl FnMut(&mut Delete, Delete) -> Result<(), E>,
-) -> Result<Deletes, E> {
-    let mut outermost: Vec<Delete> = Vec::with_capacity(sorted.len());
-    for delete in sorted {
+fn outermost<T: Located, E>(
+    sorted: impl ExactSizeIterator<Item = T>,
+    mut nested: impl FnMut(&mut T, T) -> Result<(), E>,
+) -> Result<Vec<T>, E> {
+    let mut outermost: Vec<T> = Vec::with_capacity(sorted.len());
+    for item in sorted {
         match outermost.last_mut() {
-            Some(outer) if delete.path.starts_with(&outer.path) => nested(outer, delete)?,
-            _ => outermost.push(delete),
+            Some(outer) if item.path().starts_with(outer.path()) => nested(outer, item)?,
+            _ => outermost.push(item),
         }
     }
-    Ok(Deletes(outermost))
-}
-
-fn absorb(outer: &mut Delete, inner: Delete) {
-    outer.bootouts.extend(inner.bootouts);
-    if inner.run_as == RunAs::Sudo {
-        outer.run_as = RunAs::Sudo;
-    }
+    Ok(outermost)
 }
 
 #[cfg(test)]
@@ -92,7 +115,20 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use super::*;
-    use crate::plan::{ItemKind, Size, Status};
+    use crate::plan::{ItemKind, RunAs, Size, Status};
+
+    /// A found item that is already a delete; siblings never nest, so nothing is absorbed.
+    struct Sibling(Delete);
+
+    impl Located for Sibling {
+        fn path(&self) -> &Path {
+            &self.0.path
+        }
+    }
+
+    impl Found for Sibling {
+        fn absorb(&mut self, _inner: Self) {}
+    }
 
     fn sibling(i: usize) -> Delete {
         Delete {
@@ -112,14 +148,14 @@ mod tests {
     #[test]
     fn finds_nested_entries_among_twenty_thousand_quickly() {
         let reversed: Vec<Delete> = (0..20_000).rev().map(sibling).collect();
-        let by_path: BTreeMap<PathBuf, Delete> = reversed
+        let by_path: BTreeMap<PathBuf, Sibling> = reversed
             .iter()
-            .map(|delete| (delete.path.clone(), delete.clone()))
+            .map(|delete| (delete.path.clone(), Sibling(delete.clone())))
             .collect();
 
         let started = Instant::now();
         let refused = Deletes::refusing_nested(reversed).expect("siblings are not nested");
-        let collapsed = Deletes::collapsing(by_path);
+        let collapsed = Deletes::collapsing(by_path, |sibling| sibling.0);
         let elapsed = started.elapsed();
 
         assert_eq!(refused.len(), 20_000);

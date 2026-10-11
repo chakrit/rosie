@@ -57,6 +57,12 @@ pub enum Error {
     )]
     RepeatedDelete { path: PathBuf },
 
+    #[error(
+        "the plan has {count} rule conflict(s); save it as TOML and set each \"conflict\" \
+         status to ticked or unticked"
+    )]
+    UnresolvedConflicts { count: usize },
+
     #[error("[[{section}]] entry {number}: {problem}")]
     InvalidEntry {
         section: &'static str,

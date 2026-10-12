@@ -34,10 +34,10 @@ fn each_walk_skip_names_its_path_and_reason() {
 
     ran.assert_status(ExitStatus::Success);
     for line in [
-        format!("- skipped {CWD}/Foo.app: bundle (use --enter-bundles to enter)"),
-        format!("- skipped {CWD}/vol: another volume (use --enter-mounts to cross)"),
+        format!("- skipped {CWD}/Foo.app: bundle (to enter it: --enter-bundles)"),
+        format!("- skipped {CWD}/vol: another volume (to cross it: --enter-mounts)"),
         format!(
-            "- skipped {CWD}/cloud: cloud placeholder, not downloaded (use --enter-placeholders to open)"
+            "- skipped {CWD}/cloud: cloud placeholder, not downloaded (to open it: --enter-placeholders)"
         ),
         format!("- skipped {CWD}/locked: permission denied"),
     ] {
@@ -68,7 +68,7 @@ fn a_skip_closed_several_ways_names_every_flag_it_needs() {
     ran.assert_status(ExitStatus::Success);
     let line = format!(
         "- skipped {CWD}/Old.app: cloud placeholder, not downloaded; another volume; bundle \
-         (use --enter-placeholders, --enter-mounts and --enter-bundles to enter)"
+         (to enter it: --enter-placeholders --enter-mounts --enter-bundles)"
     );
     assert!(
         ran.stderr.lines().any(|shown| shown == line),
@@ -550,11 +550,13 @@ fn a_first_run_with_a_seeded_root_through_a_symlink_writes_the_config_and_can_be
 
     first.assert_status(ExitStatus::Failed);
     assert_eq!(written, seeded);
-    assert!(
-        first.stderr.contains(&format!("{HOME}/.cargo")),
-        "{}",
-        first.stderr
-    );
+    for fix in [
+        "rosie config set walk.enter_links roots".to_owned(),
+        "rosie roots remove ~/.cargo/registry".to_owned(),
+        format!("rosie roots add {HOME}/dotfiles/cargo/.cargo/registry"),
+    ] {
+        assert!(first.stderr.contains(&fix), "{fix}\n{}", first.stderr);
+    }
     assert!(first.stdout.is_empty(), "{}", first.stdout);
     fixed.assert_status(ExitStatus::Success);
     after.assert_status(ExitStatus::Success);

@@ -10,7 +10,9 @@ use crate::fs::EnterLinks;
 use crate::plan::AggressiveItems;
 use crate::rules::Name;
 use crate::run::elevated;
-use crate::scan::{Settings, WalkSetting, WalkSkip};
+use crate::scan::{Needs, Settings, WalkSetting, WalkSkip};
+
+use super::fix::{Fix, Flag, Step};
 
 #[derive(Debug, Parser)]
 #[command(name = "rosie", version, about = "A macOS cleanup CLI for developers.")]
@@ -188,12 +190,11 @@ impl Default for Mode {
 }
 
 impl Mode {
-    /// The flags that would open the skipped path, worded for the parenthetical a
-    /// walk-skip line adds, or `None` when this mode does not take every one of them
-    /// (`docs/spec/cli.md#flags`). Every mode takes `--enter-mounts`; only `tree` and
-    /// `caches` take the bundle and placeholder flags. A sealed skip stays closed
-    /// whatever the flags, and `Denied` has no flag in any mode.
-    pub fn walk_skip_hint(&self, skip: WalkSkip) -> Option<String> {
+    /// The flags that would open the skipped path, or `None` when this mode does not
+    /// take every one of them (`docs/spec/cli.md#flags`). Every mode takes
+    /// `--enter-mounts`; only `tree` and `caches` take the bundle and placeholder flags. A
+    /// sealed skip stays closed whatever the flags, and `Denied` has no flag in any mode.
+    pub fn walk_skip_fix(&self, skip: WalkSkip) -> Option<Fix> {
         let WalkSkip::Closed(needs) = skip else {
             return None;
         };
@@ -205,14 +206,23 @@ impl Mode {
         if !needs.settings().all(accepted) {
             return None;
         }
+        Some(enter_fix(needs))
+    }
+}
 
-        let flags: Vec<&str> = needs.settings().map(flag).collect();
-        let outermost = needs.outermost();
-        let hint = match flags.as_slice() {
-            [] | [_] => format!("use {} to {}", flag(outermost), verb(outermost)),
-            [init @ .., last] => format!("use {} and {last} to enter", init.join(", ")),
-        };
-        Some(hint)
+/// The flags that open a folder closed for `needs`, all at once, named by what the
+/// outermost one does: `to cross it: --enter-mounts`.
+pub(super) fn enter_fix(needs: Needs) -> Fix {
+    let label = match needs.settings().count() {
+        1 => format!("to {} it", verb(needs.outermost())),
+        _ => "to enter it".to_owned(),
+    };
+    Fix {
+        label,
+        steps: needs
+            .settings()
+            .map(|setting| Step::Flag(Flag::Enter(setting)))
+            .collect(),
     }
 }
 

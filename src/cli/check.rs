@@ -12,11 +12,12 @@
 //! refusal of the bundle, or a bundle that cannot be read, makes it `skipped` with the
 //! error's text, and any other error of that scan fails `check` as it fails `scan`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
-use super::args::{CheckArgs, flag};
+use super::args::{CheckArgs, enter_fix};
 use super::console::{Console, Finish};
 use super::findings::problem_line;
+use super::fix::{Command, Fix, Flag};
 use super::session::Session;
 use super::{Error, ExitStatus};
 use crate::apps;
@@ -27,7 +28,6 @@ use crate::scan::{
     self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Scanner, Settings, Skipped,
     WalkSkip,
 };
-use crate::shell;
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// Prints one line per path, in columns, after scanning them all with one context,
@@ -142,11 +142,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             return error.to_string();
         };
         let shown = self.tilde();
+        let allow = Fix::run("to allow it", [Command::ConfigSetLinks(EnterLinks::Roots)]);
         match UserInput::path(link, EnterLinks::Roots).perform(&self.own) {
             Ok(target) => format!(
-                "through symlink {} → {}; enter_links = \"roots\" allows it",
+                "through symlink {} → {}; {}",
                 shown.path(link),
-                shown.path(&target)
+                shown.path(&target),
+                allow.compact()
             ),
             Err(unfollowed) => format!("{error}; {unfollowed}"),
         }
@@ -219,15 +221,6 @@ impl Shown<'_> {
             Err(_) => path.display().to_string(),
         }
     }
-
-    /// `path` as a shell word to paste, with home still written `~`.
-    fn word(&self, path: &Path) -> String {
-        match path.strip_prefix(self.home) {
-            Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
-            Ok(rest) => format!("~/{}", shell::quote_word(&rest.to_string_lossy())),
-            Err(_) => shell::quote_word(&path.to_string_lossy()),
-        }
-    }
 }
 
 /// Whether the walk leaves `path` to app mode: it is named as an `.app`, nothing at or
@@ -287,15 +280,16 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
         (Place::At, Planned::OutsideRoots) => None,
         (Place::At, Planned::Conflict(disagreement)) => Some(sides(disagreement)),
     };
-    let hint = match planned {
+    let fix = match planned {
         Planned::Clean(_) => None,
-        Planned::Keep => Some("--aggressive cleans it".to_owned()),
-        Planned::OutsideRoots => Some(format!(
-            "to allow it: rosie roots add {}",
-            shown.word(&delete.path)
+        Planned::Keep => Some(Fix::flag("to clean it", Flag::Aggressive)),
+        Planned::OutsideRoots => Some(Fix::run(
+            "to allow it",
+            [Command::RootsAdd(PathBuf::from(shown.path(&delete.path)))],
         )),
-        Planned::Conflict(_) => Some("choose clean or keep in the plan".to_owned()),
+        Planned::Conflict(_) => Some(Fix::by_hand("choose clean or keep in the plan")),
     };
+    let hint = fix.map(|fix| fix.compact());
     let sudo = (delete.run_as == RunAs::Sudo).then(|| "needs sudo".to_owned());
 
     let parts: Vec<String> = [what, hint, sudo].into_iter().flatten().collect();
@@ -334,14 +328,7 @@ fn running(program: &Path, pid: u32) -> String {
 fn skip_reason(skipped: &Skipped) -> String {
     let reason = skipped.reason.reason();
     let hint = match skipped.reason {
-        WalkSkip::Closed(needs) => {
-            let flags: Vec<&str> = needs.settings().map(flag).collect();
-            match flags.split_last() {
-                Some((only, [])) => Some(format!("{only} enters it")),
-                Some((last, init)) => Some(format!("{} and {last} enter it", init.join(", "))),
-                None => None,
-            }
-        }
+        WalkSkip::Closed(needs) => Some(enter_fix(needs).compact()),
         WalkSkip::LinkOutsideRoots
         | WalkSkip::SealedMount
         | WalkSkip::SealedPlaceholder
@@ -383,9 +370,9 @@ fn holds(stats: &PlanStats, path: &Path, shown: &Shown) -> (Word, String) {
         .map(|(kind, tally)| format!("{} {} ({})", tally.items, kind.label(), tally.size))
         .collect();
     let reason = format!(
-        "contains {items} {noun}: {}; see rosie scan tree {}",
+        "contains {items} {noun}: {}; see {}",
         counts.join(", "),
-        shown.word(path)
+        Command::ScanTree(PathBuf::from(shown.path(path)))
     );
     (Word::Plan(kind), reason)
 }
@@ -404,9 +391,9 @@ fn holds_unplanned(in_use: usize, skipped: usize, path: &Path, shown: &Shown) ->
         .map(|(count, counted)| format!("{count} {}", counted.label()))
         .collect();
     let reason = format!(
-        "contains {}; see rosie scan tree {}",
+        "contains {}; see {}",
         parts.join(", "),
-        shown.word(path)
+        Command::ScanTree(PathBuf::from(shown.path(path)))
     );
     (word, reason)
 }
@@ -416,7 +403,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn paths_under_home_print_from_tilde_and_paste_as_shell_words() {
+    fn paths_under_home_print_from_tilde() {
         let shown = Shown {
             home: Path::new("/Users/me"),
         };
@@ -424,6 +411,5 @@ mod tests {
         assert_eq!(shown.path(Path::new("/Users/me")), "~");
         assert_eq!(shown.path(Path::new("/Users/me/My App")), "~/My App");
         assert_eq!(shown.path(Path::new("/Users/meme")), "/Users/meme");
-        assert_eq!(shown.word(Path::new("/Users/me/My App")), "~/'My App'");
     }
 }

@@ -144,7 +144,7 @@ fn an_aggressive_item_is_keep_unless_aggressive_is_given() {
         line(
             "keep",
             "~/src/old/.venv",
-            "rosie/python-venv (aggressive); --aggressive cleans it"
+            "rosie/python-venv (aggressive); to clean it: --aggressive"
         )
     );
     cleaned.assert_status(ExitStatus::Success);
@@ -334,7 +334,7 @@ fn a_typed_path_through_a_symlink_is_skipped_naming_the_link_and_its_target() {
         line(
             "skipped",
             "~/.cargo/registry",
-            "through symlink ~/.cargo → ~/dotfiles/cargo; enter_links = \"roots\" allows it"
+            "through symlink ~/.cargo → ~/dotfiles/cargo; to allow it: rosie config set walk.enter_links roots"
         )
     );
 }
@@ -354,7 +354,7 @@ fn a_path_on_another_volume_is_skipped_naming_the_flag_that_enters_it() {
         line(
             "skipped",
             "/Volumes/Backup/build",
-            "another volume; --enter-mounts enters it"
+            "another volume; to cross it: --enter-mounts"
         )
     );
     assert_eq!(
@@ -374,8 +374,8 @@ fn a_folder_closed_several_ways_names_every_flag_that_enters_it() {
 
     assert_eq!(
         line_for(&ran, "~/src/Old.app/Contents").reason,
-        "cloud placeholder, not downloaded; another volume; bundle; --enter-placeholders, \
-         --enter-mounts and --enter-bundles enter it"
+        "cloud placeholder, not downloaded; another volume; bundle; to enter it: \
+         --enter-placeholders --enter-mounts --enter-bundles"
     );
 }
 

@@ -70,14 +70,14 @@ $ rosie check ~/src/app/node_modules ~/src/app/node_modules/react \
 clean          ~/src/app/node_modules                 rosie/node-modules (normal)
 clean          ~/src/app/node_modules/react           inside ~/src/app/node_modules (rosie/node-modules)
 clean          ~/Library/Developer/Xcode/DerivedData  rosie/xcode-derived-data (normal); needs sudo
-keep           ~/src/old/.venv                        rosie/python-venv (aggressive); --aggressive cleans it
+keep           ~/src/old/.venv                        rosie/python-venv (aggressive); to clean it: --aggressive
 outside-roots  ~/Library/Caches/com.foo.Bar           to allow it: rosie roots add ~/Library/Caches
 conflict       ~/src/api/target                       rosie/cargo-target (normal) vs alice/rust (aggressive, on target/debug); choose clean or keep in the plan
 conflict       ~/src/api/target/debug                 rosie/cargo-target (normal, on ~/src/api/target) vs alice/rust (aggressive); choose clean or keep in the plan
 clean          ~/src/web                              contains 3 items: 2 clean (1.4 GB), 1 keep (210 MB); see rosie scan tree ~/src/web
 in use         ~/Applications/Slack.app               running: Slack (pid 4123)
-skipped        ~/.cargo/registry                      through symlink ~/.cargo → ~/dotfiles/cargo; enter_links = "roots" allows it
-skipped        /Volumes/Backup/build                  another volume; --enter-mounts enters it
+skipped        ~/.cargo/registry                      through symlink ~/.cargo → ~/dotfiles/cargo; to allow it: rosie config set walk.enter_links roots
+skipped        /Volumes/Backup/build                  another volume; to cross it: --enter-mounts
 no rule        ~/src/app/src                          no rule matches it or anything inside
 no rule        ~/Downloads/missing                    does not exist
 ```
@@ -118,7 +118,7 @@ no rule        ~/Downloads/missing                    does not exist
   leads. *(agent-inferred)*
 - A path inside an item a process runs from reads `inside <item> (<rules>); running:
   <program> (pid <pid>)`. *(agent-inferred)*
-- A skip names every flag that would enter it: `--a and --b enter it`.
+- A skip names every flag that would enter it: `to enter it: --a --b`.
   *(agent-inferred)*
 - A refused typed path is `skipped` with the refusal's own text; one through a symlink
   names the link and where it leads. *(agent-inferred)*

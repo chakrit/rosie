@@ -9,7 +9,9 @@ mod args;
 mod check;
 mod console;
 mod error;
+mod failure;
 mod findings;
+mod fix;
 mod manage;
 mod progress;
 mod root;
@@ -207,10 +209,14 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
         let written = match error {
             // A usage message reads like clap's own usage errors: no marker.
             Error::Usage(message) => writeln!(self.console.stderr(), "{message}"),
-            _ => {
-                let line = palette.line(&Line::new(Mark::Error, error.to_string()));
+            _ => failure::failures(error).iter().try_for_each(|failure| {
+                let text = std::iter::once(failure.problem.clone())
+                    .chain(fix::fix_lines(palette, &failure.fixes))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let line = palette.line(&Line::new(Mark::Error, text));
                 writeln!(self.console.stderr(), "{line}")
-            }
+            }),
         };
         match written {
             Ok(()) => status,

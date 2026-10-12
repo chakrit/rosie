@@ -43,7 +43,7 @@ pub enum Error {
     },
 
     #[error(
-        "{typed} does not match the spelling on disk; use {real} instead",
+        "{typed} is spelled {real} on disk",
         typed = typed.display(),
         real = real.display(),
     )]
@@ -118,7 +118,7 @@ impl Error {
 /// target, or the reason that could not be done.
 #[derive(Debug, Error)]
 pub enum RealPath {
-    #[error("use the real path {path} instead", path = .0.display())]
+    #[error("its real path is {path}", path = .0.display())]
     Resolved(PathBuf),
 
     #[error("its real path cannot be determined: {0}")]

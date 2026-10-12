@@ -111,7 +111,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Some(path) => self.typed_root(&path),
             None => {
                 let picker = self.picker("rosie roots remove <path>")?;
-                let options = file.roots()
+                let options = file
+                    .roots()
                     .iter()
                     .map(|root| (root.display().to_string(), root.clone()))
                     .collect();

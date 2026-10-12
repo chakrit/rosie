@@ -77,7 +77,7 @@ pub enum Error {
         source: Box<fs::Error>,
     },
 
-    #[error("no pack has a rule named `{name}`; `rosie rules` lists them")]
+    #[error("no pack has a rule named `{name}`")]
     UnknownRule { name: Name },
 }
 

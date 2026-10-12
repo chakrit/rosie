@@ -169,7 +169,7 @@ pub enum Error {
     #[error("{name} is not a config key")]
     UnknownKey { name: String },
 
-    #[error("roots is not set through `config`; use `rosie roots add` or `rosie roots remove`")]
+    #[error("roots is not set through `rosie config`")]
     RootsNotSettable,
 
     #[error("{key} does not accept `{value}`; use one of: {allowed}")]

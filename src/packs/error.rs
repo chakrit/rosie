@@ -74,17 +74,14 @@ pub enum Error {
         clear: Box<Error>,
     },
 
-    #[error("the pull time {path} is unreadable; run rosie rules pull to refresh the pack", path = path.display())]
+    #[error("the pull time {path} is unreadable", path = path.display())]
     BadPullTime { path: PathBuf },
 
-    #[error(
-        "the pack {pack} is already installed from {installed}; remove it first with rosie rules remove {installed_pack}",
-        installed_pack = installed.pack(),
-    )]
+    #[error("the pack {pack} is already installed from {installed}")]
     PackNameTaken { pack: String, installed: Source },
 
     #[error(
-        "{path} is in the packs folder but is not a pack: {problem}; move it out of there",
+        "{path} is in the packs folder but is not a pack: {problem}",
         path = path.display(),
     )]
     StrayEntry { path: PathBuf, problem: Stray },

@@ -29,7 +29,9 @@ fn sudo_rosie_is_refused_before_anything_is_read() {
         "rosie destroys things.",
     ];
     assert!(
-        known.iter().any(|line| lines[0].starts_with(&format!("✗ {line}"))),
+        known
+            .iter()
+            .any(|line| lines[0].starts_with(&format!("✗ {line}"))),
         "{}",
         ran.stderr
     );

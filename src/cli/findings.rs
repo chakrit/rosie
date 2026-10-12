@@ -5,6 +5,7 @@
 use std::fmt;
 
 use super::args::Mode;
+use super::fix::{Command, Fix};
 use crate::output::{Line, Mark};
 use crate::plan::Report;
 use crate::scan::{Problem, Refused, Scan, Skipped, WalkSkip, WalkSkips};
@@ -40,12 +41,15 @@ pub(super) fn stats_lines(stats: impl fmt::Display, skips: WalkSkips) -> String 
 fn walk_skip_line(skipped: &Skipped, mode: &Mode) -> String {
     let path = skipped.path.display();
     let reason = skipped.reason.reason();
-    let hint = match skipped.reason {
-        WalkSkip::LinkOutsideRoots => Some(format!("to clean it: rosie roots add {path}")),
-        skip => mode.walk_skip_hint(skip),
+    let fix = match skipped.reason {
+        WalkSkip::LinkOutsideRoots => Some(Fix::run(
+            "to clean it",
+            [Command::RootsAdd(skipped.path.clone())],
+        )),
+        skip => mode.walk_skip_fix(skip),
     };
-    match hint {
-        Some(hint) => format!("skipped {path}: {reason} ({hint})"),
+    match fix {
+        Some(fix) => format!("skipped {path}: {reason} ({})", fix.compact()),
         None => format!("skipped {path}: {reason}"),
     }
 }
@@ -145,7 +149,7 @@ mod tests {
             [Line::new(
                 Mark::Skipped,
                 "skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not \
-                 downloaded (use --enter-placeholders to open)"
+                 downloaded (to open it: --enter-placeholders)"
             )]
         );
     }

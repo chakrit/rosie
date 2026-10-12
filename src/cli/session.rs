@@ -101,10 +101,16 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     // what commands load
 
-    /// The user's config. A missing one is seeded (`docs/spec/safety.md#roots`) from the
-    /// default source's `config.toml`, whose download also installs the default pack
-    /// when none is installed yet.
-    pub fn config(&mut self) -> Result<ConfigFile, Error> {
+    /// The config the scans use: the user's config file with every root located on disk.
+    pub fn config(&mut self) -> Result<Config, Error> {
+        let file = self.config_file()?;
+        Ok(file.locate(&self.own)?)
+    }
+
+    /// The user's config file, as `rosie roots` and `rosie config` edit it. A missing one
+    /// is seeded (`docs/spec/safety.md#roots`) from the default source's `config.toml`,
+    /// whose download also installs the default pack when none is installed yet.
+    pub fn config_file(&mut self) -> Result<ConfigFile, Error> {
         let dir = self.env.paths.config_dir();
         match config::load(&self.own, &dir) {
             Err(config::Error::NotFound) => {}

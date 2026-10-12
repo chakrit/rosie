@@ -521,6 +521,50 @@ fn a_first_run_pulls_the_default_pack_seeds_the_config_and_proceeds() {
     );
 }
 
+/// `docs/spec/safety.md#roots`: the first run writes the default config before checking
+/// its roots, so the commands that fix a root failing on this machine work right away.
+#[test]
+fn a_first_run_with_a_seeded_root_through_a_symlink_writes_the_config_and_can_be_fixed() {
+    let seeded = format!("roots = [\"{HOME}\", \"~/.cargo/registry\"]\n");
+    let source = Tarball::github()
+        .dir(&format!("{TOP}/rules"))
+        .file(
+            &format!("{TOP}/rules/node.toml"),
+            cli_fixture::NODE_RULE.as_bytes(),
+        )
+        .file(&format!("{TOP}/config.toml"), seeded.as_bytes())
+        .gzip();
+    let sandbox = Sandbox::bare().with_net(Canned::serving(ROSIE_URL, source));
+    sandbox
+        .fake
+        .add_dir(format!("{HOME}/dotfiles/cargo/.cargo/registry"));
+    sandbox
+        .fake
+        .add_symlink(format!("{HOME}/.cargo"), "dotfiles/cargo/.cargo");
+    sandbox.node_project(&format!("{CWD}/app"));
+
+    let first = sandbox.run(&["scan", "tree", "."]);
+    let written = sandbox.file(CONFIG_FILE);
+    let fixed = sandbox.run(&["config", "set", "walk.enter_links", "roots"]);
+    let after = sandbox.run(&["scan", "tree", "."]);
+
+    first.assert_status(ExitStatus::Failed);
+    assert_eq!(written, seeded);
+    assert!(
+        first.stderr.contains(&format!("{HOME}/.cargo")),
+        "{}",
+        first.stderr
+    );
+    assert!(first.stdout.is_empty(), "{}", first.stdout);
+    fixed.assert_status(ExitStatus::Success);
+    after.assert_status(ExitStatus::Success);
+    assert!(
+        after.stdout.contains(&format!("{CWD}/app/node_modules")),
+        "{}",
+        after.stdout
+    );
+}
+
 #[test]
 fn an_offline_first_run_stops_with_the_reason() {
     let sandbox = Sandbox::bare();

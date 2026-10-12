@@ -9,7 +9,7 @@ use super::findings::{findings_lines, stats_lines};
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps;
-use crate::config::ConfigFile;
+use crate::config::Config;
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::packs::Network;
 use crate::plan::{ItemSize, Plan, PlanStats, Selection};
@@ -142,16 +142,16 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     fn find(
         &mut self,
-        config: &ConfigFile,
+        config: &Config,
         mode: &Mode,
         flags: &ScanFlags,
         app_usage: &str,
     ) -> Result<Scan, Error> {
-        let settings = flags.settings(config.config().walk);
+        let settings = flags.settings(config.walk);
 
         match mode {
             Mode::Tree { dir, rules } => {
-                let scanner = self.rule_scanner(config.config(), settings, rules)?;
+                let scanner = self.rule_scanner(config, settings, rules)?;
                 let dir = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
                 let progress = self.console.progress();
                 let scan = scanner.tree(&dir, &progress);
@@ -159,14 +159,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 Ok(scan?)
             }
             Mode::Caches { rules } => {
-                let scanner = self.rule_scanner(config.config(), settings, rules)?;
+                let scanner = self.rule_scanner(config, settings, rules)?;
                 let progress = self.console.progress();
                 let scan = scanner.caches(&progress);
                 progress.finish()?;
                 Ok(scan?)
             }
             Mode::App { app } => {
-                let ctx = self.roots_ctx(config.config())?;
+                let ctx = self.roots_ctx(config)?;
                 let app = match app {
                     Some(app) => self.absolute(app),
                     None => self.pick_app(&ctx, app_usage)?,
@@ -174,7 +174,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 Ok(apps::scan_app(&ctx, &app, &settings)?)
             }
             Mode::Orphans => {
-                let ctx = self.roots_ctx(config.config())?;
+                let ctx = self.roots_ctx(config)?;
                 Ok(apps::scan_orphans(&ctx, &settings)?)
             }
         }
@@ -274,11 +274,11 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// item failed.
     fn execute(
         &mut self,
-        config: &ConfigFile,
+        config: &Config,
         plan: &Plan,
         skips: ScanSkips<'_>,
     ) -> Result<bool, Error> {
-        let ctx = self.roots_ctx(config.config())?;
+        let ctx = self.roots_ctx(config)?;
         let elevation = Elevation {
             exe: self.env.exe.clone(),
         };

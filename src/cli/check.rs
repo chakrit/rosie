@@ -36,8 +36,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn check(&mut self, args: CheckArgs) -> Result<ExitStatus, Error> {
         let config = self.config()?;
         // The settings `rosie scan app` runs with under the same flags.
-        let app_mode = args.flags.settings(config.config().walk);
-        let scanner = self.rule_scanner(config.config(), app_mode, &args.rules)?;
+        let app_mode = args.flags.settings(config.walk);
+        let scanner = self.rule_scanner(&config, app_mode, &args.rules)?;
 
         let mut lines = Vec::new();
         for typed in &args.paths {

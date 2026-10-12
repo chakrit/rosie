@@ -3,28 +3,28 @@
 
 use std::path::{Path, PathBuf};
 
-use super::{Config, ConfigFile, Error, document, store};
+use super::{ConfigFile, Error, document, store};
 use crate::fs::{Backend, FsContext, FsOp, Paths, UserInput};
-
-/// The current `roots` allowlist, for `rosie roots`.
-pub fn list(config: &Config) -> &[PathBuf] {
-    &config.roots
-}
 
 /// `roots add <path>`: refuses a path with a symlink component, unless the config's
 /// `enter_links` allows one, or a spelling that does not match the disk, naming the
 /// real path (`docs/spec/safety.md#symlinks`). The entry written is the path as typed,
 /// with `.` and `..` resolved, spelled under `~` when the user typed `~` and the path
 /// is still under home; a resolved path never replaces it. Adding a root already listed
-/// for the same location writes nothing.
+/// for the same location writes nothing. Other entries are not checked against the disk
+/// beyond that comparison.
 pub fn add<B: Backend>(
     ctx: &FsContext<B>,
     config_dir: &Path,
     file: &ConfigFile,
     path: &Path,
 ) -> Result<ConfigFile, Error> {
-    let located = UserInput::path(path, file.config.walk.enter_links).perform(ctx)?;
-    if file.config.roots.contains(&located) {
+    let located = UserInput::path(path, file.walk().enter_links).perform(ctx)?;
+    let listed = file
+        .roots()
+        .iter()
+        .any(|root| file.locates_at(ctx, root, &located));
+    if listed {
         return Ok(file.clone());
     }
 
@@ -48,11 +48,11 @@ pub fn remove<B: Backend>(
     path: &Path,
 ) -> Result<ConfigFile, Error> {
     let target = ctx.paths().expand(path)?;
+    let written_as = |root: &PathBuf| ctx.paths().expand(root).is_ok_and(|root| root == target);
     let index = file
-        .written_roots
+        .roots()
         .iter()
-        .zip(&file.config.roots)
-        .position(|(written, located)| *written == target || *located == target)
+        .position(|root| written_as(root) || file.locates_at(ctx, root, &target))
         .ok_or(Error::NotARoot { path: target })?;
 
     let edited = document::without_root(&file.document, index);
@@ -101,6 +101,10 @@ mod tests {
         load(ctx, config_dir()).expect("load config")
     }
 
+    fn located(ctx: &FsContext<&FakeBackend>, file: &ConfigFile) -> Vec<PathBuf> {
+        file.locate(ctx).expect("every root locates").roots
+    }
+
     fn file_text(ctx: &FsContext<&FakeBackend>) -> String {
         let bytes = Rosie::read(Path::new(CONFIG_FILE))
             .perform(ctx)
@@ -123,8 +127,8 @@ mod tests {
         )
         .expect("add a real folder");
 
-        assert_eq!(list(updated.config()), &[PathBuf::from("/Users/me/code")]);
-        assert_eq!(loaded(&ctx).config().roots, updated.config().roots);
+        assert_eq!(located(&ctx, &updated), &[PathBuf::from("/Users/me/code")]);
+        assert_eq!(located(&ctx, &loaded(&ctx)), located(&ctx, &updated));
     }
 
     #[test]
@@ -145,7 +149,7 @@ mod tests {
         .expect("add a tilde path");
 
         assert_eq!(
-            list(updated.config()),
+            located(&ctx, &updated),
             &[
                 PathBuf::from("/Users/me/Applications"),
                 PathBuf::from("/Users/me/Library/Caches"),
@@ -228,7 +232,7 @@ mod tests {
         .expect("a root through a link");
 
         assert_eq!(
-            list(updated.config()),
+            located(&ctx, &updated),
             &[PathBuf::from("/Users/me/dotfiles/cargo/registry")]
         );
         let text = file_text(&ctx);
@@ -253,7 +257,7 @@ mod tests {
         )
         .expect("remove the root as written");
 
-        assert_eq!(list(updated.config()), &[] as &[PathBuf]);
+        assert_eq!(located(&ctx, &updated), &[] as &[PathBuf]);
     }
 
     #[test]
@@ -272,7 +276,7 @@ mod tests {
         )
         .expect("re-add the same root");
 
-        assert_eq!(list(updated.config()), &[PathBuf::from("/Users/me/code")]);
+        assert_eq!(located(&ctx, &updated), &[PathBuf::from("/Users/me/code")]);
         assert_eq!(file_text(&ctx), original);
     }
 
@@ -292,7 +296,7 @@ mod tests {
         .expect("remove a root");
 
         assert_eq!(
-            list(updated.config()),
+            located(&ctx, &updated),
             &[
                 PathBuf::from("/Users/me/code"),
                 PathBuf::from("/Users/me/Library/Caches"),
@@ -302,7 +306,7 @@ mod tests {
         assert!(!text.contains("~/Applications"), "{text}");
         assert!(text.contains("# apps"), "{text}");
         assert!(text.contains("\"~/Library/Caches\""), "{text}");
-        assert_eq!(loaded(&ctx).config().roots, updated.config().roots);
+        assert_eq!(located(&ctx, &loaded(&ctx)), located(&ctx, &updated));
     }
 
     #[test]

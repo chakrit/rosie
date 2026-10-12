@@ -21,7 +21,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     pub fn roots_command(&mut self, action: Option<RootsAction>) -> Result<ExitStatus, Error> {
-        let file = self.config()?;
+        let file = self.config_file()?;
         match action {
             None => self.show_roots(&file),
             Some(RootsAction::Add { path }) => self.add_root(&file, &path),
@@ -30,7 +30,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     pub fn config_command(&mut self, action: Option<ConfigAction>) -> Result<ExitStatus, Error> {
-        let file = self.config()?;
+        let file = self.config_file()?;
         match action {
             None => self.show_config(&file),
             Some(ConfigAction::Get { key }) => self.get_key(&file, key),
@@ -87,7 +87,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     // roots
 
     fn show_roots(&mut self, file: &ConfigFile) -> Result<ExitStatus, Error> {
-        for root in roots::list(file.config()) {
+        for root in file.roots() {
             self.say(&root.display().to_string())?;
         }
         Ok(ExitStatus::Success)
@@ -111,7 +111,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Some(path) => self.typed_root(&path),
             None => {
                 let picker = self.picker("rosie roots remove <path>")?;
-                let options = roots::list(file.config())
+                let options = file.roots()
                     .iter()
                     .map(|root| (root.display().to_string(), root.clone()))
                     .collect();
@@ -138,7 +138,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     fn show_config(&mut self, file: &ConfigFile) -> Result<ExitStatus, Error> {
         for key in Key::ALL {
-            let value = keys::get(key, file.config());
+            let value = keys::get(key, file);
             let line = match key {
                 Key::Roots => format!("roots =\n{}", indented(&value)),
                 Key::Walk(_) => format!("{} = {value}", key.name()),
@@ -161,7 +161,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             }
         };
 
-        self.say(&keys::get(key, file.config()))?;
+        self.say(&keys::get(key, file))?;
         Ok(ExitStatus::Success)
     }
 
@@ -197,7 +197,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let dir = self.env.paths.config_dir();
 
         let unset = keys::unset(&self.own, &dir, file, walk_key)?;
-        let default = keys::get(Key::Walk(walk_key), unset.config());
+        let default = keys::get(Key::Walk(walk_key), &unset);
         self.say(&format!("{} = {default} (default)", walk_key.name()))?;
         Ok(ExitStatus::Success)
     }

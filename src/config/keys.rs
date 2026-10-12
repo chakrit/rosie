@@ -5,7 +5,7 @@ use std::path::Path;
 
 use toml_edit::Value;
 
-use super::{Config, ConfigFile, Error, document, store};
+use super::{ConfigFile, Error, document, store};
 use crate::fs::{Backend, EnterLinks, FsContext};
 
 /// A config key, as `rosie config` and `config get` show it.
@@ -123,16 +123,16 @@ impl WalkKey {
 }
 
 /// The current value of `key`, for `config get` and `config` (show every key). Roots
-/// print one per line.
-pub fn get(key: Key, config: &Config) -> String {
+/// print one per line, as written.
+pub fn get(key: Key, file: &ConfigFile) -> String {
     match key {
-        Key::Roots => config
-            .roots
+        Key::Roots => file
+            .roots()
             .iter()
             .map(|root| root.display().to_string())
             .collect::<Vec<_>>()
             .join("\n"),
-        Key::Walk(key) => config.walk.value(key),
+        Key::Walk(key) => file.walk().value(key),
     }
 }
 
@@ -230,12 +230,9 @@ mod tests {
         let updated =
             set(&ctx, config_dir(), &file, WalkKey::EnterMounts, "true").expect("set a flag");
 
-        assert_eq!(
-            get(Key::Walk(WalkKey::EnterMounts), updated.config()),
-            "true"
-        );
+        assert_eq!(get(Key::Walk(WalkKey::EnterMounts), &updated), "true");
         let reloaded = load(&ctx, config_dir()).expect("reload");
-        assert!(reloaded.config().walk.enter_mounts);
+        assert!(reloaded.walk().enter_mounts);
     }
 
     #[test]
@@ -257,18 +254,15 @@ mod tests {
         fake.add_file(CONFIG_FILE, "roots = []\n");
         let ctx = ctx(&fake);
         let file = load(&ctx, config_dir()).expect("load");
-        assert_eq!(get(Key::Walk(WalkKey::EnterLinks), file.config()), "none");
+        assert_eq!(get(Key::Walk(WalkKey::EnterLinks), &file), "none");
 
         let updated =
             set(&ctx, config_dir(), &file, WalkKey::EnterLinks, "roots").expect("set a level");
 
-        assert_eq!(
-            get(Key::Walk(WalkKey::EnterLinks), updated.config()),
-            "roots"
-        );
+        assert_eq!(get(Key::Walk(WalkKey::EnterLinks), &updated), "roots");
         assert!(file_text(&ctx).contains("enter_links = \"roots\""));
         let reloaded = load(&ctx, config_dir()).expect("reload");
-        assert_eq!(reloaded.config().walk.enter_links, EnterLinks::Roots);
+        assert_eq!(reloaded.walk().enter_links, EnterLinks::Roots);
     }
 
     #[test]
@@ -305,7 +299,7 @@ mod tests {
         assert!(!text.contains("enter_bundles"), "{text}");
         assert!(text.contains("enter_mounts = true"), "{text}");
         let reloaded = load(&ctx, config_dir()).expect("reload");
-        assert!(!reloaded.config().walk.enter_bundles);
+        assert!(!reloaded.walk().enter_bundles);
     }
 
     #[test]

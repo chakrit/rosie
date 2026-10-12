@@ -29,13 +29,21 @@ const FILE_NAME: &str = "config.toml";
 /// What an error in the default text that seeds `config.toml` names as its file.
 const DEFAULT_LABEL: &str = "<default config.toml>";
 
-/// The user's config, typed. Fields default when the key is absent, so an empty or
-/// partial file is valid. A key rosie does not know is a load error.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
-#[serde(default, deny_unknown_fields)]
+/// The config the scans use: every root located on disk
+/// (`docs/spec/safety.md#symlinks`), and the walk settings.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct Config {
     pub roots: Vec<PathBuf>,
     pub walk: Walk,
+}
+
+/// `config.toml` typed as written. Fields default when the key is absent, so an empty or
+/// partial file is valid. A key rosie does not know is a load error.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default, deny_unknown_fields)]
+struct Written {
+    roots: Vec<PathBuf>,
+    walk: Walk,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
@@ -59,22 +67,74 @@ impl Walk {
     }
 }
 
-/// The user's config file as loaded: the document as written, and its validated typed
-/// reading with every root checked and located on disk. `config.roots[i]` is where the
-/// `i`th entry of the document's `roots` array is on disk, and `written_roots[i]` is
-/// that entry as written, with `~` expanded and dots resolved; the two differ only
-/// through a symlink `enter_links` allows.
+/// The user's config file: the document as written and its typed reading. It is
+/// well-formed TOML with known keys of the right shape; nothing in it has been checked
+/// against the disk, so `rosie roots` and `rosie config` can repair any root
+/// (`docs/spec/safety.md#roots`).
 #[derive(Debug, Clone)]
 pub struct ConfigFile {
     document: DocumentMut,
-    config: Config,
-    written_roots: Vec<PathBuf>,
+    written: Written,
 }
 
 impl ConfigFile {
-    pub fn config(&self) -> &Config {
-        &self.config
+    /// The `roots` entries as written, `~` and all.
+    pub fn roots(&self) -> &[PathBuf] {
+        &self.written.roots
     }
+
+    pub fn walk(&self) -> Walk {
+        self.written.walk
+    }
+
+    /// The config the scans use: each root located on disk. Fails naming every root
+    /// that cannot be used here, so one run reports them all.
+    pub fn locate<B: Backend>(&self, ctx: &FsContext<B>) -> Result<Config, Error> {
+        let (located, unusable): (Vec<_>, Vec<_>) = self
+            .roots()
+            .iter()
+            .map(|root| {
+                self.locate_root(ctx, root).map_err(|error| UnusableRoot {
+                    written: root.clone(),
+                    error,
+                })
+            })
+            .partition(Result::is_ok);
+
+        let unusable: Vec<UnusableRoot> = unusable.into_iter().filter_map(Result::err).collect();
+        if !unusable.is_empty() {
+            return Err(Error::UnusableRoots(unusable));
+        }
+
+        Ok(Config {
+            roots: located.into_iter().filter_map(Result::ok).collect(),
+            walk: self.walk(),
+        })
+    }
+
+    /// Whether the entry `root` is at `location` on disk. An entry that cannot be located
+    /// is at no location; `locate` reports why.
+    fn locates_at<B: Backend>(&self, ctx: &FsContext<B>, root: &Path, location: &Path) -> bool {
+        self.locate_root(ctx, root)
+            .is_ok_and(|root| root == location)
+    }
+
+    /// Where the entry `root` is on disk, under this file's `enter_links`.
+    fn locate_root<B: Backend>(
+        &self,
+        ctx: &FsContext<B>,
+        root: &Path,
+    ) -> Result<PathBuf, fs::Error> {
+        UserInput::path(root, self.walk().enter_links).perform(ctx)
+    }
+}
+
+/// A `roots` entry that fails the path gate on this machine.
+#[derive(Debug)]
+pub struct UnusableRoot {
+    /// The entry as written in `config.toml`.
+    pub written: PathBuf,
+    pub error: fs::Error,
 }
 
 #[derive(Debug, Error)]
@@ -102,6 +162,9 @@ pub enum Error {
 
     #[error("the default config is invalid: {0}")]
     InvalidDefault(#[source] Box<Error>),
+
+    #[error("{}", unusable_roots_text(.0))]
+    UnusableRoots(Vec<UnusableRoot>),
 
     #[error("{name} is not a config key")]
     UnknownKey { name: String },
@@ -158,7 +221,7 @@ pub fn load<B: Backend>(ctx: &FsContext<B>, config_dir: &Path) -> Result<ConfigF
         path: path.clone(),
         source,
     })?;
-    parse(text, &path, ctx)
+    parse(text, &path)
 }
 
 /// Writes `default_text` as the user's config file, first validating it the same way a
@@ -173,7 +236,7 @@ fn seed<B: Backend>(
     default_text: &str,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
-    let file = parse(default_text, Path::new(DEFAULT_LABEL), ctx)
+    let file = parse(default_text, Path::new(DEFAULT_LABEL))
         .map_err(|source| Error::InvalidDefault(Box::new(source)))?;
     write_validated(ctx, config_dir, &path, default_text, file)
 }
@@ -188,7 +251,7 @@ fn store<B: Backend>(
     text: &str,
 ) -> Result<ConfigFile, Error> {
     let path = config_path(config_dir);
-    let file = parse(text, &path, ctx)?;
+    let file = parse(text, &path)?;
     write_validated(ctx, config_dir, &path, text, file)
 }
 
@@ -217,33 +280,15 @@ fn sibling_path(config_dir: &Path) -> PathBuf {
 
 // parsing
 
-fn parse<B: Backend>(text: &str, path: &Path, ctx: &FsContext<B>) -> Result<ConfigFile, Error> {
+fn parse(text: &str, path: &Path) -> Result<ConfigFile, Error> {
     let document = parse_syntax(text, path)?;
     validate_shape(&document, path)?;
 
-    let raw: Config = toml_edit::de::from_str(text).map_err(|source| Error::Parse {
+    let written: Written = toml_edit::de::from_str(text).map_err(|source| Error::Parse {
         path: path.to_path_buf(),
         source,
     })?;
-
-    let links = raw.walk.enter_links;
-    let roots = raw
-        .roots
-        .iter()
-        .map(|root| UserInput::path(root, links).perform(ctx))
-        .collect::<Result<Vec<_>, _>>()?;
-    let written_roots = raw
-        .roots
-        .iter()
-        .map(|root| ctx.paths().expand(root))
-        .collect::<Result<Vec<_>, _>>()?;
-
-    let config = Config { roots, ..raw };
-    Ok(ConfigFile {
-        document,
-        config,
-        written_roots,
-    })
+    Ok(ConfigFile { document, written })
 }
 
 /// Parses `text` as an editable document. The typed reading is a second, separate parse
@@ -281,6 +326,14 @@ fn validate_shape(document: &DocumentMut, path: &Path) -> Result<(), Error> {
         });
     }
     Ok(())
+}
+
+fn unusable_roots_text(roots: &[UnusableRoot]) -> String {
+    roots
+        .iter()
+        .map(|root| root.error.to_string())
+        .collect::<Vec<_>>()
+        .join("\n")
 }
 
 fn load_error(source: fs::Error) -> Error {
@@ -322,6 +375,10 @@ mod tests {
         Path::new(CONFIG_DIR)
     }
 
+    fn located(ctx: &FsContext<&FakeBackend>, file: &ConfigFile) -> Vec<PathBuf> {
+        file.locate(ctx).expect("every root locates").roots
+    }
+
     #[test]
     fn loads_a_config_with_roots_and_walk_flags() {
         let fake = FakeBackend::new();
@@ -334,9 +391,9 @@ mod tests {
 
         let file = load(&ctx, config_dir()).expect("load config");
 
-        assert_eq!(file.config().roots, vec![PathBuf::from("/Users/me/code")]);
-        assert!(file.config().walk.enter_bundles);
-        assert!(!file.config().walk.enter_mounts);
+        assert_eq!(located(&ctx, &file), vec![PathBuf::from("/Users/me/code")]);
+        assert!(file.walk().enter_bundles);
+        assert!(!file.walk().enter_mounts);
     }
 
     #[test]
@@ -381,7 +438,7 @@ mod tests {
         let file = load(&ctx, config_dir()).expect("load config");
 
         assert_eq!(
-            file.config().roots,
+            located(&ctx, &file),
             vec![PathBuf::from("/Users/me/Applications")]
         );
     }
@@ -398,13 +455,15 @@ mod tests {
         let file = load(&ctx, config_dir()).expect("missing root is fine");
 
         assert_eq!(
-            file.config().roots,
+            located(&ctx, &file),
             vec![PathBuf::from("/opt/homebrew/Cellar")]
         );
     }
 
+    /// `docs/spec/safety.md#symlinks`: a root through a symlink fails every command that
+    /// uses the roots, and `docs/spec/safety.md#roots`: the file still loads for editing.
     #[test]
-    fn a_root_through_an_existing_symlink_component_is_a_load_error_naming_it() {
+    fn a_root_through_a_symlink_loads_for_editing_but_cannot_be_located() {
         let fake = FakeBackend::new();
         fake.add_dir("/Users/me/elsewhere");
         fake.add_symlink("/Users/me/code", "elsewhere");
@@ -414,12 +473,63 @@ mod tests {
         );
         let ctx = ctx(&fake);
 
-        let result = load(&ctx, config_dir());
+        let file = load(&ctx, config_dir()).expect("a well-formed file loads");
+        let result = file.locate(&ctx);
 
-        let Err(Error::Fs(fs::Error::Symlink { link, .. })) = result else {
-            panic!("expected a symlink load error, got {result:?}");
+        let Err(Error::UnusableRoots(unusable)) = result else {
+            panic!("expected unusable roots, got {result:?}");
         };
-        assert_eq!(link, PathBuf::from("/Users/me/code"));
+        let [UnusableRoot { written, error }] = unusable.as_slice() else {
+            panic!("expected one unusable root, got {unusable:?}");
+        };
+        assert_eq!(written, &PathBuf::from("/Users/me/code/app"));
+        let fs::Error::Symlink { link, .. } = error else {
+            panic!("expected a symlink error, got {error:?}");
+        };
+        assert_eq!(link, &PathBuf::from("/Users/me/code"));
+    }
+
+    #[test]
+    fn locating_names_every_unusable_root_not_just_the_first() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/elsewhere");
+        fake.add_dir("/Users/me/Code");
+        fake.add_symlink("/Users/me/link", "elsewhere");
+        fake.add_file(
+            "/Users/me/.config/rosie/config.toml",
+            "roots = [\"~/link/a\", \"/Users/me/Code\", \"~/code\"]\n",
+        );
+        let ctx = ctx(&fake);
+
+        let result = load(&ctx, config_dir()).expect("load").locate(&ctx);
+
+        let Err(Error::UnusableRoots(unusable)) = result else {
+            panic!("expected unusable roots, got {result:?}");
+        };
+        let written: Vec<_> = unusable.iter().map(|root| root.written.clone()).collect();
+        assert_eq!(
+            written,
+            [PathBuf::from("~/link/a"), PathBuf::from("~/code")]
+        );
+    }
+
+    #[test]
+    fn seeds_a_default_whose_root_fails_on_this_machine() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/dotfiles/cargo");
+        fake.add_symlink("/Users/me/.cargo", "dotfiles/cargo");
+        let ctx = ctx(&fake);
+        let default_text = "roots = [\"~/.cargo/registry\"]\n";
+
+        let seeded = seed(&ctx, config_dir(), default_text).expect("seed config");
+
+        assert!(matches!(seeded.locate(&ctx), Err(Error::UnusableRoots(_))));
+        assert_eq!(
+            Rosie::read(&config_path(config_dir()))
+                .perform(&ctx)
+                .expect("config written"),
+            default_text.as_bytes()
+        );
     }
 
     #[test]
@@ -431,7 +541,7 @@ mod tests {
 
         let seeded = seed(&ctx, config_dir(), default_text).expect("seed config");
 
-        assert_eq!(seeded.config(), &Config::default());
+        assert_eq!(seeded.locate(&ctx).expect("locate"), Config::default());
         assert_eq!(
             Rosie::read(&config_path(config_dir()))
                 .perform(&ctx)
@@ -532,8 +642,8 @@ mod tests {
         let second = load_or_seed(&ctx, config_dir(), "roots = []\n")
             .expect("load the edited file, not the default again");
 
-        assert_eq!(first.config(), &Config::default());
-        assert_eq!(second.config().roots, vec![PathBuf::from("/Users/me")]);
+        assert_eq!(first.locate(&ctx).expect("locate"), Config::default());
+        assert_eq!(second.roots(), [PathBuf::from("/Users/me")]);
     }
 
     #[test]

@@ -210,9 +210,9 @@ fn is_root_sudo(process: &Process) -> bool {
 fn root_ctx<'b, B: Backend>(backend: &'b B, paths: &Paths) -> Result<FsContext<&'b B>, Error> {
     let bootstrap = FsContext::new(backend, paths.bounds(Vec::new(), ROOT_UID))?;
     let user_uid = UserInput::home_owner().perform(&bootstrap)?;
-    let file = config::load(&bootstrap, &paths.config_dir())?;
+    let config = config::load(&bootstrap, &paths.config_dir())?.locate(&bootstrap)?;
 
-    let roots = file.config().roots.clone();
+    let roots = config.roots;
     Ok(FsContext::new_as_root(
         backend,
         paths.bounds(roots, user_uid),

@@ -21,6 +21,7 @@ Status: accepted.
 | Crate                         | Use                                                                  |
 |-------------------------------|----------------------------------------------------------------------|
 | `clap`                        | CLI parsing, `--help`, `--version`                                   |
+| `console`                     | terminal styling of stderr lines ([cli.md](cli.md#output))           |
 | `indicatif`                   | progress and spinners                                                |
 | `inquire`                     | pickers, confirmation, checklist                                     |
 | `thiserror`                   | error types                                                          |

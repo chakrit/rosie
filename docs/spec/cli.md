@@ -205,6 +205,37 @@ Global flags are `--help` and `--version`. There is no `--verbose`.
 `rosie check` exits `0` when any path would be cleaned and `1` otherwise
 ([Check](#check)).
 
+## Output
+
+Every line rosie writes to stderr starts with a marker in the first column:
+
+| Marker  | Line                        |
+|---------|-----------------------------|
+| `·`     | note                        |
+| `✓`     | done                        |
+| `✗`     | error                       |
+| `!`     | warning                     |
+| `-`     | skipped                     |
+| spinner | work in progress            |
+| `?`     | prompt                      |
+
+- One module owns the markers and the palette; `inquire`'s render config takes the same
+  palette.
+- Color only when stderr is a terminal and `NO_COLOR` is unset. Markers always.
+- Stdout data (plan TOML, lists, `check` columns) stays plain.
+
+## Errors
+
+- An error line states the problem only. Its causes follow.
+- Each fix follows on its own lines: a dim label, then the command in cyan, indented.
+- A fix is a rosie command, a flag, or a manual step. Commands are shell-quoted.
+- Every failure the user can fix by changing their setup, their config, or how they run
+  rosie carries at least one fix.
+- Failures the user cannot act on (the elevation protocol, plan files a scan never
+  writes, pack archive tampering, Lua runtime errors, unexpected `launchctl` output)
+  carry the problem line only.
+- `rosie check` hints and plan TOML hints show the first fix.
+
 ## Configuration
 
 User configuration is TOML at `~/.config/rosie/config.toml`. Keys defined so far:

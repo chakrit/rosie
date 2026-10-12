@@ -679,7 +679,7 @@ mod tests {
         assert!(text.contains("# size unknown\n[[forget]]"), "{text}");
         assert!(
             text.contains(
-                "# 1.2 MB; outside roots. To allow it: \
+                "# 1.2 MB; outside roots. To allow it, add it or a folder above it: \
                  rosie roots add '/elsewhere/it'\\''s \"odd\"'$'\\012''$x'\n"
             ),
             "{text}"

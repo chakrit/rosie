@@ -167,7 +167,7 @@ fn an_item_outside_the_roots_names_the_roots_add_that_allows_it() {
         line(
             "outside-roots",
             "~/other/app/node_modules",
-            "to allow it: rosie roots add ~/other/app/node_modules"
+            "to allow it, add it or a folder above it: rosie roots add ~/other/app/node_modules"
         )
     );
 }
@@ -662,7 +662,7 @@ fn prints_one_line_per_path_in_columns_as_wide_as_the_widest_entry() {
     assert_eq!(
         ran.stdout,
         "clean          ~/src/app/node_modules  rosie/node-modules (normal)\n\
-         outside-roots  ~/x/node_modules        to allow it: rosie roots add ~/x/node_modules\n\
+         outside-roots  ~/x/node_modules        to allow it, add it or a folder above it: rosie roots add ~/x/node_modules\n\
          no rule        ~/src/app/src           does not exist\n"
     );
 }

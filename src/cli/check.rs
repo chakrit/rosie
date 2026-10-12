@@ -284,7 +284,7 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
         Planned::Clean(_) => None,
         Planned::Keep => Some(Fix::flag("to clean it", Flag::Aggressive)),
         Planned::OutsideRoots => Some(Fix::run(
-            "to allow it",
+            "to allow it, add it or a folder above it",
             [Command::RootsAdd(PathBuf::from(shown.path(&delete.path)))],
         )),
         Planned::Conflict(_) => Some(Fix::by_hand("choose clean or keep in the plan")),

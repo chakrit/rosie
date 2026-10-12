@@ -125,11 +125,11 @@ impl Plan {
     }
 }
 
-/// What an `outside-roots` entry shows: `outside roots. To allow it: rosie roots add
-/// <path>`, with the path quoted to paste into a shell.
+/// What an `outside-roots` entry shows: `outside roots. To allow it, add it or a folder
+/// above it: rosie roots add <path>`, with the path quoted to paste into a shell.
 fn outside_roots_hint(path: &Path) -> String {
     let path = shell::quote_word(&path.to_string_lossy());
-    format!("outside roots. To allow it: rosie roots add {path}")
+    format!("outside roots. To allow it, add it or a folder above it: rosie roots add {path}")
 }
 
 /// A NUL byte ends a path or an argument at the operating system, so the item a run

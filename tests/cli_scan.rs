@@ -34,12 +34,12 @@ fn each_walk_skip_names_its_path_and_reason() {
 
     ran.assert_status(ExitStatus::Success);
     for line in [
-        format!("skipped {CWD}/Foo.app: bundle (use --enter-bundles to enter)"),
-        format!("skipped {CWD}/vol: another volume (use --enter-mounts to cross)"),
+        format!("- skipped {CWD}/Foo.app: bundle (use --enter-bundles to enter)"),
+        format!("- skipped {CWD}/vol: another volume (use --enter-mounts to cross)"),
         format!(
-            "skipped {CWD}/cloud: cloud placeholder, not downloaded (use --enter-placeholders to open)"
+            "- skipped {CWD}/cloud: cloud placeholder, not downloaded (use --enter-placeholders to open)"
         ),
-        format!("skipped {CWD}/locked: permission denied"),
+        format!("- skipped {CWD}/locked: permission denied"),
     ] {
         assert!(
             ran.stderr.lines().any(|shown| shown == line),
@@ -67,7 +67,7 @@ fn a_skip_closed_several_ways_names_every_flag_it_needs() {
 
     ran.assert_status(ExitStatus::Success);
     let line = format!(
-        "skipped {CWD}/Old.app: cloud placeholder, not downloaded; another volume; bundle \
+        "- skipped {CWD}/Old.app: cloud placeholder, not downloaded; another volume; bundle \
          (use --enter-placeholders, --enter-mounts and --enter-bundles to enter)"
     );
     assert!(
@@ -94,7 +94,7 @@ fn a_matched_mount_root_names_no_flag_to_try() {
     let ran = sandbox.run(&["scan", "tree", ".", "--enter-mounts"]);
 
     ran.assert_status(ExitStatus::Success);
-    let line = format!("skipped {node_modules}: mount point, never entered or a target");
+    let line = format!("- skipped {node_modules}: mount point, never entered or a target");
     assert!(
         ran.stderr.lines().any(|shown| shown == line),
         "{line}\n{}",
@@ -122,7 +122,7 @@ fn enter_links_all_follows_links_and_suggests_roots_add_for_one_outside() {
     let with = sandbox.run(&["scan", "tree", ".", "--enter-links=all"]);
     let invalid = sandbox.run(&["scan", "tree", ".", "--enter-links=yes"]);
 
-    let line = "skipped /Users/me/elsewhere: linked to from the roots, but outside them \
+    let line = "- skipped /Users/me/elsewhere: linked to from the roots, but outside them \
                 (to clean it: rosie roots add /Users/me/elsewhere)";
     assert!(!without.stderr.contains(line), "{}", without.stderr);
     assert!(
@@ -177,7 +177,7 @@ fn a_target_a_process_runs_from_is_skipped_naming_the_process() {
 
     ran.assert_status(ExitStatus::Success);
     let line = format!(
-        "skipped {CWD}/app/node_modules (4.1 KB): in use by process 77 ({CWD}/app/node_modules/.bin/vite)"
+        "- skipped {CWD}/app/node_modules (4.1 KB): in use by process 77 ({CWD}/app/node_modules/.bin/vite)"
     );
     assert!(
         ran.stderr.lines().any(|shown| shown == line),
@@ -204,7 +204,7 @@ fn clean_counts_a_target_a_process_runs_from_in_the_end_of_run_skips_with_its_si
     assert!(
         ran.stderr
             .lines()
-            .any(|shown| shown == "skipped: 1 item, 4.1 KB (running process 1 item, 4.1 KB)"),
+            .any(|shown| shown == "  skipped: 1 item, 4.1 KB (running process 1 item, 4.1 KB)"),
         "{}",
         ran.stderr
     );
@@ -237,7 +237,7 @@ fn a_stale_entry_is_skipped_naming_why() {
     );
 
     ran.assert_status(ExitStatus::Success);
-    let line = format!("skipped (stale) {gone} (4.1 KB): no longer exists");
+    let line = format!("- skipped (stale) {gone} (4.1 KB): no longer exists");
     assert!(
         ran.stderr.lines().any(|shown| shown == line),
         "{}",
@@ -261,7 +261,7 @@ fn an_entry_a_process_runs_from_is_skipped_at_run_naming_the_process() {
 
     ran.assert_status(ExitStatus::Success);
     let line =
-        format!("skipped (running process) {busy} (4.1 KB): process 88 runs {busy}/bin/tool");
+        format!("- skipped (running process) {busy} (4.1 KB): process 88 runs {busy}/bin/tool");
     assert!(
         ran.stderr.lines().any(|shown| shown == line),
         "{}",
@@ -283,7 +283,7 @@ fn sudo_items_are_skipped_naming_why_when_sudo_fails() {
     );
 
     ran.assert_status(ExitStatus::Success);
-    let prefix = format!("skipped (sudo refused) {owned} (4.1 KB): ");
+    let prefix = format!("- skipped (sudo refused) {owned} (4.1 KB): ");
     assert!(
         ran.stderr.lines().any(|shown| shown.starts_with(&prefix)),
         "{}",
@@ -658,11 +658,11 @@ fn an_untested_tool_version_warns_and_the_scan_goes_on() {
     let warnings: Vec<&str> = ran
         .stderr
         .lines()
-        .filter(|line| line.starts_with("warning:"))
+        .filter(|line| line.starts_with("! "))
         .collect();
     assert_eq!(
         warnings,
-        ["warning: /usr/sbin/lsof is version 4.99; rosie was tested with 4.91"],
+        ["! /usr/sbin/lsof is version 4.99; rosie was tested with 4.91"],
         "{}",
         ran.stderr
     );

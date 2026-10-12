@@ -10,10 +10,11 @@ use std::io::{self, Write};
 use std::sync::mpsc::Sender;
 use std::time::Duration;
 
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::ProgressBar;
 
-use super::{ItemResult, Subject};
+use super::{ItemResult, Outcome, Subject};
 use crate::fs::Argv;
+use crate::output::{Line, Mark, Palette};
 
 /// How many output lines of a command are shown.
 const WINDOW: usize = 3;
@@ -122,12 +123,17 @@ impl OutputWindow {
 /// A failed write stops further output; [`PlainReporter::finish`] returns it.
 pub struct PlainReporter<W: Write> {
     out: W,
+    palette: Palette,
     error: Option<io::Error>,
 }
 
 impl<W: Write> PlainReporter<W> {
-    pub fn new(out: W) -> Self {
-        PlainReporter { out, error: None }
+    pub fn new(out: W, palette: Palette) -> Self {
+        PlainReporter {
+            out,
+            palette,
+            error: None,
+        }
     }
 
     /// The first write error, if any write failed.
@@ -138,11 +144,11 @@ impl<W: Write> PlainReporter<W> {
         }
     }
 
-    fn line(&mut self, text: &str) {
+    fn line(&mut self, line: &Line) {
         if self.error.is_some() {
             return;
         }
-        if let Err(error) = writeln!(self.out, "{text}") {
+        if let Err(error) = writeln!(self.out, "{}", self.palette.line(line)) {
             self.error = Some(error);
         }
     }
@@ -154,11 +160,11 @@ impl<W: Write> Reporter for PlainReporter<W> {
     fn command_output(&mut self, _argv: &Argv, _window: &OutputWindow) {}
 
     fn item_finished(&mut self, result: &ItemResult) {
-        self.line(&result.to_string());
+        self.line(&Line::new(mark(result.outcome), result.to_string()));
     }
 
     fn elevating(&mut self, items: usize) {
-        self.line(&elevating_line(items));
+        self.line(&Line::new(Mark::Note, elevating_line(items)));
     }
 }
 
@@ -170,16 +176,14 @@ pub struct TerminalReporter {
     spinner: Option<ProgressBar>,
 }
 
-impl Default for TerminalReporter {
-    fn default() -> Self {
+impl TerminalReporter {
+    pub fn new(palette: Palette) -> Self {
         TerminalReporter {
-            results: PlainReporter::new(io::stderr()),
+            results: PlainReporter::new(io::stderr(), palette),
             spinner: None,
         }
     }
-}
 
-impl TerminalReporter {
     pub fn finish(self) -> io::Result<()> {
         self.results.finish()
     }
@@ -188,11 +192,7 @@ impl TerminalReporter {
 impl Reporter for TerminalReporter {
     fn command_started(&mut self, argv: &Argv) {
         let spinner = ProgressBar::new_spinner();
-        spinner.set_style(
-            ProgressStyle::with_template("{spinner} {msg}").unwrap_or_else(|error| {
-                unreachable!("the spinner template is fixed and valid: {error}")
-            }),
-        );
+        spinner.set_style(self.results.palette.spinner("{spinner} {msg}"));
         spinner.set_message(spinner_message(argv, &OutputWindow::default()));
         spinner.enable_steady_tick(SPINNER_TICK);
         self.spinner = Some(spinner);
@@ -232,6 +232,15 @@ fn spinner_message(argv: &Argv, window: &OutputWindow) -> String {
         message.push_str(line);
     }
     message
+}
+
+/// A done item is `Done`, a skipped one `Skipped`, a failed one `Error`.
+fn mark(outcome: Outcome) -> Mark {
+    match outcome {
+        Outcome::Done => Mark::Done,
+        Outcome::Skipped(_) => Mark::Skipped,
+        Outcome::Failed => Mark::Error,
+    }
 }
 
 fn elevating_line(items: usize) -> String {
@@ -279,7 +288,7 @@ mod tests {
     #[test]
     fn plain_output_shows_only_results_with_the_final_lines() {
         let argv = Argv::new("gradle").arg("--stop");
-        let mut reporter = PlainReporter::new(Vec::new());
+        let mut reporter = PlainReporter::new(Vec::new(), Palette::plain());
 
         reporter.command_started(&argv);
         reporter.command_output(&argv, &window_of(&["starting"]));
@@ -300,13 +309,13 @@ mod tests {
         });
         reporter.elevating(2);
 
-        let PlainReporter { out, error } = reporter;
+        let PlainReporter { out, error, .. } = reporter;
         assert!(error.is_none());
         assert_eq!(
             String::from_utf8(out).expect("utf-8"),
-            "ran gradle --stop\n  | b\n  | c\n  | d\n\
-             skipped (stale) /w/node_modules (1.5 MB): no longer exists\n\
-             running 2 items with sudo\n"
+            "✓ ran gradle --stop\n  | b\n  | c\n  | d\n\
+             - skipped (stale) /w/node_modules (1.5 MB): no longer exists\n\
+             · running 2 items with sudo\n"
         );
     }
 }

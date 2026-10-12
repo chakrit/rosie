@@ -4,6 +4,7 @@ pub mod apps;
 pub mod cli;
 pub mod config;
 pub mod fs;
+pub mod output;
 pub mod packs;
 pub mod plan;
 pub mod process;

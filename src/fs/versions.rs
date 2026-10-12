@@ -184,14 +184,14 @@ impl fmt::Display for UntestedVersion {
                 tested,
             } => write!(
                 f,
-                "warning: {tool} is version {found}; rosie was tested with {tested}"
+                "{tool} is version {found}; rosie was tested with {tested}"
             ),
             UntestedVersion::MacOs { tool, found } => write!(
                 f,
-                "warning: {tool} comes with macOS {found}; rosie was tested on macOS {TESTED_MACOS}"
+                "{tool} comes with macOS {found}; rosie was tested on macOS {TESTED_MACOS}"
             ),
             UntestedVersion::Unreadable { tool, reason } => {
-                write!(f, "warning: cannot read the version of {tool}: {reason}")
+                write!(f, "cannot read the version of {tool}: {reason}")
             }
         }
     }

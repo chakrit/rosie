@@ -80,7 +80,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         app_mode: Settings,
     ) -> Result<Line, Error> {
         for problem in &scanned.scan.problems {
-            self.note(&problem_line(problem))?;
+            let line = problem_line(problem);
+            self.note(line.mark, &line.text)?;
         }
         let path = &scanned.path;
         let verdict = scanned.scan.verdict(path);

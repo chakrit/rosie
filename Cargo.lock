@@ -700,6 +700,7 @@ name = "rosie"
 version = "0.1.0"
 dependencies = [
  "clap",
+ "console",
  "flate2",
  "indicatif",
  "inquire",

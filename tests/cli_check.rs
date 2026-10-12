@@ -635,7 +635,7 @@ fn an_app_mode_error_not_about_the_bundle_fails_check() {
     assert_eq!(ran.stdout, "");
     assert!(
         ran.stderr
-            .starts_with("rosie: `/usr/sbin/pkgutil --pkgs` failed"),
+            .starts_with("✗ `/usr/sbin/pkgutil --pkgs` failed"),
         "{}",
         ran.stderr
     );

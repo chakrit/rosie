@@ -25,6 +25,7 @@ use clap::Parser;
 use clap::error::ErrorKind;
 
 use crate::fs::{Backend, Paths, VersionCheck};
+use crate::output::{Line, Mark};
 use crate::packs::Network;
 use crate::run::RunStats;
 use crate::run::elevated::{self, Invocation};
@@ -126,11 +127,13 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     /// Prints the warnings of every system tool whose version rosie was not tested with;
     /// the command has run regardless.
     fn show_version_warnings(&mut self, status: ExitStatus) -> ExitStatus {
+        let palette = self.console.palette();
         let written: Result<(), std::io::Error> = self
             .backend
             .take_warnings()
             .iter()
-            .try_for_each(|warning| writeln!(self.console.stderr(), "{warning}"));
+            .map(|warning| palette.line(&Line::new(Mark::Warning, warning.to_string())))
+            .try_for_each(|line| writeln!(self.console.stderr(), "{line}"));
         match written {
             Ok(()) => status,
             Err(_) => ExitStatus::Failed,
@@ -175,7 +178,8 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     /// The environment could not be gathered (for example `$HOME` is not set); no
     /// command needing it ever ran.
     fn show_env_error(&mut self, reason: &str) -> ExitStatus {
-        match writeln!(self.console.stderr(), "rosie: {reason}") {
+        let line = self.console.palette().line(&Line::new(Mark::Error, reason));
+        match writeln!(self.console.stderr(), "{line}") {
             Ok(()) | Err(_) => ExitStatus::Failed,
         }
     }
@@ -199,14 +203,14 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             Error::Usage(_) => ExitStatus::Usage,
             _ => ExitStatus::Failed,
         };
+        let palette = self.console.palette();
         let written = match error {
-            Error::Root(RootError::Refused(refusal)) => {
-                writeln!(self.console.stderr(), "{refusal}")
-            }
-            // A usage message already reads as a full sentence to the user (it names
-            // `rosie` or starts with `usage:` itself), so it takes no extra prefix.
+            // A usage message reads like clap's own usage errors: no marker.
             Error::Usage(message) => writeln!(self.console.stderr(), "{message}"),
-            _ => writeln!(self.console.stderr(), "rosie: {error}"),
+            _ => {
+                let line = palette.line(&Line::new(Mark::Error, error.to_string()));
+                writeln!(self.console.stderr(), "{line}")
+            }
         };
         match written {
             Ok(()) => status,

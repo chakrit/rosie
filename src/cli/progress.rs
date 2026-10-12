@@ -6,8 +6,9 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::time::Duration;
 
-use indicatif::{ProgressBar, ProgressState, ProgressStyle};
+use indicatif::{ProgressBar, ProgressState};
 
+use crate::output::Palette;
 use crate::plan::Size;
 use crate::scan::Progress;
 
@@ -35,11 +36,11 @@ impl Counts {
 }
 
 impl StderrProgress {
-    pub fn new() -> Self {
+    pub fn new(palette: Palette) -> Self {
         let counts = Arc::new(Counts::default());
         let spinner = io::stderr()
             .is_terminal()
-            .then(|| spinner(Arc::clone(&counts)));
+            .then(|| spinner(Arc::clone(&counts), palette));
         StderrProgress { counts, spinner }
     }
 
@@ -48,12 +49,6 @@ impl StderrProgress {
         if let Some(spinner) = &self.spinner {
             spinner.finish_and_clear();
         }
-    }
-}
-
-impl Default for StderrProgress {
-    fn default() -> Self {
-        Self::new()
     }
 }
 
@@ -77,17 +72,15 @@ impl Progress for StderrProgress {
 }
 
 /// The spinner reads the counts on each tick, so workers only bump atomics.
-fn spinner(counts: Arc<Counts>) -> ProgressBar {
-    let style = ProgressStyle::with_template("{spinner} {summary}")
-        .unwrap_or_else(|error| unreachable!("the spinner template is fixed and valid: {error}"))
-        .with_key(
-            "summary",
-            move |_: &ProgressState, out: &mut dyn std::fmt::Write| {
-                // indicatif gives a key no way to report a failed write; it would only
-                // lose one frame of the spinner.
-                let _ = out.write_str(&counts.summary());
-            },
-        );
+fn spinner(counts: Arc<Counts>, palette: Palette) -> ProgressBar {
+    let style = palette.spinner("{spinner} {summary}").with_key(
+        "summary",
+        move |_: &ProgressState, out: &mut dyn std::fmt::Write| {
+            // indicatif gives a key no way to report a failed write; it would only
+            // lose one frame of the spinner.
+            let _ = out.write_str(&counts.summary());
+        },
+    );
     let spinner = ProgressBar::new_spinner().with_style(style);
     spinner.enable_steady_tick(TICK);
     spinner

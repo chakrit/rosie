@@ -5,25 +5,26 @@
 use std::fmt;
 
 use super::args::Mode;
+use crate::output::{Line, Mark};
 use crate::plan::Report;
 use crate::scan::{Problem, Refused, Scan, Skipped, WalkSkip, WalkSkips};
 
 /// Every skip and problem of `scan`, one per line. `mode` decides whether a walk-skip
 /// line may point to a flag: only the flags the mode that produced it actually accepts.
-pub(super) fn findings_lines(scan: &Scan, mode: &Mode) -> Vec<String> {
+pub(super) fn findings_lines(scan: &Scan, mode: &Mode) -> Vec<Line> {
     let skipped = scan
         .skipped
         .iter()
         .map(|skipped| walk_skip_line(skipped, mode));
     let refused = scan.refused.iter().map(refused_line);
     let reports = scan.plan.reports().iter().map(report_line);
-    let problems = scan.problems.iter().map(problem_line);
-
-    skipped
+    let skips = skipped
         .chain(refused)
         .chain(reports)
-        .chain(problems)
-        .collect()
+        .map(|text| Line::new(Mark::Skipped, text));
+    let problems = scan.problems.iter().map(problem_line);
+
+    skips.chain(problems).collect()
 }
 
 /// The stats lines: the plan's tallies, as scan and confirmation show them, or the
@@ -67,8 +68,8 @@ fn report_line(report: &Report) -> String {
     )
 }
 
-pub(super) fn problem_line(problem: &Problem) -> String {
-    format!("problem: {problem}")
+pub(super) fn problem_line(problem: &Problem) -> Line {
+    Line::new(Mark::Warning, problem.to_string())
 }
 
 #[cfg(test)]
@@ -94,10 +95,11 @@ mod tests {
 
         assert_eq!(
             findings_lines(&scan, &Mode::default()),
-            [
+            [Line::new(
+                Mark::Skipped,
                 "skipped login item Bar: rosie cannot remove it; by hand: Open System Settings > \
                  General > Login Items; Remove Bar"
-            ]
+            )]
         );
     }
 
@@ -117,7 +119,10 @@ mod tests {
 
         assert_eq!(
             findings_lines(&scan, &Mode::Orphans),
-            ["skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not downloaded"]
+            [Line::new(
+                Mark::Skipped,
+                "skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not downloaded"
+            )]
         );
     }
 
@@ -137,10 +142,11 @@ mod tests {
 
         assert_eq!(
             findings_lines(&scan, &Mode::default()),
-            [
+            [Line::new(
+                Mark::Skipped,
                 "skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not \
                  downloaded (use --enter-placeholders to open)"
-            ]
+            )]
         );
     }
 

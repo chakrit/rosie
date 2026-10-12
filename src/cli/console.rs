@@ -8,6 +8,7 @@ use inquire::{InquireError, MultiSelect, Select, Text};
 
 use super::progress::StderrProgress;
 use crate::fs::Argv;
+use crate::output::{ColorChoice, Palette};
 use crate::run::elevated::Stdin;
 use crate::run::{ItemResult, OutputWindow, PlainReporter, Reporter, TerminalReporter};
 use crate::scan::Progress;
@@ -48,6 +49,10 @@ pub trait Console {
     type Reporter: Reporter + Finish;
 
     fn terminals(&self) -> Terminals;
+
+    /// How stderr lines, spinners, and prompts look (`docs/spec/cli.md#output`).
+    fn palette(&self) -> Palette;
+
     fn stdout(&mut self) -> &mut Self::Out;
     fn stderr(&mut self) -> &mut Self::Err;
 
@@ -77,12 +82,14 @@ pub trait Console {
 /// The process's own standard streams, with `inquire` prompts.
 pub struct SystemConsole {
     terminals: Terminals,
+    palette: Palette,
     stdout: Stdout,
     stderr: Stderr,
 }
 
 impl SystemConsole {
-    pub fn new() -> Self {
+    /// `colors` is the user's `NO_COLOR`, which `main` reads.
+    pub fn new(colors: ColorChoice) -> Self {
         let terminals = Terminals {
             stdin: io::stdin().is_terminal(),
             stdout: io::stdout().is_terminal(),
@@ -90,15 +97,10 @@ impl SystemConsole {
         };
         SystemConsole {
             terminals,
+            palette: Palette::for_stderr(terminals.stderr, colors),
             stdout: io::stdout(),
             stderr: io::stderr(),
         }
-    }
-}
-
-impl Default for SystemConsole {
-    fn default() -> Self {
-        SystemConsole::new()
     }
 }
 
@@ -110,6 +112,10 @@ impl Console for SystemConsole {
 
     fn terminals(&self) -> Terminals {
         self.terminals
+    }
+
+    fn palette(&self) -> Palette {
+        self.palette
     }
 
     fn stdout(&mut self) -> &mut Stdout {
@@ -131,11 +137,15 @@ impl Console for SystemConsole {
     }
 
     fn ask(&mut self, prompt: &str) -> Result<String, PromptError> {
-        Text::new(prompt).prompt().map_err(prompt_error)
+        Text::new(prompt)
+            .with_render_config(self.palette.prompts())
+            .prompt()
+            .map_err(prompt_error)
     }
 
     fn pick(&mut self, prompt: &str, options: &[String]) -> Result<usize, PromptError> {
         Select::new(prompt, options.to_vec())
+            .with_render_config(self.palette.prompts())
             .raw_prompt()
             .map(|chosen| chosen.index)
             .map_err(prompt_error)
@@ -147,19 +157,20 @@ impl Console for SystemConsole {
         items: Vec<T>,
     ) -> Result<Vec<T>, PromptError> {
         MultiSelect::new(prompt, items)
+            .with_render_config(self.palette.prompts())
             .with_all_selected_by_default()
             .prompt()
             .map_err(prompt_error)
     }
 
     fn progress(&self) -> StderrProgress {
-        StderrProgress::new()
+        StderrProgress::new(self.palette)
     }
 
     fn reporter(&self) -> StderrReporter {
         match self.terminals.stderr {
-            true => StderrReporter::Terminal(TerminalReporter::default()),
-            false => StderrReporter::Plain(PlainReporter::new(io::stderr())),
+            true => StderrReporter::Terminal(TerminalReporter::new(self.palette)),
+            false => StderrReporter::Plain(PlainReporter::new(io::stderr(), self.palette)),
         }
     }
 }

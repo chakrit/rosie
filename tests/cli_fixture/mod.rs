@@ -16,6 +16,7 @@ use rosie::apps::{launch_jobs_argv, system_jobs_argv};
 use rosie::cli::{App, Console, Env, ExitStatus, PromptError, Terminals};
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{Argv, CommandOutput, Exit, Paths};
+use rosie::output::Palette;
 use rosie::run::PlainReporter;
 use rosie::run::elevated::Stdin;
 use rosie::scan::NoProgress;
@@ -324,6 +325,10 @@ impl Console for ScriptedConsole {
         self.script.terminals
     }
 
+    fn palette(&self) -> Palette {
+        Palette::plain()
+    }
+
     fn stdout(&mut self) -> &mut Shared {
         &mut self.out
     }
@@ -384,6 +389,6 @@ impl Console for ScriptedConsole {
     }
 
     fn reporter(&self) -> PlainReporter<Shared> {
-        PlainReporter::new(self.err.clone())
+        PlainReporter::new(self.err.clone(), Palette::plain())
     }
 }

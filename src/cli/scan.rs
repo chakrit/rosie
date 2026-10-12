@@ -11,6 +11,7 @@ use super::{Error, ExitStatus};
 use crate::apps;
 use crate::config::Config;
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
+use crate::output::Mark;
 use crate::packs::Network;
 use crate::plan::{ItemSize, Plan, PlanStats, Selection};
 use crate::run::{Elevation, Outcome, Runner, SkipReason};
@@ -200,7 +201,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             self.show_stats(&plan, skips)?;
             let conflicts = plan.conflicts().len();
             if plan.clean_entries().is_empty() && conflicts == 0 {
-                self.note("nothing to clean")?;
+                self.note(Mark::Note, "nothing to clean")?;
                 return Ok(Confirmation::NothingClean);
             }
 
@@ -212,12 +213,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             match (answer, conflicts) {
                 (Answer::Yes, 0) => return Ok(Confirmation::Run(plan)),
                 (Answer::Yes, _) => {
-                    self.note(&format!(
-                        "{conflicts} rule conflict(s) must be resolved first: answer e"
-                    ))?;
+                    self.note(
+                        Mark::Warning,
+                        &format!("{conflicts} rule conflict(s) must be resolved first: answer e"),
+                    )?;
                 }
                 (Answer::No, _) => {
-                    self.note("nothing cleaned")?;
+                    self.note(Mark::Note, "nothing cleaned")?;
                     return Ok(Confirmation::Declined);
                 }
                 (Answer::Edit, _) => plan = self.edit(plan)?,
@@ -290,7 +292,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         for refused in skips.refused {
             stats.record(ItemSize::Known(refused.size), RUNNING_PROCESS);
         }
-        self.note(stats_lines(stats, skips.walk).trim_end())?;
+        self.note(Mark::Note, stats_lines(stats, skips.walk).trim_end())?;
         Ok(stats.any_failed())
     }
 
@@ -298,13 +300,16 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     fn show_findings(&mut self, scan: &Scan, mode: &Mode) -> Result<(), Error> {
         for line in findings_lines(scan, mode) {
-            self.note(&line)?;
+            self.note(line.mark, &line.text)?;
         }
         Ok(())
     }
 
     fn show_stats(&mut self, plan: &Plan, skips: WalkSkips) -> Result<(), Error> {
-        self.note(stats_lines(PlanStats::of(plan), skips).trim_end())?;
+        self.note(
+            Mark::Note,
+            stats_lines(PlanStats::of(plan), skips).trim_end(),
+        )?;
         Ok(())
     }
 }

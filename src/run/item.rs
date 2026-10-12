@@ -24,7 +24,8 @@ pub enum Subject {
 }
 
 /// `deleted /path (1.2 GB)`, `skipped (stale) /path (1.2 GB): no longer exists`, or
-/// `ran docker system prune --force` followed by its kept output lines.
+/// `ran docker system prune --force` followed by its kept output lines, each as `| line`
+/// for the stderr line to indent under the text.
 impl fmt::Display for ItemResult {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let verb = match (&self.subject, self.outcome) {
@@ -47,7 +48,7 @@ impl fmt::Display for ItemResult {
         }
         if let Subject::Command { output, .. } = &self.subject {
             for line in output {
-                write!(f, "\n  | {line}")?;
+                write!(f, "\n| {line}")?;
             }
         }
         Ok(())

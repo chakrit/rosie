@@ -10,6 +10,7 @@ use super::root::refuse_root;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
 use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, UserInput};
+use crate::output::{Line, Mark};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
 use crate::rules::{Name, RuleLayers, RuleSet};
 use crate::scan::{Scanner, Settings};
@@ -121,10 +122,10 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         self.show_first_run(&seed.first_run)?;
         let seeded = config::load_or_seed(&self.own, &dir, &seed.config)?;
         let path = config::config_path(&dir);
-        self.note(&format!(
-            "created {} from the default config",
-            path.display()
-        ))?;
+        self.note(
+            Mark::Done,
+            &format!("created {} from the default config", path.display()),
+        )?;
         Ok(seeded)
     }
 
@@ -141,7 +142,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
         self.show_first_run(&first_run)?;
         if let Some(warning) = warning {
-            self.note(&warning.to_string())?;
+            self.note(Mark::Warning, &warning.to_string())?;
         }
 
         let layers = RuleLayers::new(packs, &self.env.paths.config_dir());
@@ -200,16 +201,20 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         writeln!(self.console.stdout(), "{text}")
     }
 
-    /// A line on stderr.
-    pub fn note(&mut self, text: &str) -> io::Result<()> {
-        writeln!(self.console.stderr(), "{text}")
+    /// A line on stderr, marked as `mark` (`docs/spec/cli.md#output`).
+    pub fn note(&mut self, mark: Mark, text: &str) -> io::Result<()> {
+        let line = self.console.palette().line(&Line::new(mark, text));
+        writeln!(self.console.stderr(), "{line}")
     }
 
     fn show_first_run(&mut self, first_run: &FirstRun) -> io::Result<()> {
         let FirstRun::Pulled(pulled) = first_run else {
             return Ok(());
         };
-        self.note(&format!("no rule pack yet; pulled {}", pulled.source))
+        self.note(
+            Mark::Note,
+            &format!("no rule pack yet; pulled {}", pulled.source),
+        )
     }
 
     // pickers

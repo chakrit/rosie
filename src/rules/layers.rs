@@ -123,7 +123,7 @@ fn apply_user_rule(
 }
 
 /// The identity a user rule's key names: a rule of the `user` pack, or the pack rule a
-/// qualified key overrides.
+/// qualified key overrides, spelled as its pack spells it.
 fn user_rule_identity(
     loaded: &BTreeMap<RuleId, Rule>,
     key: &str,
@@ -142,10 +142,13 @@ fn user_rule_identity(
     }
 
     let id = RuleId::parse_qualified(key).map_err(name_problem)?;
-    let from_a_pack = !id.pack.is_user() && loaded.contains_key(&id);
-    match from_a_pack {
-        true => Ok((id, Source::UserOverride)),
-        false => Err(Error::UnknownOverride {
+    let overridden = loaded
+        .get_key_value(&id)
+        .map(|(found, _)| found)
+        .filter(|found| !found.pack.is_user());
+    match overridden {
+        Some(found) => Ok((found.clone(), Source::UserOverride)),
+        None => Err(Error::UnknownOverride {
             file: file.into(),
             rule: id,
         }),

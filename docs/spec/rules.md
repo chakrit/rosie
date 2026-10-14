@@ -152,4 +152,7 @@ A later layer overrides a rule by its qualified name, e.g. `[rules."rosie/docker
 override replaces the whole rule. Rules cannot be disabled individually: a pack is used
 whole or removed.
 
+An override whose pack name differs from the pack's only in ASCII case keeps the pack's
+spelling. *(agent-inferred)*
+
 Rules and packs cannot add `roots` ([safety.md](safety.md#roots)).

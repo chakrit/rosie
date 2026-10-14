@@ -162,6 +162,27 @@ fn a_user_override_replaces_the_whole_rule_under_its_identity() {
     );
 }
 
+/// `docs/spec/rules.md#packs`: pack names compare ignoring ASCII case; the override
+/// keeps the pack's own spelling.
+#[test]
+fn an_override_spelled_in_another_case_keeps_the_packs_spelling() {
+    let fake = FakeBackend::new();
+    fake.add_file(
+        format!("{ROSIE_PACK}/docker.toml"),
+        "[rules.docker]\nstrategy = \"tool\"\ncmd = \"docker system prune --force\"",
+    );
+    fake.add_file(
+        format!("{USER_RULES}/docker.toml"),
+        "[rules.\"Rosie/docker\"]\nstrategy = \"path\"\npaths = [\"~/.docker/buildx\"]",
+    );
+
+    let rules = loaded(&fake);
+
+    assert_eq!(ids(&rules), vec!["rosie/docker"]);
+    let docker = rules.iter().next().expect("one rule");
+    assert_eq!(docker.source(), Source::UserOverride);
+}
+
 #[test]
 fn refuses_an_override_of_a_rule_no_pack_defines() {
     let fake = FakeBackend::new();

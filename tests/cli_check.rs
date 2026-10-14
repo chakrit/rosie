@@ -29,16 +29,30 @@ struct Line {
 
 /// The line `check` printed for the path shown as `shown`.
 fn line_for(ran: &Ran, shown: &str) -> Line {
-    let lines: Vec<Line> = ran.stdout.lines().map(columns).collect();
+    let lines: Vec<Line> = rows(&ran.stdout).iter().map(|row| columns(row)).collect();
     lines
         .into_iter()
         .find(|line| line.path == shown)
         .unwrap_or_else(|| panic!("no line for {shown}:\n{}", ran.stdout))
 }
 
+/// Each printed line with the indented lines that continue its reason, joined by `\n`.
+fn rows(stdout: &str) -> Vec<String> {
+    let mut rows: Vec<String> = Vec::new();
+    for text in stdout.lines() {
+        match (text.starts_with(' '), rows.last_mut()) {
+            (true, Some(row)) => row.push_str(&format!("\n{}", text.trim())),
+            _ => rows.push(text.to_owned()),
+        }
+    }
+    rows
+}
+
 /// Columns are separated by at least two spaces; no column holds two spaces in a row.
+/// Lines after the first continue the reason.
 fn columns(text: &str) -> Line {
-    let parts: Vec<&str> = text
+    let (first, more) = text.split_once('\n').unwrap_or((text, ""));
+    let parts: Vec<&str> = first
         .split("  ")
         .map(str::trim)
         .filter(|part| !part.is_empty())
@@ -49,7 +63,11 @@ fn columns(text: &str) -> Line {
     Line {
         status: (*status).to_owned(),
         path: (*path).to_owned(),
-        reason: (*reason).to_owned(),
+        reason: [*reason, more]
+            .into_iter()
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>()
+            .join("\n"),
     }
 }
 
@@ -103,6 +121,25 @@ fn a_path_inside_a_matched_folder_names_the_entry_holding_it() {
             "~/src/app/node_modules/left-pad",
             "inside ~/src/app/node_modules (rosie/node-modules)"
         )
+    );
+}
+
+#[test]
+fn needs_sudo_comes_before_the_hints_so_they_can_continue_below() {
+    let sandbox = Sandbox::with_roots(&[CWD]);
+    sandbox.node_project(&format!("{HOME}/other/app"));
+    sandbox
+        .fake
+        .chown(format!("{HOME}/other/app/node_modules"), 0);
+
+    let ran = check(&sandbox, &[&format!("{HOME}/other/app/node_modules")]);
+
+    assert_eq!(
+        line_for(&ran, "~/other/app/node_modules").reason,
+        "needs sudo; to allow just it:\n\
+         rosie roots add ~/other/app/node_modules\n\
+         or to allow its folder:\n\
+         rosie roots add ~/other/app"
     );
 }
 
@@ -167,7 +204,10 @@ fn an_item_outside_the_roots_names_the_roots_add_that_allows_it() {
         line(
             "outside-roots",
             "~/other/app/node_modules",
-            "to allow it, add it or a folder above it: rosie roots add ~/other/app/node_modules"
+            "to allow just it:\n\
+             rosie roots add ~/other/app/node_modules\n\
+             or to allow its folder:\n\
+             rosie roots add ~/other/app"
         )
     );
 }
@@ -658,12 +698,19 @@ fn prints_one_line_per_path_in_columns_as_wide_as_the_widest_entry() {
         ],
     );
 
+    // Lines that continue a reason start at its column.
+    let reason_column = " ".repeat("outside-roots  ~/src/app/node_modules  ".len());
     ran.assert_status(ExitStatus::Success);
     assert_eq!(
         ran.stdout,
-        "clean          ~/src/app/node_modules  rosie/node-modules (normal)\n\
-         outside-roots  ~/x/node_modules        to allow it, add it or a folder above it: rosie roots add ~/x/node_modules\n\
-         no rule        ~/src/app/src           does not exist\n"
+        format!(
+            "clean          ~/src/app/node_modules  rosie/node-modules (normal)\n\
+             outside-roots  ~/x/node_modules        to allow just it:\n\
+             {reason_column}  rosie roots add ~/x/node_modules\n\
+             {reason_column}or to allow its folder:\n\
+             {reason_column}  rosie roots add ~/x\n\
+             no rule        ~/src/app/src           does not exist\n"
+        )
     );
 }
 

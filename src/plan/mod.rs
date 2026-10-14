@@ -23,7 +23,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use crate::fs::{Argv, FileKind, ShellCommand, SystemArgv, SystemTool};
-use crate::shell;
+use crate::hint::{self, Hint};
 
 use deletes::Deletes;
 
@@ -125,11 +125,16 @@ impl Plan {
     }
 }
 
-/// What an `outside-roots` entry shows: `outside roots. To allow it, add it or a folder
-/// above it: rosie roots add <path>`, with the path quoted to paste into a shell.
+/// What an `outside-roots` entry shows: `outside roots`, then the hints that would let
+/// it in on the lines below.
 fn outside_roots_hint(path: &Path) -> String {
-    let path = shell::quote_word(&path.to_string_lossy());
-    format!("outside roots. To allow it, add it or a folder above it: rosie roots add {path}")
+    let hints = hint::hints_text(&Hint::allow_in_roots(path));
+    format!("outside roots\n{hints}")
+}
+
+/// `text` as comment lines, so no line of it can run or parse as TOML.
+fn comment(text: &str) -> String {
+    text.lines().map(|line| format!("# {line}\n")).collect()
 }
 
 /// A NUL byte ends a path or an argument at the operating system, so the item a run

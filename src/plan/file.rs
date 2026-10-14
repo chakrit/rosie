@@ -16,7 +16,7 @@ use serde::{Deserialize, Serialize};
 use super::conflict::conflict_hint;
 use super::{
     Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, Status, StatusKind, Tool, check_path, outside_roots_hint,
+    Selection, Size, Status, StatusKind, Tool, check_path, comment, outside_roots_hint,
 };
 use crate::fs::ShellCommand;
 
@@ -80,7 +80,7 @@ impl Plan {
 fn push_entry(text: &mut String, note: Option<String>, entry: PlanFile) -> Result<(), Error> {
     text.push('\n');
     if let Some(note) = note {
-        text.push_str(&format!("# {note}\n"));
+        text.push_str(&comment(&note));
     }
     text.push_str(&toml::to_string(&entry)?);
     Ok(())
@@ -679,8 +679,12 @@ mod tests {
         assert!(text.contains("# size unknown\n[[forget]]"), "{text}");
         assert!(
             text.contains(
-                "# 1.2 MB; outside roots. To allow it, add it or a folder above it: \
-                 rosie roots add '/elsewhere/it'\\''s \"odd\"'$'\\012''$x'\n"
+                "# 1.2 MB; outside roots\n\
+                 # to allow just it:\n\
+                 #   rosie roots add '/elsewhere/it'\\''s \"odd\"'$'\\012''$x'\n\
+                 # or to allow its folder:\n\
+                 #   rosie roots add /elsewhere\n\
+                 [[delete]]\n"
             ),
             "{text}"
         );

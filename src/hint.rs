@@ -4,7 +4,7 @@
 //! command, key, or flag that does not exist.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use crate::config::{WalkKey, WalkSetting};
 use crate::fs::EnterLinks;
@@ -39,6 +39,23 @@ impl Hint {
         Hint {
             label: label.into(),
             steps: Vec::new(),
+        }
+    }
+
+    /// The ways to let an item outside the roots in: add the item itself, or the folder
+    /// holding it unless that folder is `/` (`docs/spec/cli.md#check`).
+    pub fn allow_in_roots(item: &Path) -> Vec<Hint> {
+        let add = |path: &Path| [Command::RootsAdd(path.to_path_buf())];
+        let folder = item
+            .parent()
+            .filter(|folder| !folder.as_os_str().is_empty() && *folder != Path::new("/"));
+
+        match folder {
+            Some(folder) => vec![
+                Hint::run("to allow just it", add(item)),
+                Hint::run("to allow its folder", add(folder)),
+            ],
+            None => vec![Hint::run("to allow it", add(item))],
         }
     }
 }
@@ -188,12 +205,22 @@ fn flag(setting: WalkSetting) -> &'static str {
     }
 }
 
-/// A word the shell gives rosie as `text`. A path under `~/` keeps its `~/` outside the
-/// quotes, so the shell expands it as it does when the user types it.
+/// A word the shell gives rosie as `text`. Home, `~`, and a path under `~/` keep the `~`
+/// outside the quotes, so the shell expands it as it does when the user types it.
 fn shell_word(text: &str) -> String {
-    match text.strip_prefix("~/") {
-        Some(rest) => format!("~/{}", quote_word(rest)),
-        None => quote_word(text),
+    match (text, text.strip_prefix("~/")) {
+        ("~", _) => "~".to_owned(),
+        (_, Some(rest)) => format!("~/{}", quote_word(rest)),
+        (_, None) => quote_word(text),
+    }
+}
+
+/// Hints as text that follows what they are about: one hint compact on the same line;
+/// several as their [`hint_lines`], the first on the same line, uncolored.
+pub fn hints_text(hints: &[Hint]) -> String {
+    match hints {
+        [hint] => hint.compact(),
+        several => hint_lines(Palette::plain(), several).join("\n"),
     }
 }
 
@@ -234,7 +261,24 @@ mod tests {
         assert_eq!(spaced.to_string(), "rosie roots add '/Users/me/My Code'");
         assert_eq!(home.to_string(), "rosie roots remove ~/.cargo/registry");
         assert_eq!(odd_home.to_string(), "rosie roots remove ~/'My Code'");
+        assert_eq!(
+            Command::RootsAdd(PathBuf::from("~")).to_string(),
+            "rosie roots add ~"
+        );
         assert_eq!(Command::RootsAddAny.to_string(), "rosie roots add <path>");
+    }
+
+    #[test]
+    fn an_item_in_the_top_folder_is_allowed_only_by_itself() {
+        let hints = Hint::allow_in_roots(Path::new("/x"));
+
+        assert_eq!(
+            hints,
+            [Hint::run(
+                "to allow it",
+                [Command::RootsAdd(PathBuf::from("/x"))]
+            )]
+        );
     }
 
     #[test]

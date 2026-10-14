@@ -16,7 +16,7 @@
 use std::path::Path;
 
 use super::conflict::conflict_hint;
-use super::{Error, Plan, Status, outside_roots_hint};
+use super::{Error, Plan, Status, comment, outside_roots_hint};
 use crate::fs::Argv;
 use crate::shell;
 
@@ -115,10 +115,13 @@ impl Line {
 
     fn render(&self, command: &str) -> String {
         match &self.status {
-            Status::Clean => format!("\n# {}\n{command}\n", self.note),
-            Status::Keep => format!("\n# keep: {}\n# {command}\n", self.note),
+            Status::Clean => format!("\n{}{command}\n", comment(&self.note)),
+            Status::Keep => format!(
+                "\n{}# {command}\n",
+                comment(&format!("keep: {}", self.note))
+            ),
             Status::OutsideRoots | Status::Conflict(_) => {
-                format!("\n# {}\n# {command}\n", self.note)
+                format!("\n{}# {command}\n", comment(&self.note))
             }
         }
     }
@@ -407,7 +410,16 @@ mod tests {
                 .contains("\n# ( exec -- /bin/bash -c 'tool clean --dir=/tmp/x$y' ) </dev/null\n"),
             "{script}"
         );
-        assert!(script.contains("rosie roots add "), "{script}");
+        assert!(
+            script.contains(&format!(
+                "\n# to allow just it:\n\
+                 #   rosie roots add {}\n\
+                 # or to allow its folder:\n\
+                 #   rosie roots add /x/w\n",
+                shell::quote_word(&format!("/x{HOSTILE}"))
+            )),
+            "{script}"
+        );
     }
 
     #[test]

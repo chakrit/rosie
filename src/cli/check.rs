@@ -21,7 +21,7 @@ use super::session::Session;
 use super::{Error, ExitStatus};
 use crate::apps;
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
-use crate::hint::{Command, Flag, Hint};
+use crate::hint::{Command, Flag, Hint, hints_text};
 use crate::packs::Network;
 use crate::plan::{Delete, Disagreement, PlanStats, RunAs, StatusKind, Tally};
 use crate::scan::{
@@ -189,20 +189,22 @@ impl Word {
     }
 }
 
-/// The lines in columns: each column as wide as its widest entry, two spaces apart.
+/// The lines in columns: each column as wide as its widest entry, two spaces apart. A
+/// reason's later lines start at the reason column.
 fn layout(lines: &[Line]) -> Vec<String> {
     let width = |column: fn(&Line) -> usize| lines.iter().map(column).max().unwrap_or(0);
     let status_width = width(|line| line.word.label().chars().count());
     let path_width = width(|line| line.path.chars().count());
+    let reason_column = format!("\n{}", " ".repeat(status_width + 2 + path_width + 2));
 
     lines
         .iter()
         .map(|line| {
+            let reason = line.reason.replace('\n', &reason_column);
             format!(
-                "{:<status_width$}  {:<path_width$}  {}",
+                "{:<status_width$}  {:<path_width$}  {reason}",
                 line.word.label(),
                 line.path,
-                line.reason
             )
         })
         .collect()
@@ -270,7 +272,7 @@ fn line(verdict: &PathVerdict, path: &Path, shown: &Shown) -> Line {
 }
 
 /// `rosie/node-modules (normal)` at the entry, `inside <entry> (<rules>)` below it,
-/// then what would change its status, and `needs sudo` when it is not the user's.
+/// `needs sudo` when it is not the user's, then the hints that would change its status.
 fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown) -> String {
     let rules = delete.rules.join(", ");
     let what = match (place, planned) {
@@ -280,19 +282,16 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
         (Place::At, Planned::OutsideRoots) => None,
         (Place::At, Planned::Conflict(disagreement)) => Some(sides(disagreement)),
     };
-    let hint = match planned {
-        Planned::Clean(_) => None,
-        Planned::Keep => Some(Hint::flag("to clean it", Flag::Aggressive)),
-        Planned::OutsideRoots => Some(Hint::run(
-            "to allow it, add it or a folder above it",
-            [Command::RootsAdd(PathBuf::from(shown.path(&delete.path)))],
-        )),
-        Planned::Conflict(_) => Some(Hint::by_hand("choose clean or keep in the plan")),
-    };
-    let hint = hint.map(|hint| hint.compact());
     let sudo = (delete.run_as == RunAs::Sudo).then(|| "needs sudo".to_owned());
+    let hints = match planned {
+        Planned::Clean(_) => Vec::new(),
+        Planned::Keep => vec![Hint::flag("to clean it", Flag::Aggressive)],
+        Planned::OutsideRoots => Hint::allow_in_roots(&PathBuf::from(shown.path(&delete.path))),
+        Planned::Conflict(_) => vec![Hint::by_hand("choose clean or keep in the plan")],
+    };
+    let hints = (!hints.is_empty()).then(|| hints_text(&hints));
 
-    let parts: Vec<String> = [what, hint, sudo].into_iter().flatten().collect();
+    let parts: Vec<String> = [what, sudo, hints].into_iter().flatten().collect();
     parts.join("; ")
 }
 

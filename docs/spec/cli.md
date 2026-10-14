@@ -71,7 +71,10 @@ clean          ~/src/app/node_modules                 rosie/node-modules (normal
 clean          ~/src/app/node_modules/react           inside ~/src/app/node_modules (rosie/node-modules)
 clean          ~/Library/Developer/Xcode/DerivedData  rosie/xcode-derived-data (normal); needs sudo
 keep           ~/src/old/.venv                        rosie/python-venv (aggressive); to clean it: --aggressive
-outside-roots  ~/Library/Caches/com.foo.Bar           to allow it, add it or a folder above it: rosie roots add ~/Library/Caches/com.foo.Bar
+outside-roots  ~/Library/Caches/com.foo.Bar           to allow just it:
+                                                        rosie roots add ~/Library/Caches/com.foo.Bar
+                                                      or to allow its folder:
+                                                        rosie roots add ~/Library/Caches
 conflict       ~/src/api/target                       rosie/cargo-target (normal) vs alice/rust (aggressive, on target/debug); choose clean or keep in the plan
 conflict       ~/src/api/target/debug                 rosie/cargo-target (normal, on ~/src/api/target) vs alice/rust (aggressive); choose clean or keep in the plan
 clean          ~/src/web                              contains 3 items: 2 clean (1.4 GB), 1 keep (210 MB); see rosie scan tree ~/src/web
@@ -101,10 +104,12 @@ no rule        ~/Downloads/missing                    does not exist
   *(agent-inferred)*
 - A `keep`, `outside-roots`, or `conflict` line carries its hint inside an entry too.
   *(agent-inferred)*
-- `; needs sudo` ends every line about an entry not owned by the user, inside lines
-  included. *(agent-inferred)*
-- An `outside-roots` hint names the entry's path, as the plan's hint does, and notes
-  that a folder above it can be added instead.
+- `needs sudo` follows the description on every line about an entry not owned by the
+  user, inside lines included, before any hint. *(agent-inferred)*
+- An `outside-roots` line lists the ways to allow it, one of which is enough: the entry
+  itself (`to allow just it`) or the folder holding it (`or to allow its folder`). When
+  that folder is `/`, only the entry is listed, as `to allow it`. The plan file lists
+  the same.
 - A conflict found by a `tree` or `caches` walk is at one path, so neither side names an
   `on <path>`, and a conflict nested in another, as in the example's `~/src/api/target`
   and `~/src/api/target/debug` lines, does not arise. *(agent-inferred)*
@@ -234,7 +239,8 @@ Every line rosie writes to stderr starts with a marker in the first column:
 - Failures the user cannot act on (the elevation protocol, plan files a scan never
   writes, pack archive tampering, Lua runtime errors, unexpected `launchctl` output)
   carry the problem line only.
-- `rosie check` lines and plan TOML comments show the first hint.
+- `rosie check` lines and plan TOML comments show one hint on the line. Several follow on
+  the lines below in the stderr form, each line of a plan comment commented out.
 
 ## Configuration
 

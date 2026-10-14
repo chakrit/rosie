@@ -21,7 +21,11 @@ sits inside the delete that holds its plist:
 # Delete any entry you do not want, then: rosie run <this file>
 version = 1
 
-# 4.1 KB; outside roots. To allow it, add it or a folder above it: rosie roots add /Library/LaunchDaemons/com.x.plist
+# 4.1 KB; outside roots
+# to allow just it:
+#   rosie roots add /Library/LaunchDaemons/com.x.plist
+# or to allow its folder:
+#   rosie roots add /Library/LaunchDaemons
 [[delete]]
 path = "/Library/LaunchDaemons/com.x.plist"
 type = "file"

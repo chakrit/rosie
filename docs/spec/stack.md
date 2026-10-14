@@ -16,6 +16,11 @@ Status: accepted.
 - No `#![deny(warnings)]`; a clean `cargo clippy --all-targets --all-features` is the
   gate.
 
+## Disk space
+
+- Monitor disk space and clean as you go, regularly.
+- Keep monitoring while subagents build and during anything else that eats up space.
+
 ## Crates
 
 | Crate                         | Use                                                                  |

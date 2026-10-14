@@ -21,6 +21,8 @@ rebuilding rosie. See `docs/spec/` for the design.
 - `cargo build` — build.
 - `cargo test` — tests.
 - `cargo clippy --all-targets --all-features` — must be clean before work is done.
+- Watch disk space and clean as you go, including during subagent builds
+  (`docs/spec/stack.md#disk-space`).
 
 ## Conventions
 

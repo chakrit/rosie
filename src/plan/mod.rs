@@ -29,7 +29,7 @@ use deletes::Deletes;
 
 pub use builder::{AggressiveItems, AgreedTiers, Built, PathMatch, PlanBuilder, Reach};
 pub use conflict::Disagreement;
-pub use error::Error;
+pub use error::{EntryProblem, Error};
 pub use size::Size;
 pub use stats::{ItemSize, PlanStats, Tally};
 pub use trim::CleanEntry;

@@ -15,8 +15,9 @@ use serde::{Deserialize, Serialize};
 
 use super::conflict::conflict_hint;
 use super::{
-    Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, Status, StatusKind, Tool, check_path, comment, outside_roots_hint,
+    Bootout, Delete, Deletes, EntryProblem, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
+    Report, RunAs, Selection, Size, Status, StatusKind, Tool, check_path, comment,
+    outside_roots_hint,
 };
 use crate::fs::ShellCommand;
 
@@ -253,7 +254,7 @@ impl PlanFile {
 fn numbered<T, E>(
     section: &'static str,
     tables: Vec<T>,
-    convert: impl Fn(T) -> Result<E, String>,
+    convert: impl Fn(T) -> Result<E, EntryProblem>,
 ) -> Result<Vec<E>, Error> {
     tables
         .into_iter()
@@ -262,21 +263,20 @@ fn numbered<T, E>(
             convert(table).map_err(|problem| Error::InvalidEntry {
                 section,
                 number: index + 1,
-                problem,
+                problem: Box::new(problem),
             })
         })
         .collect()
 }
 
 impl DeleteTable {
-    fn into_delete(self) -> Result<Delete, String> {
+    fn into_delete(self) -> Result<Delete, EntryProblem> {
         let path = absolute_path("path", self.path)?;
         let Some(kind) = ItemKind::parse(&self.kind) else {
-            let kinds = ItemKind::ALL.map(ItemKind::label).join(", ");
-            return Err(format!("type {:?} is not one of {kinds}", self.kind));
+            return Err(EntryProblem::UnknownKind { text: self.kind });
         };
         let Some(bytes) = self.size else {
-            return Err("size is missing".to_owned());
+            return Err(EntryProblem::MissingSize);
         };
         let status = status(&self.status)?;
         let run_as = match self.sudo {
@@ -305,20 +305,16 @@ impl DeleteTable {
 impl BootoutTable {
     /// A bootout belongs to the delete whose path is its plist or holds it, so it runs
     /// exactly when that delete does.
-    fn into_bootout(self, delete_path: &Path) -> Result<Bootout, String> {
+    fn into_bootout(self, delete_path: &Path) -> Result<Bootout, EntryProblem> {
         let plist = absolute_path("bootout plist", self.plist)?;
         if !plist.starts_with(delete_path) {
-            return Err(format!(
-                "bootout plist {:?} is not inside path {:?}",
-                plist.display().to_string(),
-                delete_path.display().to_string()
-            ));
+            return Err(EntryProblem::PlistOutsideDelete {
+                plist,
+                path: delete_path.to_path_buf(),
+            });
         }
         let Some(domain) = LaunchDomain::parse(&self.domain) else {
-            return Err(format!(
-                "bootout domain {:?} is not system or gui/<uid>",
-                self.domain
-            ));
+            return Err(EntryProblem::UnknownDomain { text: self.domain });
         };
         Ok(Bootout { plist, domain })
     }
@@ -326,24 +322,23 @@ impl BootoutTable {
 
 /// A delete carries one bootout per plist, whatever the domain, as the plan builder
 /// writes it.
-fn refuse_repeated_plists(bootouts: &[Bootout]) -> Result<(), String> {
+fn refuse_repeated_plists(bootouts: &[Bootout]) -> Result<(), EntryProblem> {
     let mut seen = HashSet::new();
     match bootouts.iter().find(|bootout| !seen.insert(&bootout.plist)) {
-        Some(repeated) => Err(format!(
-            "bootout plist {:?} is listed twice",
-            repeated.plist.display().to_string()
-        )),
+        Some(repeated) => Err(EntryProblem::RepeatedPlist {
+            plist: repeated.plist.clone(),
+        }),
         None => Ok(()),
     }
 }
 
 impl ToolTable {
-    fn into_tool(self) -> Result<Tool, String> {
+    fn into_tool(self) -> Result<Tool, EntryProblem> {
         if self.shell.is_empty() {
-            return Err("shell is missing".to_owned());
+            return Err(EntryProblem::MissingShell);
         }
         let command =
-            ShellCommand::new(self.shell, self.cmd, self.env).map_err(|error| error.to_string())?;
+            ShellCommand::new(self.shell, self.cmd, self.env).map_err(EntryProblem::Command)?;
         let selection = selection(&self.status)?;
         Ok(Tool {
             rule: self.rule,
@@ -354,55 +349,52 @@ impl ToolTable {
 }
 
 impl ForgetTable {
-    fn into_receipt(self) -> Result<Receipt, String> {
-        let package = Package::new(self.package).map_err(|error| error.to_string())?;
+    fn into_receipt(self) -> Result<Receipt, EntryProblem> {
+        let package = Package::new(self.package).map_err(EntryProblem::Value)?;
         let selection = selection(&self.status)?;
         Ok(Receipt { package, selection })
     }
 }
 
 impl ReportTable {
-    fn into_report(self) -> Result<Report, String> {
-        Report::new(self.subject, self.steps).map_err(|error| error.to_string())
+    fn into_report(self) -> Result<Report, EntryProblem> {
+        Report::new(self.subject, self.steps).map_err(EntryProblem::Value)
     }
 }
 
-fn absolute_path(field: &str, text: String) -> Result<PathBuf, String> {
+fn absolute_path(field: &'static str, text: String) -> Result<PathBuf, EntryProblem> {
     let path = PathBuf::from(text);
     match check_path(&path) {
         Ok(()) => Ok(path),
-        Err(error) => Err(format!("{field} {error}")),
+        Err(source) => Err(EntryProblem::Path { field, source }),
     }
 }
 
-fn status(text: &str) -> Result<Status, String> {
+fn status(text: &str) -> Result<Status, EntryProblem> {
     let Some(kind) = StatusKind::parse(text) else {
-        let statuses = StatusKind::ALL.map(StatusKind::label).join(", ");
-        return Err(format!("status {text:?} is not one of {statuses}"));
+        return Err(EntryProblem::UnknownStatus {
+            text: text.to_owned(),
+        });
     };
 
     match kind {
         StatusKind::Clean => Ok(Status::Clean),
         StatusKind::Keep => Ok(Status::Keep),
         StatusKind::OutsideRoots => Ok(Status::OutsideRoots),
-        StatusKind::Conflict => Err(format!(
-            "status {text:?} is a rule conflict; resolve it to {} or {}",
-            StatusKind::Clean.label(),
-            StatusKind::Keep.label()
-        )),
+        StatusKind::Conflict => Err(EntryProblem::ConflictStatus {
+            text: text.to_owned(),
+        }),
     }
 }
 
 /// Commands are outside the roots gate, so they are never `outside-roots`.
-fn selection(text: &str) -> Result<Selection, String> {
+fn selection(text: &str) -> Result<Selection, EntryProblem> {
     match StatusKind::parse(text) {
         Some(StatusKind::Clean) => Ok(Selection::Clean),
         Some(StatusKind::Keep) => Ok(Selection::Keep),
-        _ => Err(format!(
-            "status {text:?} is not one of {}, {}",
-            StatusKind::Clean.label(),
-            StatusKind::Keep.label()
-        )),
+        _ => Err(EntryProblem::UnknownSelection {
+            text: text.to_owned(),
+        }),
     }
 }
 
@@ -726,7 +718,7 @@ mod tests {
         let parsed = Plan::parse(&resolved).expect("resolved plan parses");
 
         assert!(
-            matches!(&refused, Err(Error::InvalidEntry { problem, .. }) if problem.contains("rule conflict")),
+            matches!(&refused, Err(Error::InvalidEntry { problem, .. }) if matches!(**problem, EntryProblem::ConflictStatus { .. })),
             "{refused:?}"
         );
         assert_eq!(parsed.deletes()[0].status, Status::Keep);

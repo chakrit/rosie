@@ -2,7 +2,8 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::LaunchDomain;
+use super::{ItemKind, LaunchDomain, StatusKind};
+use crate::fs::InvalidCommand;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -59,7 +60,7 @@ pub enum Error {
         section: &'static str,
         /// 1-based, as a reader counts the entries in the file.
         number: usize,
-        problem: String,
+        problem: Box<EntryProblem>,
     },
 
     #[error("cannot read the plan: {0}")]
@@ -67,4 +68,66 @@ pub enum Error {
 
     #[error("cannot write the plan: {0}")]
     Serialize(#[from] toml::ser::Error),
+}
+
+/// Why one entry of a plan file cannot be read back.
+#[derive(Debug, Error)]
+pub enum EntryProblem {
+    #[error("{field} {source}")]
+    Path {
+        field: &'static str,
+        #[source]
+        source: Error,
+    },
+
+    #[error(
+        "type {text:?} is not one of {}",
+        ItemKind::ALL.map(ItemKind::label).join(", ")
+    )]
+    UnknownKind { text: String },
+
+    #[error("size is missing")]
+    MissingSize,
+
+    #[error(
+        "status {text:?} is not one of {}",
+        StatusKind::ALL.map(StatusKind::label).join(", ")
+    )]
+    UnknownStatus { text: String },
+
+    #[error(
+        "status {text:?} is a rule conflict; resolve it to {} or {}",
+        StatusKind::Clean.label(),
+        StatusKind::Keep.label()
+    )]
+    ConflictStatus { text: String },
+
+    #[error(
+        "status {text:?} is not one of {}, {}",
+        StatusKind::Clean.label(),
+        StatusKind::Keep.label()
+    )]
+    UnknownSelection { text: String },
+
+    #[error(
+        "bootout plist {:?} is not inside path {:?}",
+        plist.display().to_string(),
+        path.display().to_string()
+    )]
+    PlistOutsideDelete { plist: PathBuf, path: PathBuf },
+
+    #[error("bootout domain {text:?} is not system or gui/<uid>")]
+    UnknownDomain { text: String },
+
+    #[error("bootout plist {:?} is listed twice", plist.display().to_string())]
+    RepeatedPlist { plist: PathBuf },
+
+    #[error("shell is missing")]
+    MissingShell,
+
+    #[error(transparent)]
+    Command(InvalidCommand),
+
+    #[error(transparent)]
+    Value(Error),
 }

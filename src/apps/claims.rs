@@ -8,7 +8,6 @@ use super::Error;
 use super::bundle::InstalledApp;
 use super::matching::mentions;
 use crate::fs::{Backend, Cleanup, FsContext, FsOp, SystemArgv, SystemTool};
-use crate::process;
 
 /// The folders Homebrew installs formulae into, one folder per formula, on Apple silicon
 /// and on Intel.
@@ -74,7 +73,7 @@ fn vendor_prefix(id: &str) -> String {
 /// The labels of the loaded launchd jobs: the third column of `launchctl list` below its
 /// `PID Status Label` header.
 fn loaded_jobs<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Error> {
-    let listed = process::run_tool_text(ctx, &launch_jobs_argv())?;
+    let listed = ctx.run_tool_text(&launch_jobs_argv())?;
     let mut lines = listed.lines();
     let unreadable = |line: &str| Error::LaunchJobs {
         line: line.to_owned(),
@@ -96,7 +95,7 @@ fn loaded_jobs<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Error> {
 /// `<pid> <status> <label>` line in the `services` block of `launchctl print system`.
 /// Every other block, `disabled services` included, names jobs that need not be loaded.
 fn system_jobs<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Error> {
-    let printed = process::run_tool_text(ctx, &system_jobs_argv())?;
+    let printed = ctx.run_tool_text(&system_jobs_argv())?;
     let unreadable = |line: &str| Error::SystemJobs {
         line: line.to_owned(),
     };

@@ -362,7 +362,7 @@ fn a_wrapper_rosie_may_not_list_fails_the_scan_with_the_denial() {
         matches!(
             &result,
             Err(Error::UnreadableBundle { source, .. })
-                if matches!(**source, Error::Fs(fs::Error::Io { op: Op::ReadDir, .. }))
+                if matches!(source, fs::Error::Io { op: Op::ReadDir, .. })
         ),
         "{result:?}"
     );

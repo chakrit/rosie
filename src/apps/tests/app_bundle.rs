@@ -3,7 +3,6 @@
 use super::*;
 use crate::fs::fake::Call;
 use crate::fs::{CommandOutput, Exit};
-use crate::process;
 
 /// Bar.app whose `Info.plist` answers `plutil` with `id` and `name` for the two keys.
 fn bar_app_answering(fake: &FakeBackend, id: CommandOutput, name: CommandOutput) {
@@ -26,7 +25,7 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
 /// `plutil` failing on the scanned app's own `Info.plist` makes the bundle unreadable.
 fn is_unreadable_by_plutil(result: &Result<Scan, Error>) -> bool {
     matches!(result, Err(Error::UnreadableBundle { source, .. })
-        if matches!(**source, Error::Process(process::Error::Failed { .. })))
+        if matches!(source, fs::Error::ToolFailed { .. }))
 }
 
 #[test]
@@ -142,12 +141,7 @@ fn a_system_command_that_cannot_be_run_fails_the_scan() {
     let result = app_scan(&fake, BAR);
 
     assert!(
-        matches!(
-            result,
-            Err(Error::Process(process::Error::Fs(
-                fs::Error::Command { .. }
-            )))
-        ),
+        matches!(result, Err(Error::Fs(fs::Error::Command { .. }))),
         "{result:?}"
     );
 }
@@ -170,7 +164,7 @@ fn system_command_output_that_is_not_utf8_fails_the_scan() {
     let result = app_scan(&fake, BAR);
 
     assert!(
-        matches!(result, Err(Error::Process(process::Error::NotUtf8 { .. }))),
+        matches!(result, Err(Error::Fs(fs::Error::ToolNotUtf8 { .. }))),
         "{result:?}"
     );
 }

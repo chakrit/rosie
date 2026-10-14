@@ -135,6 +135,8 @@ fn fs_hints(error: &fs::Error) -> Vec<Hint> {
         }
         fs::Error::Io { .. }
         | fs::Error::Command { .. }
+        | fs::Error::ToolFailed { .. }
+        | fs::Error::ToolNotUtf8 { .. }
         | fs::Error::NotAnEntryName { .. }
         | fs::Error::Relative { .. }
         | fs::Error::CrossesVolume { .. }
@@ -252,15 +254,15 @@ fn scan_hints(error: &scan::Error) -> Vec<Hint> {
 
 fn apps_hints(error: &apps::Error) -> Vec<Hint> {
     match error {
-        apps::Error::Fs(error) | apps::Error::Refused { source: error, .. } => fs_hints(error),
+        apps::Error::Fs(error)
+        | apps::Error::Refused { source: error, .. }
+        | apps::Error::UnreadableBundle { source: error, .. } => fs_hints(error),
         apps::Error::Plan(error) => plan_hints(error),
-        apps::Error::Process(_)
-        | apps::Error::NotAnApp { .. }
+        apps::Error::NotAnApp { .. }
         | apps::Error::NoInfoPlist { .. }
         | apps::Error::MissingKey { .. }
         | apps::Error::InvalidBundleId { .. }
         | apps::Error::UnreadableApp { .. }
-        | apps::Error::UnreadableBundle { .. }
         | apps::Error::UnlistableAppFolder { .. }
         | apps::Error::LaunchJobs { .. }
         | apps::Error::SystemJobs { .. }

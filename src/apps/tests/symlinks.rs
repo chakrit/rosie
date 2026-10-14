@@ -67,7 +67,7 @@ fn a_symlinked_info_plist_makes_the_app_unreadable_to_app_and_orphan_scans() {
 /// bundle unreadable.
 fn is_unreadable_through_a_symlink(result: &Result<Scan, Error>) -> bool {
     matches!(result, Err(Error::UnreadableBundle { source, .. })
-        if matches!(**source, Error::Fs(fs::Error::Symlink { .. })))
+        if matches!(source, fs::Error::Symlink { .. }))
 }
 
 // fixed folders: a symlink anywhere in their path fails the scan

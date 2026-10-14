@@ -241,10 +241,7 @@ fn a_failing_receipt_listing_fails_the_scan() {
     );
 
     assert!(
-        matches!(
-            result,
-            Err(Error::Process(crate::process::Error::Failed { .. }))
-        ),
+        matches!(result, Err(Error::Fs(fs::Error::ToolFailed { .. }))),
         "{result:?}"
     );
 }

@@ -3,7 +3,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::backend::Argv;
+use super::backend::{Argv, Exit};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -21,6 +21,17 @@ pub enum Error {
         #[source]
         source: io::Error,
     },
+
+    #[error("`{argv}` failed ({exit:?}): {stderr}")]
+    ToolFailed {
+        // Boxed so this variant does not grow every fs::Error.
+        argv: Box<Argv>,
+        exit: Exit,
+        stderr: String,
+    },
+
+    #[error("`{argv}` printed output that is not UTF-8")]
+    ToolNotUtf8 { argv: Argv },
 
     #[error("{name:?} is not the name of one entry in a folder")]
     NotAnEntryName { name: std::ffi::OsString },

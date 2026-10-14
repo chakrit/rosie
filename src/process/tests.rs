@@ -1,6 +1,6 @@
 use super::*;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{CommandOutput, Paths};
+use crate::fs::{CommandOutput, Exit, Paths};
 use std::path::Path;
 
 const PS: &[u8] = b"\
@@ -167,7 +167,7 @@ fn a_failing_ps_fails_the_query() {
     let result = ProcessTable::query(&ctx(&fake));
 
     assert!(
-        matches!(&result, Err(Error::Failed { stderr, .. }) if stderr == "ps: broken"),
+        matches!(&result, Err(Error::Fs(fs::Error::ToolFailed { stderr, .. })) if stderr == "ps: broken"),
         "{result:?}"
     );
 }

@@ -10,7 +10,6 @@ use super::Error;
 use super::listing::{Listing, list_folder};
 use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool};
 use crate::plan::Report;
-use crate::process;
 
 const ID_KEY: &str = "CFBundleIdentifier";
 const NAME_KEY: &str = "CFBundleName";
@@ -189,8 +188,8 @@ fn extract<B: Backend>(
     plist: &Path,
     key: &'static str,
 ) -> Result<String, Error> {
-    let text = match process::run_tool_text(ctx, &extract_argv(plist, key)) {
-        Err(process::Error::Failed { stderr, .. }) if stderr.contains(NO_VALUE) => {
+    let text = match ctx.run_tool_text(&extract_argv(plist, key)) {
+        Err(fs::Error::ToolFailed { stderr, .. }) if stderr.contains(NO_VALUE) => {
             let plist = plist.to_path_buf();
             return Err(Error::MissingKey { plist, key });
         }

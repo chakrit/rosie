@@ -2,9 +2,6 @@
 //! context's command method (`docs/decisions/2026-09-29-elevation-without-ffi.md`): the
 //! elevated entry walks the parent chain to find `sudo`. Whether a process runs from a
 //! cleanup target is the FS layer's own check (`docs/spec/safety.md#running-processes`).
-//!
-//! [`run_tool`] and [`run_tool_text`] are the one way rosie reads a read-only system
-//! tool's output, here and in app mode (`plutil`, `pkgutil`).
 
 use std::collections::{HashMap, HashSet};
 use std::ffi::OsStr;
@@ -14,22 +11,12 @@ use std::str::FromStr;
 
 use thiserror::Error;
 
-use crate::fs::{self, Argv, Backend, Exit, FsContext, SystemArgv, SystemTool};
+use crate::fs::{self, Argv, Backend, FsContext, SystemArgv, SystemTool};
 
 #[derive(Debug, Error)]
 pub enum Error {
     #[error(transparent)]
     Fs(#[from] fs::Error),
-
-    #[error("`{argv}` failed ({exit:?}): {stderr}")]
-    Failed {
-        argv: Argv,
-        exit: Exit,
-        stderr: String,
-    },
-
-    #[error("`{argv}` printed output that is not UTF-8")]
-    NotUtf8 { argv: Argv },
 
     #[error("cannot read `{argv}` output line {line:?}")]
     Unreadable { argv: Argv, line: String },
@@ -61,7 +48,7 @@ impl ProcessTable {
 
     /// Reads the table with `ps`.
     pub fn query<B: Backend>(ctx: &FsContext<B>) -> Result<Self, Error> {
-        let stdout = run_tool(ctx, &Self::argv())?;
+        let stdout = ctx.run_tool(&Self::argv())?;
         Self::parse(&stdout)
     }
 
@@ -135,33 +122,10 @@ fn number<T: FromStr>(field: &[u8]) -> Option<T> {
 /// The effective user id rosie runs as, from `id -u`.
 pub fn effective_uid<B: Backend>(ctx: &FsContext<B>) -> Result<u32, Error> {
     let argv = SystemTool::ID.argv().arg("-u");
-    let text = run_tool_text(ctx, &argv)?;
+    let text = ctx.run_tool_text(&argv)?;
     text.trim().parse().map_err(|_| Error::Unreadable {
         argv: argv.into(),
         line: text,
-    })
-}
-
-/// Runs a read-only system tool through the context and returns its standard output. A
-/// non-zero exit fails with the tool's standard error.
-pub fn run_tool<B: Backend>(ctx: &FsContext<B>, argv: &SystemArgv) -> Result<Vec<u8>, Error> {
-    let argv = argv.as_argv();
-    let output = ctx.run(argv)?;
-    match output.exit.success() {
-        true => Ok(output.stdout),
-        false => Err(Error::Failed {
-            argv: argv.clone(),
-            exit: output.exit,
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        }),
-    }
-}
-
-/// [`run_tool`] for a tool that prints text; output that is not UTF-8 fails.
-pub fn run_tool_text<B: Backend>(ctx: &FsContext<B>, argv: &SystemArgv) -> Result<String, Error> {
-    let stdout = run_tool(ctx, argv)?;
-    String::from_utf8(stdout).map_err(|_| Error::NotUtf8 {
-        argv: argv.as_argv().clone(),
     })
 }
 

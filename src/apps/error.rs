@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use crate::fs;
+use crate::plan;
 use crate::scan::{self, NotAnEntry};
-use crate::{plan, process};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -13,9 +13,6 @@ pub enum Error {
 
     #[error(transparent)]
     Plan(#[from] plan::Error),
-
-    #[error(transparent)]
-    Process(#[from] process::Error),
 
     #[error("{path} is not an app: expected a folder named <name>.app", path = path.display())]
     NotAnApp { path: PathBuf },
@@ -46,13 +43,13 @@ pub enum Error {
     },
 
     /// The scanned app's own bundle, at its real location, could not be read: a
-    /// filesystem or `plutil` failure, which [`Error::Fs`] and [`Error::Process`] alone
-    /// would not tell apart from failures unrelated to the bundle.
+    /// filesystem or `plutil` failure, which [`Error::Fs`] alone would not tell apart
+    /// from failures unrelated to the bundle.
     #[error("cannot read the app {bundle}: {source}", bundle = bundle.display())]
     UnreadableBundle {
         bundle: PathBuf,
         #[source]
-        source: Box<Error>,
+        source: fs::Error,
     },
 
     #[error(

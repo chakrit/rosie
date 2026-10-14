@@ -21,7 +21,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use super::backend::{Argv, Backend, CommandOutput, Exit, Metadata};
+use super::backend::{Argv, Backend, CommandOutput, Exit, Metadata, SystemArgv};
 use super::error::{Error, Op};
 use super::paths::Paths;
 use running::Running;
@@ -132,6 +132,31 @@ impl<B: Backend> FsContext<B> {
         self.backend.run(argv).map_err(|source| Error::Command {
             argv: argv.clone(),
             source,
+        })
+    }
+
+    /// Runs a read-only system tool and returns its standard output, the one way rosie
+    /// reads such a tool (`ps`, `id`, `lsof`, `plutil`, `pkgutil`, `launchctl`). A
+    /// non-zero exit fails with the tool's standard error.
+    pub fn run_tool(&self, argv: &SystemArgv) -> Result<Vec<u8>, Error> {
+        let argv = argv.as_argv();
+        let output = self.run(argv)?;
+        match output.exit.success() {
+            true => Ok(output.stdout),
+            false => Err(Error::ToolFailed {
+                argv: Box::new(argv.clone()),
+                exit: output.exit,
+                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+            }),
+        }
+    }
+
+    /// [`FsContext::run_tool`] for a tool that prints text; output that is not UTF-8
+    /// fails.
+    pub fn run_tool_text(&self, argv: &SystemArgv) -> Result<String, Error> {
+        let stdout = self.run_tool(argv)?;
+        String::from_utf8(stdout).map_err(|_| Error::ToolNotUtf8 {
+            argv: argv.as_argv().clone(),
         })
     }
 
@@ -319,18 +344,10 @@ impl<B: Backend> FsContext<B> {
     }
 
     fn read_running(&self) -> Result<Running, String> {
-        let argv = running_argv();
-        let output = self
-            .run(argv.as_argv())
+        let stdout = self
+            .run_tool(&running_argv())
             .map_err(|error| error.to_string())?;
-        match output.exit.success() {
-            true => Running::parse(&output.stdout),
-            false => Err(format!(
-                "`{argv}` failed ({:?}): {}",
-                output.exit,
-                String::from_utf8_lossy(&output.stderr).trim()
-            )),
-        }
+        Running::parse(&stdout)
     }
 
     /// Attaches the operation and path to a backend error.

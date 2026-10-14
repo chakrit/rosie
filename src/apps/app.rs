@@ -12,9 +12,10 @@ use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
 use super::matching::{claimed_by_other, claims_by_id, claims_by_name};
 use super::search::{Candidate, Search};
-use crate::fs::{Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool, UserInput};
+use crate::fs::{
+    self, Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool, UserInput,
+};
 use crate::plan::Report;
-use crate::process;
 use crate::scan::{Entry, Mounts, NotAnEntry, Scan, Settings};
 use crate::tier::Tier;
 
@@ -43,7 +44,7 @@ where
     let path = UserInput::path(app, settings.walk.enter_links).perform(ctx)?;
     let entry = match Entry::lstat(ctx, &path) {
         Ok(entry) => entry,
-        Err(NotAnEntry::Fs(error)) => return Err(unreadable(&path, error.into())),
+        Err(NotAnEntry::Fs(error)) => return Err(unreadable(&path, error)),
         Err(refused) => return Err(refused.into()),
     };
     let name = path
@@ -59,7 +60,7 @@ where
         return Err(Error::NotAnApp { path });
     };
     let bundle = read_bundle(ctx, &path).map_err(|error| match error {
-        Error::Fs(_) | Error::Process(_) => unreadable(&path, error),
+        Error::Fs(source) => unreadable(&path, source),
         described => described,
     })?;
     Cleanup::delete(&bundle.path)
@@ -116,10 +117,10 @@ where
 
 /// A filesystem or `plutil` failure reading the typed bundle at `bundle`, named as such
 /// so it is never mistaken for a failure unrelated to the bundle.
-fn unreadable(bundle: &Path, source: Error) -> Error {
+fn unreadable(bundle: &Path, source: fs::Error) -> Error {
     Error::UnreadableBundle {
         bundle: bundle.to_path_buf(),
-        source: Box::new(source),
+        source,
     }
 }
 
@@ -153,7 +154,7 @@ fn receipts<B: Backend>(
     let Some(id) = &bundle.id else {
         return Ok(Vec::new());
     };
-    let listed = process::run_tool_text(ctx, &pkgs_argv())?;
+    let listed = ctx.run_tool_text(&pkgs_argv())?;
     let matching = listed
         .lines()
         .filter(|package| claims_by_id(id, package, Holds::Plain))

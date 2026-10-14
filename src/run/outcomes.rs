@@ -20,44 +20,12 @@ use std::io::Write;
 use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
-use thiserror::Error;
 
 use super::item::{ItemResult, Subject};
-use super::{Outcome, SkipReason};
+use super::{Error, Outcome, SkipReason};
 
-const HEADER: &str = "rosie-outcomes 1";
+pub(super) const HEADER: &str = "rosie-outcomes 1";
 const END: char = '\0';
-
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("the elevated child's report is not valid UTF-8")]
-    NotUtf8,
-
-    #[error("the elevated child reported nothing")]
-    Empty,
-
-    #[error("the elevated child's report starts with {0:?}; expected {HEADER:?}")]
-    Header(String),
-
-    #[error("the elevated child's report record {record:?} is unreadable: {source}")]
-    Parse {
-        record: String,
-        #[source]
-        source: toml::de::Error,
-    },
-
-    #[error("the elevated child's report record {0:?} names no outcome")]
-    NoOutcome(String),
-
-    #[error("the elevated child's report record names both a path and a command, or neither")]
-    Subject,
-
-    #[error("cannot write the elevated report: {0}")]
-    Serialize(#[from] toml::ser::Error),
-
-    #[error("cannot write the elevated report: {0}")]
-    Write(#[from] std::io::Error),
-}
 
 /// Which item a record is about: its path, or its command's words.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -137,22 +105,22 @@ impl<W: Write> Writer<W> {
 /// start with the header, such as the empty output of a sudo that refused, is an
 /// error.
 pub fn decode(bytes: &[u8]) -> Result<Vec<Record>, Error> {
-    let text = str::from_utf8(bytes).map_err(|_| Error::NotUtf8)?;
+    let text = str::from_utf8(bytes).map_err(|_| Error::ReportNotUtf8)?;
     let whole = text
         .split_inclusive(END)
         .filter(|record| record.ends_with(END));
 
     let mut records = whole.map(|record| record.trim_end_matches(END));
-    let header = records.next().ok_or(Error::Empty)?;
+    let header = records.next().ok_or(Error::ReportEmpty)?;
     if header != HEADER {
-        return Err(Error::Header(header.to_owned()));
+        return Err(Error::ReportHeader(header.to_owned()));
     }
 
     records.map(decode_record).collect()
 }
 
 fn decode_record(record: &str) -> Result<Record, Error> {
-    let entry: Entry = toml::from_str(record).map_err(|source| Error::Parse {
+    let entry: Entry = toml::from_str(record).map_err(|source| Error::ReportParse {
         record: record.to_owned(),
         source,
     })?;
@@ -160,11 +128,11 @@ fn decode_record(record: &str) -> Result<Record, Error> {
     let key = match (entry.path, entry.command) {
         (Some(path), None) => Key::Path(path),
         (None, Some(words)) => Key::Command(words),
-        _ => return Err(Error::Subject),
+        _ => return Err(Error::ReportSubject),
     };
     let outcome = entry
         .outcome
-        .ok_or_else(|| Error::NoOutcome(record.to_owned()))?
+        .ok_or_else(|| Error::ReportNoOutcome(record.to_owned()))?
         .into();
     Ok(Record { key, outcome })
 }
@@ -286,10 +254,10 @@ mod tests {
 
     #[test]
     fn refuses_output_without_the_header() {
-        assert!(matches!(decode(b""), Err(Error::Empty)));
+        assert!(matches!(decode(b""), Err(Error::ReportEmpty)));
         assert!(matches!(
             decode(b"rosie-outcomes 2\0"),
-            Err(Error::Header(_))
+            Err(Error::ReportHeader(_))
         ));
     }
 }

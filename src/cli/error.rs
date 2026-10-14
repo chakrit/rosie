@@ -6,8 +6,7 @@ use thiserror::Error;
 use super::console::PromptError;
 use super::root::RootError;
 use super::session::PickKind;
-use crate::run::elevated;
-use crate::{apps, config, fs, packs, plan, rules, scan};
+use crate::{apps, config, fs, packs, plan, rules, run, scan};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -49,7 +48,7 @@ pub enum Error {
     Plan(#[from] plan::Error),
 
     #[error(transparent)]
-    Elevated(#[from] elevated::Error),
+    Run(#[from] run::Error),
 
     #[error(transparent)]
     Io(#[from] io::Error),

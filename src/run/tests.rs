@@ -520,12 +520,10 @@ fn pipes_the_sudo_items_behind_a_header_matching_the_argument() {
     let (argv, stdin) = sudo_call(&fake);
     let (header, body) = Header::decode(&stdin).expect("stdin starts with a header");
     let piped = Plan::parse(body).expect("the items are a plan");
+    let nonce = Nonce::parse(&argv.args()[1].to_string_lossy()).expect("the argument is a nonce");
     assert_eq!(argv.program(), EXE);
     assert_eq!(argv.args()[0], elevated::SUBCOMMAND);
-    assert_eq!(
-        Nonce::parse(&argv.args()[1].to_string_lossy()),
-        Ok(header.nonce)
-    );
+    assert_eq!(nonce, header.nonce);
     assert_eq!(header.paths.home(), Path::new(HOME));
     let piped_paths: Vec<&Path> = piped.deletes().iter().map(|d| d.path.as_path()).collect();
     assert_eq!(piped_paths, vec![Path::new("/Library/Caches/root")]);

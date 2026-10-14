@@ -13,38 +13,14 @@ use std::hash::{BuildHasher as _, Hasher as _, RandomState};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use thiserror::Error;
-
+use super::Error;
 use crate::fs::Paths;
 
 /// The header format this rosie writes and reads.
 pub const HEADER_VERSION: u32 = 1;
 
 const MAGIC: &str = "rosie-elevated";
-const NONCE_HEX_DIGITS: usize = 32;
-
-#[derive(Debug, Error, PartialEq, Eq)]
-pub enum Error {
-    #[error("stdin does not start with a rosie elevation header")]
-    Missing,
-
-    #[error(
-        "elevation header version {found} is not supported; this rosie reads version {HEADER_VERSION}"
-    )]
-    Version { found: String },
-
-    #[error("elevation header line {line} is not `{expected}`")]
-    Malformed { line: usize, expected: &'static str },
-
-    #[error("the elevation nonce is not {NONCE_HEX_DIGITS} lowercase hex digits")]
-    InvalidNonce,
-
-    #[error("home {home:?} is not an absolute UTF-8 path on one line")]
-    InvalidHome { home: PathBuf },
-
-    #[error("the elevated items are not valid UTF-8")]
-    NotUtf8,
-}
+pub(super) const NONCE_HEX_DIGITS: usize = 32;
 
 /// A random token the run passes both as the child's argument and in its stdin header,
 /// proving the piped items come from the run that launched the child.
@@ -97,7 +73,12 @@ pub struct Header {
 impl Header {
     /// The header followed by `body`.
     pub fn encode(&self, body: &str) -> Result<Vec<u8>, Error> {
-        let home = home_text(self.paths.home())?;
+        let home = self.paths.home();
+        let Some(home) = home_text(home) else {
+            return Err(Error::UnwritableHome {
+                home: home.to_path_buf(),
+            });
+        };
         let text = format!(
             "{MAGIC} {HEADER_VERSION}\nnonce {}\nhome {home}\n\n{body}",
             self.nonce.as_str()
@@ -107,21 +88,21 @@ impl Header {
 
     /// Splits stdin into its header and the body after it.
     pub fn decode(bytes: &[u8]) -> Result<(Header, &str), Error> {
-        let text = str::from_utf8(bytes).map_err(|_| Error::NotUtf8)?;
+        let text = str::from_utf8(bytes).map_err(|_| Error::ItemsNotUtf8)?;
         let mut lines = text.splitn(5, '\n');
         let mut next = || lines.next().unwrap_or_default();
 
-        let version = next().strip_prefix(MAGIC).ok_or(Error::Missing)?;
-        let version = version.strip_prefix(' ').ok_or(Error::Missing)?;
+        let version = next().strip_prefix(MAGIC).ok_or(Error::HeaderMissing)?;
+        let version = version.strip_prefix(' ').ok_or(Error::HeaderMissing)?;
         if version != HEADER_VERSION.to_string() {
-            return Err(Error::Version {
+            return Err(Error::HeaderVersion {
                 found: version.to_owned(),
             });
         }
         let nonce = field(next(), 2, "nonce <hex>", "nonce ")?;
         let home = field(next(), 3, "home <path>", "home ")?;
         if !next().is_empty() {
-            return Err(Error::Malformed {
+            return Err(Error::HeaderMalformed {
                 line: 4,
                 expected: "",
             });
@@ -129,7 +110,9 @@ impl Header {
         let body = next();
 
         let home = PathBuf::from(home);
-        home_text(&home)?;
+        if home_text(&home).is_none() {
+            return Err(Error::InvalidHome { home });
+        }
         let home = Paths::new(&home).map_err(|_| Error::InvalidHome { home: home.clone() })?;
         let header = Header {
             nonce: Nonce::parse(nonce)?,
@@ -145,20 +128,18 @@ fn field<'a>(
     expected: &'static str,
     prefix: &str,
 ) -> Result<&'a str, Error> {
-    line.strip_prefix(prefix).ok_or(Error::Malformed {
+    line.strip_prefix(prefix).ok_or(Error::HeaderMalformed {
         line: number,
         expected,
     })
 }
 
-fn home_text(home: &Path) -> Result<&str, Error> {
-    let invalid = || Error::InvalidHome {
-        home: home.to_path_buf(),
-    };
-    let text = home.to_str().ok_or_else(invalid)?;
+/// The home as its header line spells it, when it is an absolute UTF-8 path on one line.
+fn home_text(home: &Path) -> Option<&str> {
+    let text = home.to_str()?;
     match home.is_absolute() && !text.contains('\n') {
-        true => Ok(text),
-        false => Err(invalid()),
+        true => Some(text),
+        false => None,
     }
 }
 
@@ -189,7 +170,8 @@ mod tests {
         let second = Nonce::generate();
 
         assert_ne!(first, second);
-        assert_eq!(Nonce::parse(first.as_str()), Ok(first));
+        let parsed = Nonce::parse(first.as_str()).expect("well-formed nonce");
+        assert_eq!(parsed, first);
     }
 
     #[test]
@@ -198,9 +180,9 @@ mod tests {
 
         let decoded = Header::decode(text.as_bytes());
 
-        assert_eq!(
-            decoded.map(|(header, _)| header),
-            Err(Error::Version { found: "2".into() })
+        assert!(
+            matches!(&decoded, Err(Error::HeaderVersion { found }) if found == "2"),
+            "{decoded:?}"
         );
     }
 
@@ -208,7 +190,7 @@ mod tests {
     fn refuses_stdin_without_a_header() {
         let decoded = Header::decode(b"version = 1\n[[delete]]\n");
 
-        assert_eq!(decoded.map(|(header, _)| header), Err(Error::Missing));
+        assert!(matches!(decoded, Err(Error::HeaderMissing)), "{decoded:?}");
     }
 
     #[test]
@@ -217,7 +199,7 @@ mod tests {
 
         let decoded = Header::decode(text.as_bytes());
 
-        assert_eq!(decoded.map(|(header, _)| header), Err(Error::InvalidNonce));
+        assert!(matches!(decoded, Err(Error::InvalidNonce)), "{decoded:?}");
     }
 
     #[test]
@@ -236,6 +218,9 @@ mod tests {
             ..header()
         };
 
-        assert!(matches!(header.encode(""), Err(Error::InvalidHome { .. })));
+        assert!(matches!(
+            header.encode(""),
+            Err(Error::UnwritableHome { .. })
+        ));
     }
 }

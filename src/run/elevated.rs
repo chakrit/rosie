@@ -18,13 +18,11 @@ use std::io::{self, Read as _, Write};
 use std::os::fd::AsFd;
 use std::os::unix::fs::FileTypeExt as _;
 
-use thiserror::Error;
-
-use super::header::{self, Header, Nonce};
-use super::{ItemResult, OutputWindow, Reporter, RunStats, Runner, outcomes};
+use super::header::{Header, Nonce};
+use super::{Error, ItemResult, OutputWindow, Reporter, RunStats, Runner, outcomes};
 use crate::config;
-use crate::fs::{self, Argv, Backend, FsContext, FsOp, Paths, ROOT_UID, UserInput};
-use crate::plan::{self, Plan};
+use crate::fs::{Argv, Backend, FsContext, FsOp, Paths, ROOT_UID, UserInput};
+use crate::plan::Plan;
 use crate::process::{self, Process, ProcessTable};
 
 /// The hidden subcommand name.
@@ -64,44 +62,6 @@ pub struct Invocation {
     pub pid: u32,
 }
 
-#[derive(Debug, Error)]
-pub enum Error {
-    #[error("refused: stdin is not a pipe; `{SUBCOMMAND}` is only for rosie itself")]
-    NotAPipe,
-
-    #[error("refused: {0}")]
-    Header(#[from] header::Error),
-
-    #[error("refused: the nonce does not match the stdin header")]
-    NonceMismatch,
-
-    #[error("refused: not running as root (uid {uid})")]
-    NotRoot { uid: u32 },
-
-    #[error("refused: no ancestor process is sudo")]
-    NoSudoAncestor,
-
-    #[error(
-        "refused: tool commands never run as root; only deletes, their bootouts, and receipts are elevated"
-    )]
-    ToolElevated,
-
-    #[error(transparent)]
-    Process(#[from] process::Error),
-
-    #[error(transparent)]
-    Fs(#[from] fs::Error),
-
-    #[error(transparent)]
-    Config(#[from] config::Error),
-
-    #[error("the elevated items are not a valid plan: {0}")]
-    Plan(#[from] plan::Error),
-
-    #[error(transparent)]
-    Outcomes(#[from] super::outcomes::Error),
-}
-
 /// Runs the piped items as root once every gate passes, writes each item's outcome to
 /// `out` for the run that launched it as the item finishes, and returns the stats.
 pub fn run_elevated<B, R, W>(
@@ -129,7 +89,7 @@ where
     };
     let results = Runner::new(ctx).execute(&plan, &mut reporting);
     if let Some(error) = reporting.failure {
-        return Err(error.into());
+        return Err(error);
     }
 
     Ok(results.into_iter().collect())
@@ -142,7 +102,7 @@ struct ReportingToRun<'r, R, W: Write> {
     reporter: &'r mut R,
     writer: outcomes::Writer<W>,
     /// The first write that failed; the run learns of it when the items are done.
-    failure: Option<outcomes::Error>,
+    failure: Option<Error>,
 }
 
 impl<R: Reporter, W: Write> Reporter for ReportingToRun<'_, R, W> {

@@ -23,6 +23,7 @@
 
 mod elevate;
 pub mod elevated;
+mod error;
 mod header;
 mod item;
 mod outcomes;
@@ -41,6 +42,7 @@ use crate::plan::{Delete, ItemSize, Plan, RunAs, Runnable};
 use report::Forwarding;
 
 pub use elevate::Elevation;
+pub use error::Error;
 pub use item::{ItemResult, Subject};
 pub use report::{OutputWindow, PlainReporter, Reporter, TerminalReporter};
 pub use stats::{Outcome, RunStats, SkipReason};

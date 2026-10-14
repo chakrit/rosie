@@ -406,10 +406,7 @@ fn refuses_a_header_of_another_version() {
 
     let (result, _) = elevate(&fake, invocation(Stdin::Pipe(text.into_bytes())));
 
-    assert!(matches!(
-        result,
-        Err(Error::Header(header::Error::Version { .. }))
-    ));
+    assert!(matches!(result, Err(Error::HeaderVersion { .. })));
     assert!(!acted(&fake));
 }
 

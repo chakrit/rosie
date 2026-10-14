@@ -10,8 +10,7 @@ use super::session::PickKind;
 use crate::config::{self, UnusableRoot};
 use crate::fs::{self, EnterLinks, RealPath};
 use crate::hint::{Command, Hint};
-use crate::run::elevated;
-use crate::{apps, packs, plan, rules, scan};
+use crate::{apps, packs, plan, rules, run, scan};
 
 /// One problem and what the user can do about it.
 #[derive(Debug)]
@@ -33,7 +32,7 @@ impl Failure {
 pub fn failures(error: &Error) -> Vec<Failure> {
     let config_error = match error {
         Error::Config(error) => Some(error),
-        Error::Elevated(elevated::Error::Config(error)) => Some(error),
+        Error::Run(run::Error::Config(error)) => Some(error),
         _ => None,
     };
     match config_error {
@@ -52,7 +51,7 @@ fn hints(error: &Error) -> Vec<Hint> {
         Error::Scan(error) => scan_hints(error),
         Error::Apps(error) => apps_hints(error),
         Error::Plan(error) => plan_hints(error),
-        Error::Elevated(error) => elevated_hints(error),
+        Error::Run(error) => run_hints(error),
         Error::Root(RootError::Refused(refusal)) => vec![Hint::run(
             "run it again without sudo",
             [Command::Rerun(refusal.args().to_vec())],
@@ -295,18 +294,31 @@ fn plan_hints(error: &plan::Error) -> Vec<Hint> {
     }
 }
 
-fn elevated_hints(error: &elevated::Error) -> Vec<Hint> {
+fn run_hints(error: &run::Error) -> Vec<Hint> {
     match error {
-        elevated::Error::Fs(error) => fs_hints(error),
-        elevated::Error::Config(error) => config_hints(error),
-        elevated::Error::NotAPipe
-        | elevated::Error::Header(_)
-        | elevated::Error::NonceMismatch
-        | elevated::Error::NotRoot { .. }
-        | elevated::Error::NoSudoAncestor
-        | elevated::Error::ToolElevated
-        | elevated::Error::Process(_)
-        | elevated::Error::Plan(_)
-        | elevated::Error::Outcomes(_) => Vec::new(),
+        run::Error::Fs(error) => fs_hints(error),
+        run::Error::Config(error) => config_hints(error),
+        run::Error::NotAPipe
+        | run::Error::NonceMismatch
+        | run::Error::NotRoot { .. }
+        | run::Error::NoSudoAncestor
+        | run::Error::ToolElevated
+        | run::Error::HeaderMissing
+        | run::Error::HeaderVersion { .. }
+        | run::Error::HeaderMalformed { .. }
+        | run::Error::InvalidNonce
+        | run::Error::InvalidHome { .. }
+        | run::Error::ItemsNotUtf8
+        | run::Error::UnwritableHome { .. }
+        | run::Error::ReportNotUtf8
+        | run::Error::ReportEmpty
+        | run::Error::ReportHeader(_)
+        | run::Error::ReportParse { .. }
+        | run::Error::ReportNoOutcome(_)
+        | run::Error::ReportSubject
+        | run::Error::ReportSerialize(_)
+        | run::Error::ReportWrite(_)
+        | run::Error::Process(_)
+        | run::Error::Plan(_) => Vec::new(),
     }
 }

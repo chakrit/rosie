@@ -106,7 +106,7 @@ carries or widens roots.
   folders named by the built-in pack. All are written as real, non-symlink paths (for
   example `/private/var/...`). No development roots are seeded.
 - The first run writes the default `config.toml`, then checks its roots. A seeded root
-  that fails on this machine fails the run like any other root, with its fixes.
+  that fails on this machine fails the run like any other root, with its hints.
 - `rosie roots …` and `rosie config …` need only a well-formed `config.toml`; they never
   check the roots against the disk.
 
@@ -125,7 +125,7 @@ detects links: `canonicalize` and other link-resolving calls are the detector.
 - A path that does not exist canonicalizes its deepest existing ancestor and appends the
   rest.
 - `rosie roots add` refuses a path with a symlink component. A `roots` entry with one
-  fails every command that uses the roots, naming each such entry with its fixes.
+  fails every command that uses the roots, naming each such entry with its hints.
 - A scan start folder or app argument with a symlink component is refused. Bare `rosie`
   uses the current directory, which is always the physical path.
 - The walk never descends into a symlink. Symlinks never match rules.

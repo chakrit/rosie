@@ -227,14 +227,14 @@ Every line rosie writes to stderr starts with a marker in the first column:
 ## Errors
 
 - An error line states the problem only. Its causes follow.
-- Each fix follows on its own lines: a dim label, then the command in cyan, indented.
-- A fix is a rosie command, a flag, or a manual step. Commands are shell-quoted.
+- Each hint follows on its own lines: a dim label, then the command in cyan, indented.
+- A hint is a rosie command, a flag, or a manual step. Commands are shell-quoted.
 - Every failure the user can fix by changing their setup, their config, or how they run
-  rosie carries at least one fix.
+  rosie carries at least one hint.
 - Failures the user cannot act on (the elevation protocol, plan files a scan never
   writes, pack archive tampering, Lua runtime errors, unexpected `launchctl` output)
   carry the problem line only.
-- `rosie check` hints and plan TOML hints show the first fix.
+- `rosie check` lines and plan TOML comments show the first hint.
 
 ## Configuration
 

@@ -11,7 +11,7 @@ mod console;
 mod error;
 mod failure;
 mod findings;
-mod fix;
+mod hint;
 mod manage;
 mod progress;
 mod root;
@@ -211,7 +211,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             Error::Usage(message) => writeln!(self.console.stderr(), "{message}"),
             _ => failure::failures(error).iter().try_for_each(|failure| {
                 let text = std::iter::once(failure.problem.clone())
-                    .chain(fix::fix_lines(palette, &failure.fixes))
+                    .chain(hint::hint_lines(palette, &failure.hints))
                     .collect::<Vec<_>>()
                     .join("\n");
                 let line = palette.line(&Line::new(Mark::Error, text));

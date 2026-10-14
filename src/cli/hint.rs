@@ -1,6 +1,6 @@
 //! What a user can do about a failure (`docs/spec/cli.md#errors`): a rosie command to
 //! run, a flag to run the same command again with, or a step outside rosie. Commands and
-//! flags are data built from rosie's own types, never text, so a fix cannot name a
+//! flags are data built from rosie's own types, never text, so a hint cannot name a
 //! command, key, or flag that does not exist.
 
 use std::fmt;
@@ -13,40 +13,40 @@ use crate::output::Palette;
 use crate::scan::WalkSetting;
 use crate::shell::quote_word;
 
-/// One way out of a failure: what it does, then the steps that do it. A fix with no
+/// One way out of a failure: what it does, then the steps that do it. A hint with no
 /// steps is a step outside rosie, which its label names.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fix {
+pub struct Hint {
     pub label: String,
     pub steps: Vec<Step>,
 }
 
-impl Fix {
-    pub fn run(label: impl Into<String>, commands: impl IntoIterator<Item = Command>) -> Fix {
-        Fix {
+impl Hint {
+    pub fn run(label: impl Into<String>, commands: impl IntoIterator<Item = Command>) -> Hint {
+        Hint {
             label: label.into(),
             steps: commands.into_iter().map(Step::Run).collect(),
         }
     }
 
-    pub fn flag(label: impl Into<String>, flag: Flag) -> Fix {
-        Fix {
+    pub fn flag(label: impl Into<String>, flag: Flag) -> Hint {
+        Hint {
             label: label.into(),
             steps: vec![Step::Flag(flag)],
         }
     }
 
     /// A step the user takes outside rosie.
-    pub fn by_hand(label: impl Into<String>) -> Fix {
-        Fix {
+    pub fn by_hand(label: impl Into<String>) -> Hint {
+        Hint {
             label: label.into(),
             steps: Vec::new(),
         }
     }
 }
 
-impl Fix {
-    /// The fix on one line, for a line that already says what failed: `to allow it:
+impl Hint {
+    /// The hint on one line, for a line that already says what failed: `to allow it:
     /// rosie roots add ~/x`, or flags run together: `to enter it: --enter-mounts
     /// --enter-bundles`.
     pub fn compact(&self) -> String {
@@ -74,7 +74,7 @@ impl fmt::Display for Step {
     }
 }
 
-/// A rosie command line a fix suggests.
+/// A rosie command line a hint suggests.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Command {
     Roots,
@@ -190,25 +190,25 @@ fn shell_word(text: &str) -> String {
     }
 }
 
-/// The lines a failure's fixes print as, under its problem: each label, the second and
+/// The lines a failure's hints print as, under its problem: each label, the second and
 /// later after `or`, then its steps indented below it in the command color.
-pub fn fix_lines(palette: Palette, fixes: &[Fix]) -> Vec<String> {
-    fixes
+pub fn hint_lines(palette: Palette, hints: &[Hint]) -> Vec<String> {
+    hints
         .iter()
         .enumerate()
-        .flat_map(|(index, fix)| {
+        .flat_map(|(index, hint)| {
             let label = match index {
-                0 => fix.label.clone(),
-                _ => format!("or {}", fix.label),
+                0 => hint.label.clone(),
+                _ => format!("or {}", hint.label),
             };
-            let label = match fix.steps.is_empty() {
-                true => palette.fix_label(&label),
-                false => palette.fix_label(&format!("{label}:")),
+            let label = match hint.steps.is_empty() {
+                true => palette.hint_label(&label),
+                false => palette.hint_label(&format!("{label}:")),
             };
-            let steps = fix
+            let steps = hint
                 .steps
                 .iter()
-                .map(move |step| format!("  {}", palette.fix_command(&step.to_string())));
+                .map(move |step| format!("  {}", palette.hint_command(&step.to_string())));
             std::iter::once(label).chain(steps)
         })
         .collect()
@@ -251,7 +251,7 @@ mod tests {
         flags
     }
 
-    /// `docs/spec/cli.md#errors`: a fix names only commands rosie has.
+    /// `docs/spec/cli.md#errors`: a hint names only commands rosie has.
     #[test]
     fn every_suggested_command_parses_as_a_rosie_command_line() {
         for command in every_command() {
@@ -291,15 +291,15 @@ mod tests {
 
     #[test]
     fn later_fixes_read_as_alternatives_with_their_steps_indented() {
-        let fixes = [
-            Fix::run(
+        let hints = [
+            Hint::run(
                 "allow symlinks in roots",
                 [Command::ConfigSetLinks(EnterLinks::Roots)],
             ),
-            Fix::by_hand("quit Slack, then run again"),
+            Hint::by_hand("quit Slack, then run again"),
         ];
 
-        let lines = fix_lines(Palette::plain(), &fixes);
+        let lines = hint_lines(Palette::plain(), &hints);
 
         assert_eq!(
             lines,

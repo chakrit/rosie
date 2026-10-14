@@ -1,11 +1,11 @@
 //! A failed command as the user reads it (`docs/spec/cli.md#errors`): each problem, then
-//! the fixes for it. Every error variant is matched by name, with no catch-all, so a new
-//! variant does not compile until it is given its fixes or none.
+//! the hints for it. Every error variant is matched by name, with no catch-all, so a new
+//! variant does not compile until it is given its hints or none.
 
 use std::path::{Path, PathBuf};
 
 use super::error::Error;
-use super::fix::{Command, Fix};
+use super::hint::{Command, Hint};
 use super::root::RootError;
 use super::session::PickKind;
 use crate::config::{self, UnusableRoot};
@@ -17,14 +17,14 @@ use crate::{apps, packs, plan, rules, scan};
 #[derive(Debug)]
 pub struct Failure {
     pub problem: String,
-    pub fixes: Vec<Fix>,
+    pub hints: Vec<Hint>,
 }
 
 impl Failure {
-    fn new(problem: impl ToString, fixes: Vec<Fix>) -> Failure {
+    fn new(problem: impl ToString, hints: Vec<Hint>) -> Failure {
         Failure {
             problem: problem.to_string(),
-            fixes,
+            hints,
         }
     }
 }
@@ -38,21 +38,21 @@ pub fn failures(error: &Error) -> Vec<Failure> {
     };
     match config_error {
         Some(config::Error::UnusableRoots(roots)) => roots.iter().map(unusable_root).collect(),
-        Some(_) | None => vec![Failure::new(error, fixes(error))],
+        Some(_) | None => vec![Failure::new(error, hints(error))],
     }
 }
 
-fn fixes(error: &Error) -> Vec<Fix> {
+fn hints(error: &Error) -> Vec<Hint> {
     match error {
-        Error::NothingToPick { kind } => nothing_to_pick_fixes(*kind),
-        Error::Fs(error) => fs_fixes(error),
-        Error::Config(error) => config_fixes(error),
-        Error::Packs(error) => packs_fixes(error),
-        Error::Rules(error) => rules_fixes(error),
-        Error::Scan(error) => scan_fixes(error),
-        Error::Apps(error) => apps_fixes(error),
-        Error::Plan(error) => plan_fixes(error),
-        Error::Elevated(error) => elevated_fixes(error),
+        Error::NothingToPick { kind } => nothing_to_pick_hints(*kind),
+        Error::Fs(error) => fs_hints(error),
+        Error::Config(error) => config_hints(error),
+        Error::Packs(error) => packs_hints(error),
+        Error::Rules(error) => rules_hints(error),
+        Error::Scan(error) => scan_hints(error),
+        Error::Apps(error) => apps_hints(error),
+        Error::Plan(error) => plan_hints(error),
+        Error::Elevated(error) => elevated_hints(error),
         Error::Root(RootError::Refused(_) | RootError::Process(_))
         | Error::Usage(_)
         | Error::Cancelled
@@ -66,7 +66,7 @@ fn fixes(error: &Error) -> Vec<Fix> {
 fn unusable_root(root: &UnusableRoot) -> Failure {
     let UnusableRoot { written, error } = root;
     let replace = |label: &str, real: &Path| {
-        Fix::run(
+        Hint::run(
             label,
             [
                 Command::RootsRemove(written.clone()),
@@ -74,7 +74,7 @@ fn unusable_root(root: &UnusableRoot) -> Failure {
             ],
         )
     };
-    let fixes = match error {
+    let hints = match error {
         fs::Error::Symlink {
             real: RealPath::Resolved(real),
             ..
@@ -84,37 +84,37 @@ fn unusable_root(root: &UnusableRoot) -> Failure {
             ..
         } => vec![allow_links_in_roots(), remove_root(written)],
         fs::Error::Misspelled { real, .. } => vec![replace("use the spelling on disk", real)],
-        other => [fs_fixes(other), vec![remove_root(written)]].concat(),
+        other => [fs_hints(other), vec![remove_root(written)]].concat(),
     };
-    Failure::new(format!("root {}: {error}", written.display()), fixes)
+    Failure::new(format!("root {}: {error}", written.display()), hints)
 }
 
-fn allow_links_in_roots() -> Fix {
-    Fix::run(
+fn allow_links_in_roots() -> Hint {
+    Hint::run(
         "allow symlinks in roots",
         [Command::ConfigSetLinks(EnterLinks::Roots)],
     )
 }
 
-fn remove_root(written: &Path) -> Fix {
-    Fix::run("remove it", [Command::RootsRemove(written.to_path_buf())])
+fn remove_root(written: &Path) -> Hint {
+    Hint::run("remove it", [Command::RootsRemove(written.to_path_buf())])
 }
 
-fn nothing_to_pick_fixes(kind: PickKind) -> Vec<Fix> {
+fn nothing_to_pick_hints(kind: PickKind) -> Vec<Hint> {
     match kind {
-        PickKind::Root => vec![Fix::run("add one", [Command::RootsAddAny])],
-        PickKind::Pack => vec![Fix::run("pull the default pack", [Command::RulesPull])],
+        PickKind::Root => vec![Hint::run("add one", [Command::RootsAddAny])],
+        PickKind::Pack => vec![Hint::run("pull the default pack", [Command::RulesPull])],
         PickKind::App | PickKind::Key | PickKind::Value => Vec::new(),
     }
 }
 
-fn fs_fixes(error: &fs::Error) -> Vec<Fix> {
+fn fs_hints(error: &fs::Error) -> Vec<Hint> {
     match error {
         fs::Error::OutsideRoots { path } => {
-            vec![Fix::run("allow it", [Command::RootsAdd(path.clone())])]
+            vec![Hint::run("allow it", [Command::RootsAdd(path.clone())])]
         }
         fs::Error::Symlink { real, .. } => {
-            let allow = Fix::run(
+            let allow = Hint::run(
                 "allow symlinks in roots and typed paths",
                 [Command::ConfigSetLinks(EnterLinks::Roots)],
             );
@@ -124,7 +124,7 @@ fn fs_fixes(error: &fs::Error) -> Vec<Fix> {
             }
         }
         fs::Error::Misspelled { real, .. } => vec![use_instead(real)],
-        fs::Error::Running { program, .. } => vec![Fix::by_hand(format!(
+        fs::Error::Running { program, .. } => vec![Hint::by_hand(format!(
             "quit {}, then run again",
             program_name(program)
         ))],
@@ -146,12 +146,12 @@ fn fs_fixes(error: &fs::Error) -> Vec<Fix> {
     }
 }
 
-fn use_instead(real: &Path) -> Fix {
-    Fix::by_hand(format!("use {} instead", real.display()))
+fn use_instead(real: &Path) -> Hint {
+    Hint::by_hand(format!("use {} instead", real.display()))
 }
 
-fn full_disk_access() -> Fix {
-    Fix::by_hand(
+fn full_disk_access() -> Hint {
+    Hint::by_hand(
         "give your terminal Full Disk Access in System Settings > Privacy & Security > \
          Full Disk Access, then run again",
     )
@@ -163,18 +163,18 @@ fn program_name(program: &Path) -> String {
     name.to_string_lossy().into_owned()
 }
 
-fn config_fixes(error: &config::Error) -> Vec<Fix> {
-    let edit = |path: &PathBuf| vec![Fix::by_hand(format!("edit {}", path.display()))];
+fn config_hints(error: &config::Error) -> Vec<Hint> {
+    let edit = |path: &PathBuf| vec![Hint::by_hand(format!("edit {}", path.display()))];
     match error {
-        config::Error::Fs(error) => fs_fixes(error),
+        config::Error::Fs(error) => fs_hints(error),
         config::Error::UnknownKey { .. } => {
-            vec![Fix::run("see the keys", [Command::Config])]
+            vec![Hint::run("see the keys", [Command::Config])]
         }
         config::Error::RootsNotSettable => vec![
-            Fix::run("add a root", [Command::RootsAddAny]),
-            Fix::run("remove one", [Command::RootsRemovePick]),
+            Hint::run("add a root", [Command::RootsAddAny]),
+            Hint::run("remove one", [Command::RootsRemovePick]),
         ],
-        config::Error::NotARoot { .. } => vec![Fix::run("see the roots", [Command::Roots])],
+        config::Error::NotARoot { .. } => vec![Hint::run("see the roots", [Command::Roots])],
         config::Error::NotUtf8 { path, .. }
         | config::Error::Parse { path, .. }
         | config::Error::InvalidShape { path, .. } => edit(path),
@@ -187,20 +187,20 @@ fn config_fixes(error: &config::Error) -> Vec<Fix> {
     }
 }
 
-fn packs_fixes(error: &packs::Error) -> Vec<Fix> {
+fn packs_hints(error: &packs::Error) -> Vec<Hint> {
     match error {
-        packs::Error::Fs(error) => fs_fixes(error),
+        packs::Error::Fs(error) => fs_hints(error),
         packs::Error::BadPullTime { .. } => {
-            vec![Fix::run("refresh the pack", [Command::RulesPull])]
+            vec![Hint::run("refresh the pack", [Command::RulesPull])]
         }
-        packs::Error::PackNameTaken { installed, .. } => vec![Fix::run(
+        packs::Error::PackNameTaken { installed, .. } => vec![Hint::run(
             "remove the installed one first",
             [Command::RulesRemove(installed.pack().to_string())],
         )],
         packs::Error::NotInstalled { .. } => {
-            vec![Fix::run("see the installed packs", [Command::Rules])]
+            vec![Hint::run("see the installed packs", [Command::Rules])]
         }
-        packs::Error::StrayEntry { path, .. } => vec![Fix::by_hand(format!(
+        packs::Error::StrayEntry { path, .. } => vec![Hint::by_hand(format!(
             "move {} out of the packs folder",
             path.display()
         ))],
@@ -223,11 +223,11 @@ fn packs_fixes(error: &packs::Error) -> Vec<Fix> {
     }
 }
 
-fn rules_fixes(error: &rules::Error) -> Vec<Fix> {
+fn rules_hints(error: &rules::Error) -> Vec<Hint> {
     match error {
-        rules::Error::Fs(error) => fs_fixes(error),
+        rules::Error::Fs(error) => fs_hints(error),
         rules::Error::UnknownRule { .. } => {
-            vec![Fix::run("see the rule names", [Command::Rules])]
+            vec![Hint::run("see the rule names", [Command::Rules])]
         }
         rules::Error::Toml { .. }
         | rules::Error::Rule { .. }
@@ -241,17 +241,17 @@ fn rules_fixes(error: &rules::Error) -> Vec<Fix> {
     }
 }
 
-fn scan_fixes(error: &scan::Error) -> Vec<Fix> {
+fn scan_hints(error: &scan::Error) -> Vec<Hint> {
     match error {
-        scan::Error::Fs(error) | scan::Error::PathRefused(error) => fs_fixes(error),
+        scan::Error::Fs(error) | scan::Error::PathRefused(error) => fs_hints(error),
         scan::Error::NotAFolder { .. } | scan::Error::Missing { .. } => Vec::new(),
     }
 }
 
-fn apps_fixes(error: &apps::Error) -> Vec<Fix> {
+fn apps_hints(error: &apps::Error) -> Vec<Hint> {
     match error {
-        apps::Error::Fs(error) | apps::Error::Refused { source: error, .. } => fs_fixes(error),
-        apps::Error::Plan(error) => plan_fixes(error),
+        apps::Error::Fs(error) | apps::Error::Refused { source: error, .. } => fs_hints(error),
+        apps::Error::Plan(error) => plan_hints(error),
         apps::Error::Process(_)
         | apps::Error::NotAnApp { .. }
         | apps::Error::NoInfoPlist { .. }
@@ -269,9 +269,9 @@ fn apps_fixes(error: &apps::Error) -> Vec<Fix> {
     }
 }
 
-fn plan_fixes(error: &plan::Error) -> Vec<Fix> {
+fn plan_hints(error: &plan::Error) -> Vec<Hint> {
     match error {
-        plan::Error::UnresolvedConflicts { .. } => vec![Fix::by_hand(
+        plan::Error::UnresolvedConflicts { .. } => vec![Hint::by_hand(
             "save the plan as TOML and set each \"conflict\" status to clean or keep",
         )],
         plan::Error::NulByte { .. }
@@ -291,10 +291,10 @@ fn plan_fixes(error: &plan::Error) -> Vec<Fix> {
     }
 }
 
-fn elevated_fixes(error: &elevated::Error) -> Vec<Fix> {
+fn elevated_hints(error: &elevated::Error) -> Vec<Hint> {
     match error {
-        elevated::Error::Fs(error) => fs_fixes(error),
-        elevated::Error::Config(error) => config_fixes(error),
+        elevated::Error::Fs(error) => fs_hints(error),
+        elevated::Error::Config(error) => config_hints(error),
         elevated::Error::NotAPipe
         | elevated::Error::Header(_)
         | elevated::Error::NonceMismatch

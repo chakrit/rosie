@@ -100,13 +100,13 @@ impl Palette {
         format!("{mark} {text}")
     }
 
-    /// What a fix does, shown above its command.
-    pub fn fix_label(self, text: &str) -> String {
+    /// What a hint does, shown above its command.
+    pub fn hint_label(self, text: &str) -> String {
         self.paint(Style::new().dim(), text)
     }
 
     /// A command the user can type: the color `inquire` gives an answer.
-    pub fn fix_command(self, text: &str) -> String {
+    pub fn hint_command(self, text: &str) -> String {
         self.paint(Style::new().cyan(), text)
     }
 
@@ -124,7 +124,7 @@ impl Palette {
     }
 
     /// `inquire`'s look: `?` in the marker column, answers and the highlighted option in
-    /// the fix-command color.
+    /// the hint-command color.
     pub fn prompts(self) -> RenderConfig<'static> {
         match self.color {
             false => RenderConfig::empty(),

@@ -14,10 +14,10 @@
 
 use std::path::{Path, PathBuf};
 
-use super::args::{CheckArgs, enter_fix};
+use super::args::{CheckArgs, enter_hint};
 use super::console::{Console, Finish};
 use super::findings::problem_line;
-use super::fix::{Command, Fix, Flag};
+use super::hint::{Command, Flag, Hint};
 use super::session::Session;
 use super::{Error, ExitStatus};
 use crate::apps;
@@ -142,7 +142,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             return error.to_string();
         };
         let shown = self.tilde();
-        let allow = Fix::run("to allow it", [Command::ConfigSetLinks(EnterLinks::Roots)]);
+        let allow = Hint::run("to allow it", [Command::ConfigSetLinks(EnterLinks::Roots)]);
         match UserInput::path(link, EnterLinks::Roots).perform(&self.own) {
             Ok(target) => format!(
                 "through symlink {} → {}; {}",
@@ -280,16 +280,16 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
         (Place::At, Planned::OutsideRoots) => None,
         (Place::At, Planned::Conflict(disagreement)) => Some(sides(disagreement)),
     };
-    let fix = match planned {
+    let hint = match planned {
         Planned::Clean(_) => None,
-        Planned::Keep => Some(Fix::flag("to clean it", Flag::Aggressive)),
-        Planned::OutsideRoots => Some(Fix::run(
+        Planned::Keep => Some(Hint::flag("to clean it", Flag::Aggressive)),
+        Planned::OutsideRoots => Some(Hint::run(
             "to allow it, add it or a folder above it",
             [Command::RootsAdd(PathBuf::from(shown.path(&delete.path)))],
         )),
-        Planned::Conflict(_) => Some(Fix::by_hand("choose clean or keep in the plan")),
+        Planned::Conflict(_) => Some(Hint::by_hand("choose clean or keep in the plan")),
     };
-    let hint = fix.map(|fix| fix.compact());
+    let hint = hint.map(|hint| hint.compact());
     let sudo = (delete.run_as == RunAs::Sudo).then(|| "needs sudo".to_owned());
 
     let parts: Vec<String> = [what, hint, sudo].into_iter().flatten().collect();
@@ -328,7 +328,7 @@ fn running(program: &Path, pid: u32) -> String {
 fn skip_reason(skipped: &Skipped) -> String {
     let reason = skipped.reason.reason();
     let hint = match skipped.reason {
-        WalkSkip::Closed(needs) => Some(enter_fix(needs).compact()),
+        WalkSkip::Closed(needs) => Some(enter_hint(needs).compact()),
         WalkSkip::LinkOutsideRoots
         | WalkSkip::SealedMount
         | WalkSkip::SealedPlaceholder

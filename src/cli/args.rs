@@ -12,7 +12,7 @@ use crate::rules::Name;
 use crate::run::elevated;
 use crate::scan::{Needs, Settings, WalkSetting, WalkSkip};
 
-use super::fix::{Fix, Flag, Step};
+use super::hint::{Flag, Hint, Step};
 
 #[derive(Debug, Parser)]
 #[command(name = "rosie", version, about = "A macOS cleanup CLI for developers.")]
@@ -194,7 +194,7 @@ impl Mode {
     /// take every one of them (`docs/spec/cli.md#flags`). Every mode takes
     /// `--enter-mounts`; only `tree` and `caches` take the bundle and placeholder flags. A
     /// sealed skip stays closed whatever the flags, and `Denied` has no flag in any mode.
-    pub fn walk_skip_fix(&self, skip: WalkSkip) -> Option<Fix> {
+    pub fn walk_skip_hint(&self, skip: WalkSkip) -> Option<Hint> {
         let WalkSkip::Closed(needs) = skip else {
             return None;
         };
@@ -206,18 +206,18 @@ impl Mode {
         if !needs.settings().all(accepted) {
             return None;
         }
-        Some(enter_fix(needs))
+        Some(enter_hint(needs))
     }
 }
 
 /// The flags that open a folder closed for `needs`, all at once, named by what the
 /// outermost one does: `to cross it: --enter-mounts`.
-pub(super) fn enter_fix(needs: Needs) -> Fix {
+pub(super) fn enter_hint(needs: Needs) -> Hint {
     let label = match needs.settings().count() {
         1 => format!("to {} it", verb(needs.outermost())),
         _ => "to enter it".to_owned(),
     };
-    Fix {
+    Hint {
         label,
         steps: needs
             .settings()

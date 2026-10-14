@@ -5,7 +5,7 @@
 use std::fmt;
 
 use super::args::Mode;
-use super::fix::{Command, Fix};
+use super::hint::{Command, Hint};
 use crate::output::{Line, Mark};
 use crate::plan::Report;
 use crate::scan::{Problem, Refused, Scan, Skipped, WalkSkip, WalkSkips};
@@ -41,15 +41,15 @@ pub(super) fn stats_lines(stats: impl fmt::Display, skips: WalkSkips) -> String 
 fn walk_skip_line(skipped: &Skipped, mode: &Mode) -> String {
     let path = skipped.path.display();
     let reason = skipped.reason.reason();
-    let fix = match skipped.reason {
-        WalkSkip::LinkOutsideRoots => Some(Fix::run(
+    let hint = match skipped.reason {
+        WalkSkip::LinkOutsideRoots => Some(Hint::run(
             "to clean it",
             [Command::RootsAdd(skipped.path.clone())],
         )),
-        skip => mode.walk_skip_fix(skip),
+        skip => mode.walk_skip_hint(skip),
     };
-    match fix {
-        Some(fix) => format!("skipped {path}: {reason} ({})", fix.compact()),
+    match hint {
+        Some(hint) => format!("skipped {path}: {reason} ({})", hint.compact()),
         None => format!("skipped {path}: {reason}"),
     }
 }

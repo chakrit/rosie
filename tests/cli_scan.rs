@@ -550,12 +550,12 @@ fn a_first_run_with_a_seeded_root_through_a_symlink_writes_the_config_and_can_be
 
     first.assert_status(ExitStatus::Failed);
     assert_eq!(written, seeded);
-    for fix in [
+    for hint in [
         "rosie config set walk.enter_links roots".to_owned(),
         "rosie roots remove ~/.cargo/registry".to_owned(),
         format!("rosie roots add {HOME}/dotfiles/cargo/.cargo/registry"),
     ] {
-        assert!(first.stderr.contains(&fix), "{fix}\n{}", first.stderr);
+        assert!(first.stderr.contains(&hint), "{hint}\n{}", first.stderr);
     }
     assert!(first.stdout.is_empty(), "{}", first.stdout);
     fixed.assert_status(ExitStatus::Success);

@@ -97,7 +97,7 @@ impl Needs {
     pub const MOUNTS: Needs = Needs::of(WalkSetting::Mounts);
     pub const BUNDLES: Needs = Needs::of(WalkSetting::Bundles);
 
-    pub const fn of(setting: WalkSetting) -> Needs {
+    const fn of(setting: WalkSetting) -> Needs {
         Needs {
             placeholders: matches!(setting, WalkSetting::Placeholders),
             mounts: matches!(setting, WalkSetting::Mounts),

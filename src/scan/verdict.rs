@@ -57,7 +57,7 @@ impl Scan {
     /// from at or above it, a plan entry at or above it, a walk skip at or above it, a
     /// failed read at or above it, the plan entries inside it, the refused, skipped, and
     /// unread items inside it, and otherwise no rule.
-    pub fn verdict(&self, path: &Path) -> PathVerdict<'_> {
+    pub(crate) fn verdict(&self, path: &Path) -> PathVerdict<'_> {
         let place = |at: &Path| match at == path {
             true => Place::At,
             false => Place::Inside,

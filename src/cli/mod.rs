@@ -36,7 +36,6 @@ use session::Session;
 
 pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals};
 pub use error::Error;
-pub use root::{RootError, RootRefusal};
 
 /// Everything rosie takes from its environment, gathered by `main`.
 #[derive(Debug, Clone)]

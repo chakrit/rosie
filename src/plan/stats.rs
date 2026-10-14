@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use super::{Delete, Plan, Size, Status};
+use super::{Delete, Plan, Size, Status, StatusKind};
 
 /// How much one item weighs in the totals. Tool commands are "size unknown" and are
 /// excluded from the byte totals.
@@ -32,7 +32,7 @@ impl Tally {
         }
     }
 
-    pub fn plus(self, other: Tally) -> Tally {
+    pub(crate) fn plus(self, other: Tally) -> Tally {
         Tally {
             items: self.items + other.items,
             size: self.size + other.size,
@@ -112,12 +112,18 @@ impl PlanStats {
 
 impl fmt::Display for PlanStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "clean: {}", self.clean)?;
+        writeln!(f, "{}: {}", StatusKind::Clean.label(), self.clean)?;
         if !self.keep.is_empty() {
-            writeln!(f, "keep (aggressive, not run): {}", self.keep)?;
+            writeln!(
+                f,
+                "{} (aggressive, not run): {}",
+                StatusKind::Keep.label(),
+                self.keep
+            )?;
         }
         if !self.outside_roots.is_empty() {
-            writeln!(f, "outside-roots (not run): {}", self.outside_roots)?;
+            let label = StatusKind::OutsideRoots.label();
+            writeln!(f, "{label} (not run): {}", self.outside_roots)?;
         }
         if !self.conflicts.is_empty() {
             writeln!(

@@ -291,9 +291,23 @@ fn refuses_hand_placed_packs_whose_names_differ_only_in_case() {
 
     let error = load(&fake).err();
 
-    assert!(
-        matches!(&error, Some(Error::DuplicatePack { pack, .. }) if pack.eq_ignore_ascii_case("rosie")),
-        "got {error:?}"
+    let Some(Error::DuplicatePack {
+        pack,
+        first,
+        second,
+    }) = &error
+    else {
+        panic!("expected a duplicate pack, got {error:?}");
+    };
+    assert!(pack.eq_ignore_ascii_case("rosie"), "{pack}");
+    let mut folders = [first.clone(), second.clone()];
+    folders.sort();
+    assert_eq!(
+        folders,
+        [
+            PathBuf::from(ROSIE_PACK),
+            PathBuf::from(format!("{PACKS}/fork/Rosie")),
+        ]
     );
 }
 

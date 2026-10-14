@@ -10,7 +10,7 @@ use super::RuleMatch;
 use super::entry::Entry;
 use super::log::{Log, Problem, SizingLog};
 use super::progress::Progress;
-use super::refusal::{Admitted, Refused, Screening};
+use super::screening::{Admitted, Refused, Screening};
 use super::sizing::{Measure, Sizer};
 use crate::fs::{Backend, FsContext};
 use crate::plan::{ItemKind, PathMatch, Reach, RunAs};

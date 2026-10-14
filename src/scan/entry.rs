@@ -100,7 +100,7 @@ pub struct Folder {
 
 /// Why a path cannot be a [`Folder`].
 #[derive(Debug, Error)]
-pub enum NotAFolder {
+pub enum FolderError {
     /// The `lstat` failed, or the path passes through or names a symlink.
     #[error(transparent)]
     Fs(#[from] fs::Error),
@@ -169,12 +169,12 @@ impl Sealed {
 impl Folder {
     /// `lstat`s `path` as a folder whose entries will be checked. A path through a
     /// symlink, or naming one, is refused rather than followed.
-    pub fn lstat<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Result<Folder, NotAFolder> {
+    pub fn lstat<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Result<Folder, FolderError> {
         let path = fs::resolve_dots(path)?;
         let meta = Cleanup::lstat_link_free(&path).perform(ctx)?;
         match meta.kind {
             FileKind::Dir => Ok(Folder { path, meta }),
-            FileKind::File | FileKind::Symlink | FileKind::Other => Err(NotAFolder::Kind { path }),
+            FileKind::File | FileKind::Symlink | FileKind::Other => Err(FolderError::Kind { path }),
         }
     }
 

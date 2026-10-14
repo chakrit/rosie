@@ -45,7 +45,7 @@ fn bar_app_with_a_linked_plist(fake: &FakeBackend) {
 }
 
 #[test]
-fn a_symlinked_info_plist_is_refused_by_app_and_orphan_scans() {
+fn a_symlinked_info_plist_makes_the_app_unreadable_to_app_and_orphan_scans() {
     let fake = FakeBackend::new();
     bar_app_with_a_linked_plist(&fake);
 
@@ -177,7 +177,7 @@ fn a_symlinked_wrapped_info_plist_is_refused_by_app_and_orphan_scans() {
 }
 
 #[test]
-fn a_symlinked_wrapper_folder_is_refused() {
+fn a_symlinked_wrapper_folder_makes_the_app_unreadable() {
     let fake = FakeBackend::new();
     install_wrapped_app(&fake, "/Users/me/Real.app", "com.newin.nplayer", "nPlayer");
     fake.add_dir(format!("{NPLAYER}/Contents"));

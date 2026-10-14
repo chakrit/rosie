@@ -15,7 +15,7 @@ mod entry;
 mod fixed;
 mod log;
 mod progress;
-mod refusal;
+mod screening;
 mod sizing;
 mod skip;
 mod targets;
@@ -32,14 +32,14 @@ use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder};
 use crate::rules::{RuleId, RuleSet, Shape};
 use crate::tier::Tier;
 
-pub use entry::{Entry, Folder, InFolder, Mounts, NotAFolder, NotAnEntry, Sealed};
+pub use entry::{Entry, Folder, FolderError, InFolder, Mounts, NotAnEntry, Sealed};
 pub use log::{Log, Problem, Skipped};
 pub use progress::{NoProgress, Progress};
-pub use refusal::Refused;
-pub(crate) use refusal::Screening;
+pub use screening::Refused;
+pub(crate) use screening::Screening;
 pub use sizing::{Measure, Sizer};
 pub use skip::{Needs, WalkSkip, WalkSkips};
-pub use verdict::{PathVerdict, Place, Planned};
+pub(crate) use verdict::{PathVerdict, Place, Planned};
 
 use fixed::{FixedClaim, FixedTargets};
 use targets::Targets;

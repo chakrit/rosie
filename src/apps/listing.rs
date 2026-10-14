@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::path::Path;
 
 use crate::fs::{self, Backend, Cleanup, FsContext, FsOp};
-use crate::scan::{Folder, NotAFolder};
+use crate::scan::{Folder, FolderError};
 
 /// What a fixed folder holds.
 pub(super) enum Listing {
@@ -47,9 +47,9 @@ pub(super) fn find_folder<B: Backend>(
 ) -> Result<FolderLookup, fs::Error> {
     match Folder::lstat(ctx, path) {
         Ok(folder) => Ok(FolderLookup::Found(folder)),
-        Err(NotAFolder::Kind { .. }) => Ok(FolderLookup::Absent),
-        Err(NotAFolder::Fs(error)) if error.has_vanished() => Ok(FolderLookup::Absent),
-        Err(NotAFolder::Fs(error)) => Err(error),
+        Err(FolderError::Kind { .. }) => Ok(FolderLookup::Absent),
+        Err(FolderError::Fs(error)) if error.has_vanished() => Ok(FolderLookup::Absent),
+        Err(FolderError::Fs(error)) => Err(error),
     }
 }
 

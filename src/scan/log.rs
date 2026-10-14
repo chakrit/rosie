@@ -43,7 +43,7 @@ pub enum Problem {
 
 impl Problem {
     /// Where the walk met the problem, for a path that could not be read or was refused.
-    pub fn met_at(&self) -> Option<&Path> {
+    pub(crate) fn met_at(&self) -> Option<&Path> {
         match self {
             Problem::Path { met_at, .. } => Some(met_at),
             Problem::Rule(_) | Problem::Plan(_) | Problem::Special { .. } => None,

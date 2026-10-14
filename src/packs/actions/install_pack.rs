@@ -4,9 +4,8 @@ use std::time::SystemTime;
 
 use super::settle_pack::{SettlePack, Unsettled};
 use crate::fs::{self, Backend, FsContext, FsOp, Rosie};
-use crate::packs::archive::RuleFile;
+use crate::packs::archive::{CheckedRules, RuleFile};
 use crate::packs::error::Error;
-use crate::packs::source::Source;
 use crate::packs::store::{self, Store};
 
 /// Installs a pack's rule files, replacing any installed copy wholesale.
@@ -17,19 +16,18 @@ use crate::packs::store::{self, Store};
 /// rename fails after the first, settling the pack moves the old pack back before it
 /// clears the staging folder. Every crash point is listed on [`Store`].
 pub struct InstallPack<'a> {
-    pub source: &'a Source,
-    pub rules: &'a [RuleFile],
+    pub rules: CheckedRules<'a>,
     pub pulled_at: SystemTime,
 }
 
 impl InstallPack<'_> {
     pub fn run<B: Backend>(&self, store: &Store<B>) -> Result<(), Error> {
         let settle = SettlePack {
-            source: self.source,
+            source: self.rules.source(),
         };
         settle.run(store)?;
 
-        let staging = store.staging_dir(self.source);
+        let staging = store.staging_dir(self.rules.source());
         self.stage(store.ctx(), &staging)?;
         self.swap_in(store, &settle, &staging)?;
 
@@ -44,7 +42,7 @@ impl InstallPack<'_> {
     /// pack and the next settle clears it.
     fn stage<B: Backend>(&self, ctx: &FsContext<B>, staging: &Path) -> Result<(), Error> {
         Rosie::create_dir_all(staging).perform(ctx)?;
-        for rule in self.rules {
+        for rule in self.rules.files() {
             Rosie::create(&staging.join(rule.name()), rule.contents())
                 .perform(ctx)
                 .map_err(|error| named_twice(error, rule))?;
@@ -62,8 +60,9 @@ impl InstallPack<'_> {
         staging: &Path,
     ) -> Result<(), Error> {
         let ctx = store.ctx();
-        let pack = store.pack_dir(self.source);
-        let set_aside = store.set_aside_dir(self.source);
+        let source = self.rules.source();
+        let pack = store.pack_dir(source);
+        let set_aside = store.set_aside_dir(source);
         let replacing = store.exists(&pack)?;
         if replacing {
             Rosie::rename(&pack, &set_aside).perform(ctx)?;
@@ -117,8 +116,11 @@ mod tests {
     use super::*;
     use crate::fs::fake::{FakeBackend, USER_UID};
     use crate::fs::{Bounds, Op, Paths};
+    use crate::packs::archive::Archive;
+    use crate::packs::source::Source;
 
     const HOME: &str = "/Users/me";
+    const NODE_RULE: &str = "[rules.node-modules]\nstrategy = \"marker\"\ntarget = \"node_modules\"\nmarker = [\"package.json\"]\n";
     const DATA: &str = "/Users/me/.local/share/rosie";
     const PACK: &str = "/Users/me/.local/share/rosie/packs/chakrit/rosie";
     const STAGING: &str = "/Users/me/.local/share/rosie/packs/chakrit/.rosie.new";
@@ -132,8 +134,9 @@ mod tests {
         FsContext::new(fake, bounds).expect("absolute bounds")
     }
 
-    fn rule(name: &str, body: &str) -> RuleFile {
-        RuleFile::new(OsString::from(name), body.as_bytes().to_vec())
+    fn new_pack() -> Archive {
+        let rule = RuleFile::new(OsString::from("new.toml"), NODE_RULE.as_bytes().to_vec());
+        Archive::of_rules(vec![rule])
     }
 
     #[test]
@@ -145,11 +148,11 @@ mod tests {
         let ctx = ctx(&fake);
         let store = Store::new(&ctx, Path::new(DATA));
         let source = Source::default();
-        let rules = [rule("new.toml", "new")];
+        let archive = new_pack();
+        let rules = archive.checked_rules(&source).expect("valid rules");
 
         let result = InstallPack {
-            source: &source,
-            rules: &rules,
+            rules,
             pulled_at: UNIX_EPOCH + Duration::from_secs(2),
         }
         .run(&store);
@@ -175,11 +178,11 @@ mod tests {
         let ctx = ctx(&fake);
         let store = Store::new(&ctx, Path::new(DATA));
         let source = Source::default();
-        let rules = [rule("new.toml", "new")];
+        let archive = new_pack();
+        let rules = archive.checked_rules(&source).expect("valid rules");
 
         InstallPack {
-            source: &source,
-            rules: &rules,
+            rules,
             pulled_at: UNIX_EPOCH,
         }
         .run(&store)

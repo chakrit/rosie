@@ -72,7 +72,10 @@ impl Archive {
 
     /// Loads every rule file with `rules::load_pack`, so a pack refused here is exactly a
     /// pack the rule layers would refuse. Files are named `<source>/<file>` in errors.
-    pub fn check_rules(&self, source: &Source) -> Result<(), Error> {
+    pub(super) fn checked_rules<'a>(
+        &'a self,
+        source: &'a Source,
+    ) -> Result<CheckedRules<'a>, Error> {
         let labeled: Vec<(PathBuf, &[u8])> = self
             .rules
             .iter()
@@ -89,13 +92,44 @@ impl Archive {
                 .map(|(label, bytes)| (label.as_path(), *bytes)),
         )
         .map_err(|source| Error::InvalidRules(Box::new(source)))?;
-        Ok(())
+
+        Ok(CheckedRules {
+            source,
+            files: &self.rules,
+        })
     }
 
     /// The root `config.toml`, used to seed a fresh user config.
     pub fn config(&self) -> Result<&str, Error> {
         let bytes = self.config.as_deref().ok_or(Error::NoConfig)?;
         std::str::from_utf8(bytes).map_err(|_| Error::ConfigNotText)
+    }
+
+    /// An archive of just `rules`, as if parsed from a tarball holding them.
+    #[cfg(test)]
+    pub(super) fn of_rules(rules: Vec<RuleFile>) -> Archive {
+        Archive {
+            rules,
+            config: None,
+        }
+    }
+}
+
+/// An archive's rule files that loaded under the pack name of `source`, the one source
+/// they may be installed for.
+#[derive(Debug, Clone, Copy)]
+pub(super) struct CheckedRules<'a> {
+    source: &'a Source,
+    files: &'a [RuleFile],
+}
+
+impl<'a> CheckedRules<'a> {
+    pub(super) fn source(&self) -> &'a Source {
+        self.source
+    }
+
+    pub(super) fn files(&self) -> &'a [RuleFile] {
+        self.files
     }
 }
 

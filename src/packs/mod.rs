@@ -114,11 +114,10 @@ fn install<B: Backend>(
     archive: &Archive,
     now: SystemTime,
 ) -> Result<Pulled, Error> {
-    archive.check_rules(source)?;
+    let rules = archive.checked_rules(source)?;
 
     InstallPack {
-        source,
-        rules: archive.rules(),
+        rules,
         pulled_at: now,
     }
     .run(settled.store())?;

@@ -122,14 +122,13 @@ fn enter_links_all_follows_links_and_suggests_roots_add_for_one_outside() {
     let with = sandbox.run(&["scan", "tree", ".", "--enter-links=all"]);
     let invalid = sandbox.run(&["scan", "tree", ".", "--enter-links=yes"]);
 
-    let line = "- skipped /Users/me/elsewhere: linked to from the roots, but outside them \
-                (to clean it: rosie roots add /Users/me/elsewhere)";
+    let line = "- skipped /Users/me/elsewhere: linked to from the roots, but outside them\n  \
+                to allow just it:\n    \
+                rosie roots add /Users/me/elsewhere\n  \
+                or to allow its folder:\n    \
+                rosie roots add /Users/me\n";
     assert!(!without.stderr.contains(line), "{}", without.stderr);
-    assert!(
-        with.stderr.lines().any(|shown| shown == line),
-        "{line}\n{}",
-        with.stderr
-    );
+    assert!(with.stderr.contains(line), "{line}\n{}", with.stderr);
     assert!(with.stdout.contains(&format!("{CWD}/mine/node_modules")));
     assert!(!with.stdout.contains("/Users/me/elsewhere/app/node_modules"));
     invalid.assert_status(ExitStatus::Usage);
@@ -665,6 +664,28 @@ fn an_untested_tool_version_warns_and_the_scan_goes_on() {
     assert_eq!(
         warnings,
         ["! /usr/sbin/lsof is version 4.99; rosie was tested with 4.91"],
+        "{}",
+        ran.stderr
+    );
+}
+
+/// `docs/spec/cli.md#errors`: a typed path outside the roots names both ways to allow it.
+#[test]
+fn an_app_outside_the_roots_is_refused_with_the_roots_hints() {
+    let sandbox = Sandbox::with_roots(&[CWD]);
+    sandbox.install_app("/Users/me/Apps/X.app", "com.foo.X", "X");
+
+    let ran = sandbox.run(&["scan", "app", "/Users/me/Apps/X.app"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert!(
+        ran.stderr.contains(
+            "outside the allowed roots\n  \
+             to allow just it:\n    \
+             rosie roots add /Users/me/Apps/X.app\n  \
+             or to allow its folder:\n    \
+             rosie roots add /Users/me/Apps\n"
+        ),
         "{}",
         ran.stderr
     );

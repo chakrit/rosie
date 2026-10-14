@@ -504,27 +504,7 @@ const SLACK: &str = "/Users/me/Applications/Slack.app";
 
 /// An installed app with no leftovers, which `scan app` plans as one `clean` bundle.
 fn install_slack(sandbox: &Sandbox) {
-    let plist = format!("{SLACK}/Contents/Info.plist");
-    sandbox.fake.add_file(&plist, "<plist/>");
-    sandbox
-        .fake
-        .add_file(format!("{SLACK}/Contents/MacOS/Slack"), "x");
-    sandbox.respond(
-        extract(&plist, "CFBundleIdentifier"),
-        "com.tinyspeck.slackmacgap\n",
-    );
-    sandbox.respond(extract(&plist, "CFBundleName"), "Slack\n");
-    sandbox.respond(Argv::new("/usr/sbin/pkgutil").arg("--pkgs"), "");
-}
-
-fn extract(plist: &str, key: &str) -> Argv {
-    Argv::new("/usr/bin/plutil")
-        .arg("-extract")
-        .arg(key)
-        .arg("raw")
-        .arg("-o")
-        .arg("-")
-        .arg(plist)
+    sandbox.install_app(SLACK, "com.tinyspeck.slackmacgap", "Slack");
 }
 
 #[test]

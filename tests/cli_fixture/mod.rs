@@ -123,6 +123,21 @@ impl Sandbox {
             .add_file(format!("{dir}/node_modules/left-pad/index.js"), "x");
     }
 
+    /// An installed app at `bundle`: its `Info.plist` with `id` and `name`, one executable,
+    /// and no installer receipts.
+    pub fn install_app(&self, bundle: &str, id: &str, name: &str) {
+        let plist = format!("{bundle}/Contents/Info.plist");
+        self.fake.add_file(&plist, "<plist/>");
+        self.fake
+            .add_file(format!("{bundle}/Contents/MacOS/{name}"), "x");
+        self.respond(
+            plist_extract(&plist, "CFBundleIdentifier"),
+            &format!("{id}\n"),
+        );
+        self.respond(plist_extract(&plist, "CFBundleName"), &format!("{name}\n"));
+        self.respond(Argv::new("/usr/sbin/pkgutil").arg("--pkgs"), "");
+    }
+
     /// What `id -u` prints.
     pub fn running_as(&self, uid: &str) {
         self.respond(Argv::new("/usr/bin/id").arg("-u"), &format!("{uid}\n"));
@@ -391,4 +406,15 @@ impl Console for ScriptedConsole {
     fn reporter(&self) -> PlainReporter<Shared> {
         PlainReporter::new(self.err.clone(), Palette::plain())
     }
+}
+
+/// `plutil` reading one key of `plist`, as app mode runs it.
+fn plist_extract(plist: &str, key: &str) -> Argv {
+    Argv::new("/usr/bin/plutil")
+        .arg("-extract")
+        .arg(key)
+        .arg("raw")
+        .arg("-o")
+        .arg("-")
+        .arg(plist)
 }

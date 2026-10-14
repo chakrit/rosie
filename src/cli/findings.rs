@@ -5,8 +5,8 @@
 use std::fmt;
 
 use super::args::Mode;
-use crate::hint::{Command, Hint};
-use crate::output::{Line, Mark};
+use crate::hint::{Hint, hint_lines};
+use crate::output::{Line, Mark, Palette};
 use crate::plan::Report;
 use crate::scan::{Problem, Refused, Scan, Skipped, WalkSkip, WalkSkips};
 
@@ -41,16 +41,17 @@ pub(super) fn stats_lines(stats: impl fmt::Display, skips: WalkSkips) -> String 
 fn walk_skip_line(skipped: &Skipped, mode: &Mode) -> String {
     let path = skipped.path.display();
     let reason = skipped.reason.reason();
-    let hint = match skipped.reason {
-        WalkSkip::LinkOutsideRoots => Some(Hint::run(
-            "to clean it",
-            [Command::RootsAdd(skipped.path.clone())],
-        )),
-        skip => mode.walk_skip_hint(skip),
+    let hints = match skipped.reason {
+        WalkSkip::LinkOutsideRoots => Hint::allow_in_roots(&skipped.path),
+        skip => mode.walk_skip_hint(skip).into_iter().collect(),
     };
-    match hint {
-        Some(hint) => format!("skipped {path}: {reason} ({})", hint.compact()),
-        None => format!("skipped {path}: {reason}"),
+    match hints.as_slice() {
+        [] => format!("skipped {path}: {reason}"),
+        [hint] => format!("skipped {path}: {reason} ({})", hint.compact()),
+        several => {
+            let lines = hint_lines(Palette::plain(), several).join("\n");
+            format!("skipped {path}: {reason}\n{lines}")
+        }
     }
 }
 

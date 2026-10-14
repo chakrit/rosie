@@ -108,8 +108,8 @@ no rule        ~/Downloads/missing                    does not exist
   user, inside lines included, before any hint. *(agent-inferred)*
 - An `outside-roots` line lists the ways to allow it, one of which is enough: the entry
   itself (`to allow just it`) or the folder holding it (`or to allow its folder`). When
-  that folder is `/`, only the entry is listed, as `to allow it`. The plan file lists
-  the same.
+  that folder is `/`, only the entry is listed, as `to allow it`. The plan file, scan
+  skip lines, and errors about a path outside the roots list the same.
 - A conflict found by a `tree` or `caches` walk is at one path, so neither side names an
   `on <path>`, and a conflict nested in another, as in the example's `~/src/api/target`
   and `~/src/api/target/debug` lines, does not arise. *(agent-inferred)*

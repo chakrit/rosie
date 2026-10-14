@@ -7,7 +7,6 @@ mod tarball;
 use cli_fixture::{CONFIG_FILE, CWD, HOME, NODE_RULE, PACK, Sandbox, Script};
 use pack_fixture::{Canned, ROSIE_SET_ASIDE, url_of};
 use rosie::cli::ExitStatus;
-use rosie::fs::Argv;
 use tarball::Tarball;
 
 // rules
@@ -253,25 +252,11 @@ fn config_refuses_an_unknown_key_and_roots() {
 const BAR: &str = "/Applications/Bar.app";
 
 fn install_bar(sandbox: &Sandbox) {
-    let plist = format!("{BAR}/Contents/Info.plist");
-    sandbox.fake.add_file(&plist, "<plist/>");
+    sandbox.install_app(BAR, "com.foo.Bar", "Bar");
     sandbox
         .fake
-        .add_sized_file(format!("{BAR}/Contents/MacOS/Bar"), 1 << 20);
-    sandbox.respond(extract(&plist, "CFBundleIdentifier"), "com.foo.Bar\n");
-    sandbox.respond(extract(&plist, "CFBundleName"), "Bar\n");
-    sandbox.respond(Argv::new("/usr/sbin/pkgutil").arg("--pkgs"), "");
+        .add_sized_file(format!("{BAR}/Contents/Resources/Assets.car"), 1 << 20);
     sandbox.fake.add_dir("/Users/me/Library/Caches/com.foo.Bar");
-}
-
-fn extract(plist: &str, key: &str) -> Argv {
-    Argv::new("/usr/bin/plutil")
-        .arg("-extract")
-        .arg(key)
-        .arg("raw")
-        .arg("-o")
-        .arg("-")
-        .arg(plist)
 }
 
 #[test]

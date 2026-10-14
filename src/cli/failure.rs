@@ -114,9 +114,7 @@ fn nothing_to_pick_hints(kind: PickKind) -> Vec<Hint> {
 
 fn fs_hints(error: &fs::Error) -> Vec<Hint> {
     match error {
-        fs::Error::OutsideRoots { path } => {
-            vec![Hint::run("allow it", [Command::RootsAdd(path.clone())])]
-        }
+        fs::Error::OutsideRoots { path } => Hint::allow_in_roots(path),
         fs::Error::Symlink { real, .. } => {
             let allow = Hint::run(
                 "allow symlinks in roots and typed paths",

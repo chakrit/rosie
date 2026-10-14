@@ -63,9 +63,9 @@ pub fn pull<B: Backend, N: Network>(
 ) -> Result<Pulled, Error> {
     let settled = SettlePacks.run(store)?;
     let installed = settled.sources()?;
-    let replaced = installed.iter().position(|other| other == requested);
-    let source = replaced.map_or(requested, |at| &installed[at]);
-    refuse_name_taken(&installed, replaced, source)?;
+    let (replaced, others) = split_installed(&installed, requested);
+    let source = replaced.unwrap_or(requested);
+    refuse_name_taken(&others, source)?;
 
     let archive = DownloadArchive { source }.run(network)?;
     install(&settled, source, &archive, now)
@@ -126,26 +126,32 @@ fn install<B: Backend>(
     })
 }
 
-/// Two packs with one name would give their rules the same `pack/rule` identities, so a
-/// source is refused when an installed folder other than the one at `replaced` has its
-/// pack name. On a case-sensitive volume that includes a second spelling of the same
-/// repository, which the pull would leave in place.
-fn refuse_name_taken(
-    installed: &[Source],
-    replaced: Option<usize>,
-    source: &Source,
-) -> Result<(), Error> {
-    let taken = installed
+/// The installed source a pull of `requested` replaces, if any, and every other installed
+/// source, which the pull leaves in place.
+fn split_installed<'a>(
+    installed: &'a [Source],
+    requested: &Source,
+) -> (Option<&'a Source>, Vec<&'a Source>) {
+    let replaced_at = installed.iter().position(|other| other == requested);
+    let others = installed
         .iter()
         .enumerate()
-        .filter(|&(at, _)| Some(at) != replaced)
+        .filter(|&(at, _)| Some(at) != replaced_at)
         .map(|(_, other)| other)
-        .find(|other| other.pack() == source.pack());
+        .collect();
+    (replaced_at.map(|at| &installed[at]), others)
+}
+
+/// Two packs with one name would give their rules the same `pack/rule` identities, so a
+/// source is refused when a pack the pull leaves in place has its pack name. On a
+/// case-sensitive volume that includes a second spelling of the same repository.
+fn refuse_name_taken(others: &[&Source], source: &Source) -> Result<(), Error> {
+    let taken = others.iter().find(|other| other.pack() == source.pack());
 
     match taken {
         Some(other) => Err(Error::PackNameTaken {
             pack: source.pack().to_string(),
-            installed: other.clone(),
+            installed: (*other).clone(),
         }),
         None => Ok(()),
     }

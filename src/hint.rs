@@ -6,11 +6,9 @@
 use std::fmt;
 use std::path::PathBuf;
 
-use super::args::flag;
-use crate::config::WalkKey;
+use crate::config::{WalkKey, WalkSetting};
 use crate::fs::EnterLinks;
 use crate::output::Palette;
-use crate::scan::WalkSetting;
 use crate::shell::quote_word;
 
 /// One way out of a failure: what it does, then the steps that do it. A hint with no
@@ -181,6 +179,15 @@ impl fmt::Display for Flag {
     }
 }
 
+/// The command-line flag that turns `setting` on.
+fn flag(setting: WalkSetting) -> &'static str {
+    match setting {
+        WalkSetting::Placeholders => "--enter-placeholders",
+        WalkSetting::Mounts => "--enter-mounts",
+        WalkSetting::Bundles => "--enter-bundles",
+    }
+}
+
 /// A word the shell gives rosie as `text`. A path under `~/` keeps its `~/` outside the
 /// quotes, so the shell expands it as it does when the user types it.
 fn shell_word(text: &str) -> String {
@@ -216,66 +223,7 @@ pub fn hint_lines(palette: Palette, hints: &[Hint]) -> Vec<String> {
 
 #[cfg(test)]
 mod tests {
-    use clap::Parser;
-
-    use super::super::args::Cli;
     use super::*;
-
-    fn every_command() -> Vec<Command> {
-        let mut commands = vec![
-            Command::Roots,
-            Command::RootsAdd(PathBuf::from("/Users/me/My Code")),
-            Command::RootsAddAny,
-            Command::RootsRemove(PathBuf::from("~/.cargo/registry")),
-            Command::RootsRemovePick,
-            Command::Config,
-            Command::Rules,
-            Command::RulesPull,
-            Command::RulesRemove("extra".to_owned()),
-            Command::ScanTree(PathBuf::from("~/src")),
-        ];
-        commands.extend(EnterLinks::ALL.map(Command::ConfigSetLinks));
-        commands
-    }
-
-    fn every_flag() -> Vec<Flag> {
-        let mut flags = vec![Flag::Aggressive];
-        flags.extend(
-            [
-                WalkSetting::Placeholders,
-                WalkSetting::Mounts,
-                WalkSetting::Bundles,
-            ]
-            .map(Flag::Enter),
-        );
-        flags
-    }
-
-    /// `docs/spec/cli.md#errors`: a hint names only commands rosie has.
-    #[test]
-    fn every_suggested_command_parses_as_a_rosie_command_line() {
-        for command in every_command() {
-            let argv = std::iter::once("rosie".to_owned()).chain(command.args());
-
-            let parsed = Cli::try_parse_from(argv);
-
-            assert!(parsed.is_ok(), "{command}: {parsed:?}");
-        }
-    }
-
-    #[test]
-    fn every_suggested_flag_parses_on_a_tree_scan() {
-        for flag in every_flag() {
-            let argv = ["rosie", "scan", "tree"]
-                .map(str::to_owned)
-                .into_iter()
-                .chain([flag.to_string()]);
-
-            let parsed = Cli::try_parse_from(argv);
-
-            assert!(parsed.is_ok(), "{flag}: {parsed:?}");
-        }
-    }
 
     #[test]
     fn a_command_quotes_what_the_shell_would_split_and_keeps_a_home_path_expandable() {
@@ -290,7 +238,7 @@ mod tests {
     }
 
     #[test]
-    fn later_fixes_read_as_alternatives_with_their_steps_indented() {
+    fn later_hints_read_as_alternatives_with_their_steps_indented() {
         let hints = [
             Hint::run(
                 "allow symlinks in roots",

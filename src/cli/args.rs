@@ -6,13 +6,14 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 
 use crate::config::Walk;
+use crate::config::WalkSetting;
 use crate::fs::EnterLinks;
 use crate::plan::AggressiveItems;
 use crate::rules::Name;
 use crate::run::elevated;
-use crate::scan::{Needs, Settings, WalkSetting, WalkSkip};
+use crate::scan::{Needs, Settings, WalkSkip};
 
-use super::hint::{Flag, Hint, Step};
+use crate::hint::{Flag, Hint, Step};
 
 #[derive(Debug, Parser)]
 #[command(name = "rosie", version, about = "A macOS cleanup CLI for developers.")]
@@ -226,15 +227,6 @@ pub(super) fn enter_hint(needs: Needs) -> Hint {
     }
 }
 
-/// The command-line flag that turns `setting` on.
-pub(super) fn flag(setting: WalkSetting) -> &'static str {
-    match setting {
-        WalkSetting::Placeholders => "--enter-placeholders",
-        WalkSetting::Mounts => "--enter-mounts",
-        WalkSetting::Bundles => "--enter-bundles",
-    }
-}
-
 /// What `setting` lets the walk do to the folder it closes.
 fn verb(setting: WalkSetting) -> &'static str {
     match setting {
@@ -323,4 +315,68 @@ fn parse_enter_links(text: &str) -> Result<EnterLinks, String> {
         let levels: Vec<&str> = EnterLinks::ALL.into_iter().map(EnterLinks::label).collect();
         format!("expected one of: {}", levels.join(", "))
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use clap::Parser;
+
+    use super::*;
+    use crate::hint::Command as HintCommand;
+
+    fn every_command() -> Vec<HintCommand> {
+        let mut commands = vec![
+            HintCommand::Roots,
+            HintCommand::RootsAdd(PathBuf::from("/Users/me/My Code")),
+            HintCommand::RootsAddAny,
+            HintCommand::RootsRemove(PathBuf::from("~/.cargo/registry")),
+            HintCommand::RootsRemovePick,
+            HintCommand::Config,
+            HintCommand::Rules,
+            HintCommand::RulesPull,
+            HintCommand::RulesRemove("extra".to_owned()),
+            HintCommand::ScanTree(PathBuf::from("~/src")),
+        ];
+        commands.extend(EnterLinks::ALL.map(HintCommand::ConfigSetLinks));
+        commands
+    }
+
+    fn every_flag() -> Vec<Flag> {
+        let mut flags = vec![Flag::Aggressive];
+        flags.extend(
+            [
+                WalkSetting::Placeholders,
+                WalkSetting::Mounts,
+                WalkSetting::Bundles,
+            ]
+            .map(Flag::Enter),
+        );
+        flags
+    }
+
+    /// `docs/spec/cli.md#errors`: a hint names only commands rosie has.
+    #[test]
+    fn every_suggested_command_parses_as_a_rosie_command_line() {
+        for command in every_command() {
+            let argv = std::iter::once("rosie".to_owned()).chain(command.args());
+
+            let parsed = Cli::try_parse_from(argv);
+
+            assert!(parsed.is_ok(), "{command}: {parsed:?}");
+        }
+    }
+
+    #[test]
+    fn every_suggested_flag_parses_on_a_tree_scan() {
+        for flag in every_flag() {
+            let argv = ["rosie", "scan", "tree"]
+                .map(str::to_owned)
+                .into_iter()
+                .chain([flag.to_string()]);
+
+            let parsed = Cli::try_parse_from(argv);
+
+            assert!(parsed.is_ok(), "{flag}: {parsed:?}");
+        }
+    }
 }

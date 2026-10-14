@@ -22,7 +22,7 @@ use toml_edit::DocumentMut;
 
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, Rosie, UserInput};
 
-pub use keys::{Key, WalkKey};
+pub use keys::{Key, WalkKey, WalkSetting};
 
 const FILE_NAME: &str = "config.toml";
 

@@ -5,8 +5,9 @@ mod scan_fixture;
 use std::path::{Path, PathBuf};
 
 use rosie::config::Walk;
+use rosie::config::WalkSetting;
 use rosie::fs::fake::{Call, FakeBackend};
-use rosie::scan::{Needs, WalkSetting, WalkSkip};
+use rosie::scan::{Needs, WalkSkip};
 use scan_fixture::*;
 
 const NPM_CACACHE: &str =

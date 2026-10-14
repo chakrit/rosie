@@ -3,6 +3,8 @@
 
 use std::fmt;
 
+use crate::config::WalkSetting;
+
 /// Why the walk did not enter a folder (`docs/spec/safety.md#walk-skips`). A closed
 /// skip is one its `[walk]` settings would open, and it carries every setting that
 /// takes; a sealed one stays closed whatever the settings.
@@ -40,7 +42,7 @@ impl WalkSkip {
     pub fn reason(self) -> String {
         match self {
             WalkSkip::Closed(needs) => {
-                let reasons: Vec<&str> = needs.settings().map(WalkSetting::reason).collect();
+                let reasons: Vec<&str> = needs.settings().map(closed_reason).collect();
                 reasons.join("; ")
             }
             WalkSkip::SealedMount => "mount point, never entered or a target".to_owned(),
@@ -72,24 +74,12 @@ impl WalkSkip {
     }
 }
 
-/// A `[walk]` setting that opens a kind of closed folder.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum WalkSetting {
-    /// `enter_placeholders`: a dataless cloud placeholder.
-    Placeholders,
-    /// `enter_mounts`: a mount root on another volume.
-    Mounts,
-    /// `enter_bundles`: a bundle folder.
-    Bundles,
-}
-
-impl WalkSetting {
-    fn reason(self) -> &'static str {
-        match self {
-            WalkSetting::Placeholders => "cloud placeholder, not downloaded",
-            WalkSetting::Mounts => "another volume",
-            WalkSetting::Bundles => "bundle",
-        }
+/// What a folder closed for `setting` is, as a skip line names it.
+fn closed_reason(setting: WalkSetting) -> &'static str {
+    match setting {
+        WalkSetting::Placeholders => "cloud placeholder, not downloaded",
+        WalkSetting::Mounts => "another volume",
+        WalkSetting::Bundles => "bundle",
     }
 }
 

@@ -5,7 +5,7 @@
 use std::fmt;
 
 use super::args::Mode;
-use super::hint::{Command, Hint};
+use crate::hint::{Command, Hint};
 use crate::output::{Line, Mark};
 use crate::plan::Report;
 use crate::scan::{Problem, Refused, Scan, Skipped, WalkSkip, WalkSkips};

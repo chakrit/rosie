@@ -6,10 +6,11 @@ mod scan_fixture;
 use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
+use rosie::config::WalkSetting;
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{self, Op, ROOT_UID};
 use rosie::plan::{AggressiveItems, RunAs, Status};
-use rosie::scan::{Error, Needs, NoProgress, WalkSetting, WalkSkip};
+use rosie::scan::{Error, Needs, NoProgress, WalkSkip};
 use scan_fixture::*;
 
 const PYCACHE: &str = "[rules.pycache]\nstrategy = \"name\"\ntarget = \"__pycache__\"\n";

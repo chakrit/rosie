@@ -38,7 +38,7 @@ pub use progress::{NoProgress, Progress};
 pub use refusal::Refused;
 pub(crate) use refusal::Screening;
 pub use sizing::{Measure, Sizer};
-pub use skip::{Needs, WalkSetting, WalkSkip, WalkSkips};
+pub use skip::{Needs, WalkSkip, WalkSkips};
 pub use verdict::{PathVerdict, Place, Planned};
 
 use fixed::{FixedClaim, FixedTargets};

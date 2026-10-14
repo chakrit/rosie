@@ -5,11 +5,11 @@
 use std::path::{Path, PathBuf};
 
 use super::error::Error;
-use super::hint::{Command, Hint};
 use super::root::RootError;
 use super::session::PickKind;
 use crate::config::{self, UnusableRoot};
 use crate::fs::{self, EnterLinks, RealPath};
+use crate::hint::{Command, Hint};
 use crate::run::elevated;
 use crate::{apps, packs, plan, rules, scan};
 

@@ -17,11 +17,11 @@ use std::path::{Path, PathBuf};
 use super::args::{CheckArgs, enter_hint};
 use super::console::{Console, Finish};
 use super::findings::problem_line;
-use super::hint::{Command, Flag, Hint};
 use super::session::Session;
 use super::{Error, ExitStatus};
 use crate::apps;
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
+use crate::hint::{Command, Flag, Hint};
 use crate::packs::Network;
 use crate::plan::{Delete, Disagreement, PlanStats, RunAs, StatusKind, Tally};
 use crate::scan::{

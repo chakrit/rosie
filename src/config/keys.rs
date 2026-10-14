@@ -25,6 +25,17 @@ pub enum WalkKey {
     EnterLinks,
 }
 
+/// A `[walk]` setting that opens a kind of closed folder.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum WalkSetting {
+    /// `enter_placeholders`: a dataless cloud placeholder.
+    Placeholders,
+    /// `enter_mounts`: a mount root on another volume.
+    Mounts,
+    /// `enter_bundles`: a bundle folder.
+    Bundles,
+}
+
 impl Key {
     /// Every key, for `rosie config` and the `config get` picker.
     pub const ALL: [Key; 5] = [

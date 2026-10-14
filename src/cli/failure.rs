@@ -53,7 +53,11 @@ fn hints(error: &Error) -> Vec<Hint> {
         Error::Apps(error) => apps_hints(error),
         Error::Plan(error) => plan_hints(error),
         Error::Elevated(error) => elevated_hints(error),
-        Error::Root(RootError::Refused(_) | RootError::Process(_))
+        Error::Root(RootError::Refused(refusal)) => vec![Hint::run(
+            "run it again without sudo",
+            [Command::Rerun(refusal.args().to_vec())],
+        )],
+        Error::Root(RootError::Process(_))
         | Error::Usage(_)
         | Error::Cancelled
         | Error::PlanNotText(_)

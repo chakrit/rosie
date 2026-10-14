@@ -7,7 +7,6 @@ use thiserror::Error;
 
 use crate::fs::{self, Backend, FsContext};
 use crate::process;
-use crate::shell::quote_word;
 
 /// The refusal lines, one chosen per run.
 const LINES: [&str; 3] = [
@@ -43,17 +42,16 @@ impl RootRefusal {
             args,
         }
     }
+
+    pub fn args(&self) -> &[String] {
+        &self.args
+    }
 }
 
-/// The line, then `run it again without sudo: rosie <the same arguments>`, each argument
-/// shell-quoted so the line stays runnable however the user typed it.
+/// The refusal line; the command to run instead is its hint.
 impl fmt::Display for RootRefusal {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        let command = std::iter::once("rosie".to_owned())
-            .chain(self.args.iter().map(|arg| quote_word(arg)))
-            .collect::<Vec<_>>()
-            .join(" ");
-        write!(f, "{}\nrun it again without sudo: {command}", self.line)
+        write!(f, "{}", self.line)
     }
 }
 
@@ -112,7 +110,7 @@ mod tests {
     }
 
     #[test]
-    fn refuses_root_with_a_line_and_the_command_to_run_instead() {
+    fn refuses_root_with_a_line_and_the_arguments_to_run_again() {
         let fake = FakeBackend::new();
         let ctx = ctx_running_as(&fake, "0");
 
@@ -121,20 +119,8 @@ mod tests {
         let Err(RootError::Refused(refusal)) = refused else {
             panic!("expected a refusal, got {refused:?}");
         };
-        assert_eq!(
-            refusal.to_string(),
-            "Jane! Stop this crazy thing!\nrun it again without sudo: rosie clean tree ."
-        );
-    }
-
-    #[test]
-    fn quotes_a_repeated_argument_containing_spaces() {
-        let refusal = RootRefusal::new(0, vec!["scan".into(), "tree".into(), "my app".into()]);
-
-        assert!(
-            refusal.to_string().ends_with("rosie scan tree 'my app'"),
-            "{refusal}"
-        );
+        assert_eq!(refusal.to_string(), "Jane! Stop this crazy thing!");
+        assert_eq!(refusal.args(), args());
     }
 
     #[test]

@@ -336,6 +336,7 @@ mod tests {
             HintCommand::RulesPull,
             HintCommand::RulesRemove("extra".to_owned()),
             HintCommand::ScanTree(PathBuf::from("~/src")),
+            HintCommand::Rerun(vec!["clean".to_owned(), "tree".to_owned(), ".".to_owned()]),
         ];
         commands.extend(EnterLinks::ALL.map(HintCommand::ConfigSetLinks));
         commands

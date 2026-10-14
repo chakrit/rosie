@@ -105,6 +105,8 @@ pub enum Command {
     RulesPull,
     RulesRemove(String),
     ScanTree(PathBuf),
+    /// The arguments rosie was given, run again as given.
+    Rerun(Vec<String>),
 }
 
 impl Command {
@@ -125,24 +127,26 @@ impl Command {
             Command::RulesPull => &["rules", "pull"],
             Command::RulesRemove(_) => &["rules", "remove"],
             Command::ScanTree(_) => &["scan", "tree"],
+            Command::Rerun(_) => &[],
         };
-        let operand = match self {
+        let operands: Vec<Word> = match self {
             Command::RootsAdd(path) | Command::RootsRemove(path) | Command::ScanTree(path) => {
-                Some(Word::Given(path.to_string_lossy().into_owned()))
+                vec![Word::Given(path.to_string_lossy().into_owned())]
             }
-            Command::RootsAddAny => Some(Word::Placeholder("path")),
-            Command::ConfigSetLinks(level) => Some(Word::Given(level.label().to_owned())),
-            Command::RulesRemove(pack) => Some(Word::Given(pack.clone())),
+            Command::RootsAddAny => vec![Word::Placeholder("path")],
+            Command::ConfigSetLinks(level) => vec![Word::Given(level.label().to_owned())],
+            Command::RulesRemove(pack) => vec![Word::Given(pack.clone())],
+            Command::Rerun(args) => args.iter().cloned().map(Word::Literal).collect(),
             Command::Roots
             | Command::RootsRemovePick
             | Command::Config
             | Command::Rules
-            | Command::RulesPull => None,
+            | Command::RulesPull => Vec::new(),
         };
         names
             .iter()
             .map(|name| Word::Given((*name).to_owned()))
-            .chain(operand)
+            .chain(operands)
             .collect()
     }
 }
@@ -159,6 +163,8 @@ impl fmt::Display for Command {
 /// One argument of a suggested command.
 enum Word {
     Given(String),
+    /// An argument exactly as the user gave it: quoted whole, `~` included.
+    Literal(String),
     /// A value the user supplies.
     Placeholder(&'static str),
 }
@@ -168,6 +174,7 @@ impl Word {
     fn unquoted(self) -> String {
         match self {
             Word::Given(text) => text,
+            Word::Literal(text) => text,
             Word::Placeholder(name) => format!("<{name}>"),
         }
     }
@@ -175,6 +182,7 @@ impl Word {
     fn shell(&self) -> String {
         match self {
             Word::Given(text) => shell_word(text),
+            Word::Literal(text) => quote_word(text),
             Word::Placeholder(name) => format!("<{name}>"),
         }
     }
@@ -266,6 +274,13 @@ mod tests {
             "rosie roots add ~"
         );
         assert_eq!(Command::RootsAddAny.to_string(), "rosie roots add <path>");
+    }
+
+    #[test]
+    fn a_rerun_quotes_each_argument_as_given_and_never_expands_home() {
+        let rerun = Command::Rerun(vec!["scan".into(), "tree".into(), "~/my app".into()]);
+
+        assert_eq!(rerun.to_string(), "rosie scan tree '~/my app'");
     }
 
     #[test]

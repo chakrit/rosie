@@ -264,4 +264,5 @@ process ID):
 - `rosie destroys things. It should never be run under sudo. Trust me, you don't know
   what you are doing.`
 
-It is followed by a plain `run it again without sudo: rosie clean …` line.
+It is followed by the hint `run it again without sudo:` with the same command,
+`rosie clean …` ([cli.md](cli.md#errors)).

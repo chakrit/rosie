@@ -22,7 +22,7 @@ fn sudo_rosie_is_refused_before_anything_is_read() {
 
     ran.assert_status(ExitStatus::Failed);
     let lines: Vec<&str> = ran.stderr.lines().collect();
-    assert_eq!(lines.len(), 2, "{}", ran.stderr);
+    assert_eq!(lines.len(), 3, "{}", ran.stderr);
     let known = [
         "Jane! Stop this crazy thing!",
         "I swear on my mother's rechargeable batteries!",
@@ -35,7 +35,10 @@ fn sudo_rosie_is_refused_before_anything_is_read() {
         "{}",
         ran.stderr
     );
-    assert_eq!(lines[1], "  run it again without sudo: rosie clean tree .");
+    assert_eq!(
+        lines[1..],
+        ["  run it again without sudo:", "    rosie clean tree ."]
+    );
     let read_anything = sandbox.fake.calls().into_iter().any(|call| {
         matches!(
             call,

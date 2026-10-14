@@ -132,7 +132,8 @@ no rule        ~/Downloads/missing                    does not exist
 - An `.app` path is judged as `rosie scan app` would plan it, when nothing at or above
   it is claimed or skipped other than as a closed bundle; only the bundle's own line is
   printed. `orphans` is not consulted. An `.app` refused other than for a running
-  process, or unreadable, reads `skipped` with the error's text. *(agent-inferred)*
+  process, or unreadable, reads `skipped` with the error's text; one refused for lying
+  outside the roots adds the `outside-roots` hints. *(agent-inferred)*
 
 ## Management commands
 

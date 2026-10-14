@@ -581,7 +581,8 @@ fn an_app_inside_a_plan_entry_takes_the_entry_s_status() {
 }
 
 /// App mode refusing the bundle is a refusal of the typed path: `skipped` with the
-/// refusal's own text, and the other paths still print.
+/// refusal's own text and the hints that would let it in, and the other paths still
+/// print.
 #[test]
 fn an_app_outside_the_roots_is_skipped_with_the_refusal() {
     let sandbox = Sandbox::with_roots(&[CWD]);
@@ -598,7 +599,10 @@ fn an_app_outside_the_roots_is_skipped_with_the_refusal() {
             "skipped",
             "~/Applications/Slack.app",
             "cannot clean /Users/me/Applications/Slack.app: \
-             /Users/me/Applications/Slack.app is outside the allowed roots"
+             /Users/me/Applications/Slack.app is outside the allowed roots; to allow just it:\n\
+             rosie roots add ~/Applications/Slack.app\n\
+             or to allow its folder:\n\
+             rosie roots add ~/Applications"
         )
     );
 }

@@ -96,7 +96,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it:
     /// `in use` when that scan refuses the bundle for a process running from it, and
     /// `skipped` with the error's text when it refuses or cannot read the bundle for any
-    /// other reason. The walk's `verdict` decides when the path is not an app after all;
+    /// other reason, plus the hints that let it in when it is outside the roots. The walk's `verdict` decides when the path is not an app after all;
     /// any other error of that scan is not about the bundle and propagates.
     fn app_line(
         &self,
@@ -108,6 +108,15 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let shown = self.tilde();
 
         let scanned = apps::scan_app(ctx, path, &app_mode);
+        let allow = match &scanned {
+            Err(apps::Error::Refused {
+                source: fs::Error::OutsideRoots { path: refused },
+                ..
+            }) => Some(hints_text(&Hint::allow_in_roots(Path::new(
+                &shown.path(refused),
+            )))),
+            _ => None,
+        };
 
         let (word, reason) = match scanned {
             Ok(scan) => return Ok(line(&scan.verdict(path), path, &shown)),
@@ -124,7 +133,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 | apps::Error::InvalidBundleId { .. }
                 | apps::Error::Placeholder { .. }
                 | apps::Error::Mount { .. }),
-            ) => (Word::Skipped, error.to_string()),
+            ) => {
+                let parts: Vec<String> = [Some(error.to_string()), allow]
+                    .into_iter()
+                    .flatten()
+                    .collect();
+                (Word::Skipped, parts.join("; "))
+            }
             Err(error) => return Err(error.into()),
         };
         Ok(Line {

@@ -275,11 +275,6 @@ pub struct Bootout {
 }
 
 impl Bootout {
-    /// The command as the plan and its shell export show it.
-    pub fn argv(&self) -> Argv {
-        self.argv_for("launchctl")
-    }
-
     /// The command as a run executes it: the [`SystemTool`] by its absolute path, so no
     /// `PATH` lookup can put another program in its place.
     pub fn absolute_argv(&self) -> SystemArgv {
@@ -290,7 +285,8 @@ impl Bootout {
             .arg(&self.plist)
     }
 
-    fn argv_for(&self, launchctl: &str) -> Argv {
+    /// The command with `launchctl` as its program, as the shell export writes it.
+    pub(super) fn argv_for(&self, launchctl: &str) -> Argv {
         Argv::new(launchctl)
             .arg("bootout")
             .arg(self.domain.to_string())
@@ -332,11 +328,6 @@ pub struct Receipt {
 }
 
 impl Receipt {
-    /// The command as the plan and its shell export show it.
-    pub fn argv(&self) -> Argv {
-        self.argv_for("pkgutil")
-    }
-
     /// The command as a run executes it: the [`SystemTool`] by its absolute path, so no
     /// `PATH` lookup can put another program in its place.
     pub fn absolute_argv(&self) -> SystemArgv {
@@ -346,7 +337,8 @@ impl Receipt {
             .arg(self.package.as_str())
     }
 
-    fn argv_for(&self, pkgutil: &str) -> Argv {
+    /// The command with `pkgutil` as its program, as the shell export writes it.
+    pub(super) fn argv_for(&self, pkgutil: &str) -> Argv {
         Argv::new(pkgutil)
             .arg("--forget")
             .arg(self.package.as_str())

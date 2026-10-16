@@ -184,5 +184,32 @@ entry checked; after the user edits it, rosie re-shows the trimmed plan and re-p
 `rosie scan … --sh` prints the plan as a shell script that the user inspects and runs
 with sudo themselves. An `.sh` plan is export-only, for power users; rosie cannot run it.
 
-- A `[[tool]]` entry is exported as `<shell> -c <cmd>`, preceded by
-  `/usr/bin/env NAME=value …` when it has an `env`.
+```sh
+#!/bin/bash
+# rosie plan, exported as a shell script. rosie cannot run this file.
+# Inspect every line, then run it yourself: sudo bash path/to/this-file.sh
+# keep and outside-roots entries are commented out.
+
+main() {
+:
+
+# 1.2 GB · rosie/node-modules
+/bin/rm -rfx -- /Users/me/src/app/node_modules
+
+# keep: 84.0 MB · rosie/python-venv
+# /bin/rm -rfx -- /Users/me/src/old/.venv
+
+# size unknown · user/homebrew
+HOMEBREW_NO_ENV_HINTS=1 /bin/zsh -c 'brew cleanup'
+
+# size unknown · forget receipt
+/usr/sbin/pkgutil --forget com.x.pkg
+}
+
+main "$@"; exit
+```
+
+- Each command is a plain line starting with the tool's absolute path.
+- The commands sit inside a `main` function that the last line calls.
+- A `[[tool]]` entry is exported as `<shell> -c <cmd>`, preceded by its `env` as
+  `NAME=value` words.

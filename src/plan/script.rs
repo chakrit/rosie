@@ -1,13 +1,14 @@
 //! The `--sh` export: the plan as a bash script the user inspects and runs with sudo
 //! themselves (`docs/spec/plan.md#shell-script-export`). Rosie cannot run it.
 //!
-//! - Every path and argument is quoted with [`shell::quote_word`], so none can spill onto a
-//!   line of its own, and every command is written as `( exec -- <words> ) </dev/null`,
-//!   so bash runs exactly its argv.
+//! - Every command is one plain line of words quoted with [`shell::quote_word`], so none
+//!   can spill onto a line of its own, and its first word is the program's absolute path,
+//!   so bash runs exactly its argv: a word with a `/` is never read as a builtin, a
+//!   function, an alias, a reserved word, or an assignment.
 //! - The entries sit inside a `main` function that the last line calls. Bash reads the
 //!   whole script before running any of it, so a script piped to bash and cut short runs
 //!   nothing, and a command that reads its input cannot consume the rest of the script
-//!   and make bash resume inside a commented-out line. No command reads bash's input.
+//!   and make bash resume inside a commented-out line.
 //! - `keep` and `outside-roots` entries are commented out; report-only entries are
 //!   comments.
 //! - A plan with an unresolved rule conflict is refused: only a TOML plan can be
@@ -17,12 +18,8 @@ use std::path::Path;
 
 use super::conflict::conflict_hint;
 use super::{Error, Plan, Status, comment, outside_roots_hint};
-use crate::fs::Argv;
+use crate::fs::{Argv, SystemTool};
 use crate::shell;
-
-/// Adds a tool's environment; by its absolute path, so the script's `PATH` cannot swap
-/// it.
-const ENV_PROGRAM: &str = "/usr/bin/env";
 
 /// `:` keeps `main` valid bash when every entry in it is commented out.
 const HEADER: &str = "\
@@ -41,9 +38,29 @@ const FOOTER: &str = "}
 main \"$@\"; exit
 ";
 
+/// The programs an exported script runs for rosie's own entries, each by its absolute
+/// path. A tool entry runs its rule's own shell, which is absolute too.
+struct Programs<'p> {
+    rm: &'p str,
+    launchctl: &'p str,
+    pkgutil: &'p str,
+}
+
+impl Programs<'static> {
+    const SYSTEM: Programs<'static> = Programs {
+        rm: "/bin/rm",
+        launchctl: SystemTool::LAUNCHCTL.path(),
+        pkgutil: SystemTool::PKGUTIL.path(),
+    };
+}
+
 impl Plan {
-    /// Bootouts come first, so every launch job is unloaded before its plist is deleted.
     pub fn to_sh(&self) -> Result<String, Error> {
+        self.script(&Programs::SYSTEM)
+    }
+
+    /// Bootouts come first, so every launch job is unloaded before its plist is deleted.
+    fn script(&self, programs: &Programs) -> Result<String, Error> {
         let conflicts = self.conflicts().len();
         if conflicts > 0 {
             return Err(Error::UnresolvedConflicts { count: conflicts });
@@ -57,13 +74,15 @@ impl Plan {
                     shell::comment_text(&bootout.domain.to_string())
                 );
                 let line = Line::of(delete.status.clone(), &delete.path, note);
-                script.push_str(&line.render(&command_line(&bootout.argv())));
+                let argv = bootout.argv_for(programs.launchctl);
+                script.push_str(&line.render(&command_line(&argv)));
             }
         }
         for delete in self.deletes.iter() {
             let note = format!("{} · {}", delete.size, rules_text(&delete.rules));
             let line = Line::of(delete.status.clone(), &delete.path, note);
-            script.push_str(&line.render(&command_line(&delete_argv(&delete.path))));
+            let argv = delete_argv(programs.rm, &delete.path);
+            script.push_str(&line.render(&command_line(&argv)));
         }
         for tool in &self.tools {
             let note = format!("size unknown · {}", shell::comment_text(&tool.rule));
@@ -73,7 +92,8 @@ impl Plan {
         for receipt in &self.receipts {
             let note = "size unknown · forget receipt".to_owned();
             let line = Line::pathless(receipt.selection.into(), note);
-            script.push_str(&line.render(&command_line(&receipt.argv())));
+            let argv = receipt.argv_for(programs.pkgutil);
+            script.push_str(&line.render(&command_line(&argv)));
         }
         for report in &self.reports {
             script.push_str(&format!(
@@ -127,41 +147,31 @@ impl Line {
     }
 }
 
-/// An argv as one line that runs exactly that argv, reading no input:
-/// `( exec -- <quoted words> ) </dev/null`, or, with an added environment,
-/// `( exec -- /usr/bin/env NAME=value … <quoted words> ) </dev/null`.
+/// An argv as one plain line that runs exactly that argv: `<quoted words>`, or, with an
+/// added environment, `NAME=<quoted value> … <quoted words>`.
 ///
-/// As arguments to `exec`, the words are never read as a builtin, a function, a reserved
-/// word, a job, or an assignment. The subshell keeps `exec` from replacing the script.
+/// Every program the export runs is named by its absolute path, so the first word holds
+/// a `/` and bash runs it as a file, never as a builtin, a function, an alias, a reserved
+/// word, or an assignment. Names are shell names, checked when the tool command was built.
 fn command_line(argv: &Argv) -> String {
     let assignments = argv.envs().iter().map(|(name, value)| {
-        let mut assignment = name.clone();
-        assignment.push("=");
-        assignment.push(value);
-        assignment
+        format!(
+            "{}={}",
+            name.to_string_lossy(),
+            shell::quote_word(&value.to_string_lossy())
+        )
     });
-    let env_prefix = match argv.envs().is_empty() {
-        true => Vec::new(),
-        false => std::iter::once(ENV_PROGRAM.into())
-            .chain(assignments)
-            .collect(),
-    };
-
-    let words = env_prefix
-        .iter()
-        .map(|word| word.as_os_str())
-        .chain(std::iter::once(argv.program()))
+    let words = std::iter::once(argv.program())
         .chain(argv.args().iter().map(|arg| arg.as_os_str()))
-        .map(|word| shell::quote_word(&word.to_string_lossy()))
-        .collect::<Vec<_>>()
-        .join(" ");
-    format!("( exec -- {words} ) </dev/null")
+        .map(|word| shell::quote_word(&word.to_string_lossy()));
+
+    assignments.chain(words).collect::<Vec<_>>().join(" ")
 }
 
 /// `-x` keeps `rm` inside the file system the path is on, so a volume mounted inside a
 /// matched folder is left alone.
-fn delete_argv(path: &Path) -> Argv {
-    Argv::new("rm").arg("-rfx").arg("--").arg(path)
+fn delete_argv(rm: &str, path: &Path) -> Argv {
+    Argv::new(rm).arg("-rfx").arg("--").arg(path)
 }
 
 fn rules_text(rules: &[String]) -> String {
@@ -252,10 +262,10 @@ mod tests {
             .collect()
     }
 
-    /// A `PATH` folder of stub programs, one per program the export of [`plan`] runs.
-    /// Each appends its name to the file `$LOG`. The `docker` stub also reads its input a
-    /// line at a time, logging each line as `read <line>`, and stops two bytes into the
-    /// line after `# keep:`, just past the `# ` that comments out the next command.
+    /// A folder of stub programs, one per program the export of [`plan`] runs. Each
+    /// appends its name to the file `$LOG`. The `docker` stub also reads its input a line
+    /// at a time, logging each line as `read <line>`, and stops two bytes into the line
+    /// after `# keep:`, just past the `# ` that comments out the next command.
     ///
     /// Tests running at the same time share one folder: macOS pays a first-execution cost
     /// per fresh binary, so writing this folder anew in every test dominated their
@@ -291,6 +301,20 @@ mod tests {
             std::fs::set_permissions(&path, executable).expect("make stub executable");
         }
         bin
+    }
+
+    /// The export of [`plan`] with rosie's own programs swapped for the stubs in `bin`,
+    /// so running it touches nothing outside the test. Its tools run `/bin/bash`, which
+    /// finds the `docker` stub on `PATH`.
+    fn stubbed_script(bin: &Path) -> String {
+        let path = |program: &str| bin.join(program).to_str().expect("UTF-8").to_owned();
+        let (rm, launchctl, pkgutil) = (path("rm"), path("launchctl"), path("pkgutil"));
+        let programs = Programs {
+            rm: &rm,
+            launchctl: &launchctl,
+            pkgutil: &pkgutil,
+        };
+        plan().script(&programs).expect("no conflicts")
     }
 
     /// Runs `/bin/bash` with `args`, writing `input` to its stdin, `PATH` holding only
@@ -334,23 +358,7 @@ mod tests {
     fn piped_to_bash_only_clean_entries_run() {
         let bin = stubs();
 
-        let log = run_bash(
-            &[],
-            plan().to_sh().expect("no conflicts").as_bytes(),
-            bin.path(),
-        );
-
-        assert_eq!(log, CLEAN_PROGRAMS);
-    }
-
-    /// No exported command reads the input of the bash that runs the script.
-    #[test]
-    fn exported_commands_read_no_input() {
-        let bin = stubs();
-        let script = bin.path().join("exported-commands-read-no-input.sh");
-        std::fs::write(&script, plan().to_sh().expect("no conflicts")).expect("write script");
-
-        let log = run_bash(&[&script], b"y\ny\n", bin.path());
+        let log = run_bash(&[], stubbed_script(bin.path()).as_bytes(), bin.path());
 
         assert_eq!(log, CLEAN_PROGRAMS);
     }
@@ -360,8 +368,8 @@ mod tests {
     #[test]
     fn a_truncated_script_runs_nothing() {
         let bin = stubs();
-        let script = plan().to_sh().expect("no conflicts");
-        let first_command = script.find("( exec -- launchctl").expect("a bootout");
+        let script = stubbed_script(bin.path());
+        let first_command = script.find(" bootout ").expect("a bootout");
         let line_end = first_command + script[first_command..].find('\n').expect("line end");
 
         let log = run_bash(&[], &script.as_bytes()[..=line_end], bin.path());
@@ -376,12 +384,11 @@ mod tests {
         assert_eq!(
             executable_lines(&script),
             [
-                "( exec -- launchctl bootout system /Library/LaunchDaemons/com.x.plist ) </dev/null"
-                    .to_owned(),
-                "( exec -- rm -rfx -- /Library/LaunchDaemons/com.x.plist ) </dev/null".to_owned(),
-                format!("( exec -- rm -rfx -- {} ) </dev/null", shell::quote_word(HOSTILE)),
-                "( exec -- /bin/bash -c 'docker system prune --force' ) </dev/null".to_owned(),
-                "( exec -- pkgutil --forget com.x.pkg ) </dev/null".to_owned(),
+                "/bin/launchctl bootout system /Library/LaunchDaemons/com.x.plist".to_owned(),
+                "/bin/rm -rfx -- /Library/LaunchDaemons/com.x.plist".to_owned(),
+                format!("/bin/rm -rfx -- {}", shell::quote_word(HOSTILE)),
+                "/bin/bash -c 'docker system prune --force'".to_owned(),
+                "/usr/sbin/pkgutil --forget com.x.pkg".to_owned(),
             ],
             "{script}"
         );
@@ -393,21 +400,20 @@ mod tests {
 
         assert!(
             script.contains(&format!(
-                "\n# ( exec -- rm -rfx -- {} ) </dev/null\n",
+                "\n# /bin/rm -rfx -- {}\n",
                 shell::quote_word(&format!("/x{HOSTILE}"))
             )),
             "{script}"
         );
         assert!(
             script.contains(&format!(
-                "\n# ( exec -- rm -rfx -- {} ) </dev/null\n",
+                "\n# /bin/rm -rfx -- {}\n",
                 shell::quote_word(&format!("/y{HOSTILE}"))
             )),
             "{script}"
         );
         assert!(
-            script
-                .contains("\n# ( exec -- /bin/bash -c 'tool clean --dir=/tmp/x$y' ) </dev/null\n"),
+            script.contains("\n# /bin/bash -c 'tool clean --dir=/tmp/x$y'\n"),
             "{script}"
         );
         assert!(
@@ -477,29 +483,18 @@ mod tests {
         assert_eq!(
             executable_lines(&script),
             [
-                "( exec -- launchctl bootout gui/501 /w/app/com.x.plist ) </dev/null",
-                "( exec -- rm -rfx -- /w/app ) </dev/null"
+                "/bin/launchctl bootout gui/501 /w/app/com.x.plist",
+                "/bin/rm -rfx -- /w/app"
             ],
             "{script}"
         );
     }
 
-    /// What bash prints for a command's exported line, run with `PATH` holding only
-    /// `bin`.
-    fn run_exported_line(words: &[&str], bin: &Path) -> std::process::Output {
-        let (program, args) = words.split_first().expect("a program");
-        let argv = args
-            .iter()
-            .fold(Argv::new(program), |argv, arg| argv.arg(arg));
-        run_line(&command_line(&argv), bin)
-    }
-
-    fn run_line(line: &str, bin: &Path) -> std::process::Output {
+    fn run_line(line: &str) -> std::process::Output {
         Command::new("/bin/bash")
             .arg("-c")
             .arg(line)
             .env_clear()
-            .env("PATH", bin)
             .output()
             .expect("run /bin/bash")
     }
@@ -507,7 +502,6 @@ mod tests {
     /// A tool's exported line hands its `cmd` whole to its shell, with its environment.
     #[test]
     fn an_exported_tool_runs_its_cmd_through_its_shell_with_its_env() {
-        let bin = tempfile::tempdir().expect("temp folder");
         let tool = ShellCommand::new(
             "/bin/sh".to_owned(),
             "printf '%s|%s' \"$GREETING\" \"$(echo inner)\"".to_owned(),
@@ -515,56 +509,52 @@ mod tests {
         )
         .expect("valid");
 
-        let output = run_line(&command_line(&tool.argv()), bin.path());
+        let output = run_line(&command_line(&tool.argv()));
 
         assert!(output.status.success(), "{output:?}");
         assert_eq!(output.stdout, b"it's \"here\" $HOME|inner");
     }
 
-    /// A `PATH` folder whose only program is a link named `program` to
-    /// `/usr/bin/printf`, which prints the remaining words through the format `%s\0`.
-    fn printf_named(program: &str) -> tempfile::TempDir {
-        let bin = tempfile::tempdir().expect("temp folder");
-        std::os::unix::fs::symlink("/usr/bin/printf", bin.path().join(program))
-            .expect("link printf");
-        bin
-    }
-
     /// Bash builtins, reserved words, job specs, and assignments are all words bash reads
-    /// as something other than a program to look up on `PATH` when they start a command.
+    /// as something other than a program when one starts a command. Named by an absolute
+    /// path, a program with such a name runs, and its args reach it as written.
     #[test]
     fn exported_commands_run_their_program_with_their_args() {
-        let programs = [
-            "eval", "source", "exec", "cd", "trap", "time", "if", "!", "{", "%", "%1", "%a=b",
-            "FOO=1", "PATH=bin",
+        let names = [
+            "eval",
+            "source",
+            "exec",
+            "cd",
+            "trap",
+            "time",
+            "if",
+            "!",
+            "{",
+            "%",
+            "%1",
+            "%a=b",
+            "FOO=1",
+            "PATH=bin",
+            "it's \"$HOME\" `id`",
         ];
         let args = ["a b", "=c", "%d", "$(echo EVALUATED)", ";echo EVALUATED"];
+        let bin = tempfile::tempdir().expect("temp folder");
 
-        for program in programs {
-            let bin = printf_named(program);
-            let words = [program, r"%s\0"].into_iter().chain(args);
+        for name in names {
+            let program = bin.path().join(name);
+            std::os::unix::fs::symlink("/usr/bin/printf", &program).expect("link printf");
+            let argv = [r"%s\0"]
+                .into_iter()
+                .chain(args)
+                .fold(Argv::new(&program), |argv, arg| argv.arg(arg));
 
-            let output = run_exported_line(&words.collect::<Vec<_>>(), bin.path());
+            let output = run_line(&command_line(&argv));
 
-            assert!(output.status.success(), "program {program:?}: {output:?}");
+            assert!(output.status.success(), "program {name:?}: {output:?}");
             assert_eq!(
                 output.stdout, b"a b\0=c\0%d\0$(echo EVALUATED)\0;echo EVALUATED\0",
-                "program {program:?}"
+                "program {name:?}"
             );
         }
-    }
-
-    /// No file can be named `.`, so the exported line finds no program to run, and the
-    /// file named after it is never sourced.
-    #[test]
-    fn an_exported_dot_command_sources_nothing() {
-        let bin = tempfile::tempdir().expect("temp folder");
-        let script = bin.path().join("script");
-        std::fs::write(&script, "echo SOURCED\n").expect("write script");
-
-        let output = run_exported_line(&[".", &script.to_string_lossy()], bin.path());
-
-        assert!(!output.status.success(), "{output:?}");
-        assert_eq!(output.stdout, b"", "{output:?}");
     }
 }

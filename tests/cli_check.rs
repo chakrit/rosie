@@ -739,7 +739,7 @@ fn each_path_s_status_equals_its_status_in_the_tree_plan() {
         .fake
         .add_file(format!("{CWD}/in/rs/target/debug/x"), "x");
 
-    let scanned = sandbox.run(&["scan", "tree", "."]);
+    let scanned = sandbox.run(&["scan", "tree", ".", "--toml"]);
     let planned = planned_statuses(&scanned.stdout);
     let paths: Vec<&str> = planned.iter().map(|(path, _)| path.as_str()).collect();
     let checked = check(&sandbox, &paths);

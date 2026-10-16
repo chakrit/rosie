@@ -77,7 +77,7 @@ fn clean_answered_yes_deletes_clean_items_inside_the_roots_only() {
     assert!(sandbox.exists(format!("{CWD}/inside/package.json").as_str()));
     assert!(
         ran.stdout
-            .contains(&format!("rosie roots add {CWD}/outside/node_modules")),
+            .contains("rosie roots add ~/src/outside/node_modules"),
         "{}",
         ran.stdout
     );
@@ -121,7 +121,7 @@ fn clean_refuses_y_while_a_rule_conflict_remains() {
     ran.assert_status(ExitStatus::Success);
     assert!(sandbox.removals().is_empty(), "{:?}", sandbox.removals());
     assert!(
-        ran.stdout.contains("status = \"conflict\""),
+        ran.stdout.lines().any(|line| line.starts_with("conflict ")),
         "{}",
         ran.stdout
     );
@@ -163,7 +163,7 @@ fn clean_edit_makes_the_user_choose_each_conflict() {
 #[test]
 fn run_refuses_a_saved_plan_with_a_conflict() {
     let sandbox = conflicted_project();
-    let scanned = sandbox.run(&["scan", "tree", "."]);
+    let scanned = sandbox.run(&["scan", "tree", ".", "--toml"]);
 
     let ran = sandbox.run_with(Script::piped().stdin(&scanned.stdout), &["run", "-"]);
 
@@ -196,20 +196,13 @@ fn clean_edit_removes_unchecked_entries_reshows_the_plan_and_asks_again() {
     assert!(!sandbox.exists(format!("{CWD}/b/node_modules").as_str()));
     assert_eq!(ran.asked.len(), 3, "{:?}", ran.asked);
     assert!(ran.asked[1].contains(&format!("delete {CWD}/a/node_modules")));
-    let shown = ran.stdout.matches("version = 1").count();
+    let a_shown = ran.stdout.matches("~/src/a/node_modules").count();
+    let b_shown = ran.stdout.matches("~/src/b/node_modules").count();
     assert_eq!(
-        shown, 2,
+        (a_shown, b_shown),
+        (1, 2),
         "the plan is shown, then shown trimmed:\n{}",
         ran.stdout
-    );
-    let trimmed = ran
-        .stdout
-        .rsplit("version = 1")
-        .next()
-        .expect("second plan");
-    assert!(
-        !trimmed.contains(&format!("{CWD}/a/node_modules")),
-        "{trimmed}"
     );
 }
 

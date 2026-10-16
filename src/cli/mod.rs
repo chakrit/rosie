@@ -7,15 +7,19 @@
 
 mod args;
 mod check;
+mod columns;
 mod console;
+mod entry_text;
 mod error;
 mod failure;
 mod findings;
 mod manage;
+mod plan_table;
 mod progress;
 mod root;
 mod scan;
 mod session;
+mod shown;
 
 use std::ffi::OsString;
 use std::io::Write;

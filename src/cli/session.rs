@@ -7,6 +7,7 @@ use std::path::{Path, PathBuf};
 use super::args::{RuleFlags, UserCommand};
 use super::console::Console;
 use super::root::refuse_root;
+use super::shown::Shown;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
 use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, UserInput};
@@ -191,6 +192,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         match path.is_absolute() {
             true => path.to_path_buf(),
             false => self.env.cwd.join(path),
+        }
+    }
+
+    /// How this session prints paths: under the injected home as `~`.
+    pub fn tilde(&self) -> Shown<'a> {
+        Shown {
+            home: self.env.paths.home(),
         }
     }
 

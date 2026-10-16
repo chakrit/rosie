@@ -264,7 +264,7 @@ fn scan_app_without_an_app_offers_the_installed_apps() {
     let sandbox = Sandbox::with_roots(&["/Applications", "/Users/me/Library"]);
     install_bar(&sandbox);
 
-    let ran = sandbox.run_with(Script::terminal().pick(0), &["scan", "app"]);
+    let ran = sandbox.run_with(Script::terminal().pick(0), &["scan", "app", "--toml"]);
 
     ran.assert_status(ExitStatus::Success);
     assert_eq!(ran.asked, [format!("Choose an app: {BAR}")]);
@@ -314,7 +314,7 @@ fn scan_orphans_lists_leftovers_of_apps_no_longer_installed_as_keep() {
         .fake
         .add_dir("/Users/me/Library/Caches/com.gone.Tool");
 
-    let ran = sandbox.run(&["scan", "orphans"]);
+    let ran = sandbox.run(&["scan", "orphans", "--toml"]);
 
     ran.assert_status(ExitStatus::Success);
     assert!(

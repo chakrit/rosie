@@ -28,7 +28,7 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 
 | Command                    | Does                                                        |
 |----------------------------|-------------------------------------------------------------|
-| `rosie scan <mode> …`      | prints the TOML plan to stdout ([plan.md](plan.md))         |
+| `rosie scan <mode> …`      | prints the plan to stdout ([plan.md](plan.md))              |
 | `rosie plan <mode> …`      | alias of `rosie scan`                                       |
 | `rosie clean <mode> …`     | scan, confirm, run                                          |
 | `rosie run <plan>`         | executes a plan file                                        |
@@ -37,6 +37,8 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 `rosie scan tree ~ | rosie run -`.
 
+- `rosie scan` prints the plan as a table when stdout is a terminal and as TOML
+  otherwise; a format flag overrides that ([Flags](#flags)).
 - `rosie run` does not ask for confirmation; the plan is the confirmation.
 - `rosie clean` with no terminal fails with a usage error.
 
@@ -85,7 +87,7 @@ no rule        ~/src/app/src                          no rule matches it or anyt
 no rule        ~/Downloads/missing                    does not exist
 ```
 
-- `check` does not take `--sh`. *(agent-inferred)*
+- `check` takes no format flag. *(agent-inferred)*
 - Lines go to stdout; scan problems go to stderr as `scan` prints them.
   *(agent-inferred)*
 - Paths under home print as `~`. *(agent-inferred)*
@@ -191,8 +193,13 @@ Flags for `scan`, `plan`, `clean`, and `check`:
 | `--enter-mounts`         | walk across volumes (overrides `[walk] enter_mounts`)          |
 | `--enter-placeholders`   | open dataless cloud placeholders (`[walk] enter_placeholders`) |
 | `--enter-links=<level>`  | `none`, `roots`, or `all` (overrides `[walk] enter_links`)     |
-| `--sh`                   | `scan` / `plan` only: prints the plan as a shell script        |
+| `--format=<format>`      | `scan` / `plan` only: `table`, `toml`, or `sh`                 |
+| `--toml`                 | `scan` / `plan` only: shortcut for `--format=toml`             |
+| `--sh`                   | `scan` / `plan` only: shortcut for `--format=sh`               |
 
+- `table` is the plan table, `toml` the plan file, and `sh` the shell-script export
+  ([plan.md](plan.md)).
+- At most one of `--format`, `--toml`, and `--sh` is given. *(agent-inferred)*
 - `--only`, `--enter-bundles`, and `--enter-placeholders` exist only on `tree`, `caches`,
   and `check`.
 - Rule names for `--only` are listed by `rosie rules`.
@@ -229,7 +236,7 @@ Every line rosie writes to stderr starts with a marker in the first column:
 - One module owns the markers and the palette; `inquire`'s render config takes the same
   palette.
 - Color only when stderr is a terminal and `NO_COLOR` is unset. Markers always.
-- Stdout data (plan TOML, lists, `check` columns) stays plain.
+- Stdout data (plan table, plan TOML, lists, `check` columns) stays plain.
 
 ## Errors
 

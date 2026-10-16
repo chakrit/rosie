@@ -3,9 +3,10 @@
 
 use std::path::{Path, PathBuf};
 
-use super::args::{CleanArgs, Mode, PlanSource, ScanArgs, ScanFlags};
+use super::args::{CleanArgs, Format, Mode, PlanSource, ScanArgs, ScanFlags};
 use super::console::{Console, Finish, PromptError};
 use super::findings::{findings_lines, stats_lines};
+use super::plan_table::plan_table;
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps;
@@ -27,14 +28,6 @@ struct ScanSkips<'s> {
 }
 
 const RUNNING_PROCESS: Outcome = Outcome::Skipped(SkipReason::RunningProcess);
-
-/// How `scan` prints the plan.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum Format {
-    Toml,
-    /// `--sh`: a shell script to inspect and run by hand.
-    Sh,
-}
 
 /// The answer to the `clean` prompt (`docs/spec/plan.md#interactive-confirmation`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -80,18 +73,19 @@ enum Confirmation {
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn scan(&mut self, args: ScanArgs) -> Result<ExitStatus, Error> {
-        let format = match args.sh {
-            true => Format::Sh,
+        let by_terminal = match self.console.terminals().stdout {
+            true => Format::Table,
             false => Format::Toml,
         };
+        let format = args.format.or(by_terminal)?;
         let config = self.config()?;
         let scan = self.find(&config, &args.mode, &args.flags, "rosie scan app <X.app>")?;
 
-        let text = match format {
-            Format::Toml => scan.plan.to_toml()?,
-            Format::Sh => scan.plan.to_sh()?,
-        };
-        self.say(text.trim_end())?;
+        match format {
+            Format::Table => self.show_plan(&scan.plan)?,
+            Format::Toml => self.say(scan.plan.to_toml()?.trim_end())?,
+            Format::Sh => self.say(scan.plan.to_sh()?.trim_end())?,
+        }
         self.show_findings(&scan, &args.mode)?;
         self.show_stats(&scan.plan, scan.skip_counts())?;
         Ok(ExitStatus::failed_if(!scan.problems.is_empty()))
@@ -197,7 +191,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// and nothing awaits a choice. `y` is refused while a rule conflict remains.
     fn confirm(&mut self, mut plan: Plan, skips: WalkSkips) -> Result<Confirmation, Error> {
         loop {
-            self.say(plan.to_toml()?.trim_end())?;
+            self.show_plan(&plan)?;
             self.show_stats(&plan, skips)?;
             let conflicts = plan.conflicts().len();
             if plan.clean_entries().is_empty() && conflicts == 0 {
@@ -301,6 +295,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     fn show_findings(&mut self, scan: &Scan, mode: &Mode) -> Result<(), Error> {
         for line in findings_lines(scan, mode) {
             self.note(line.mark, &line.text)?;
+        }
+        Ok(())
+    }
+
+    /// The plan table on stdout (`docs/spec/plan.md#plan-table`).
+    fn show_plan(&mut self, plan: &Plan) -> Result<(), Error> {
+        for line in plan_table(plan, &self.tilde()) {
+            self.say(&line)?;
         }
         Ok(())
     }

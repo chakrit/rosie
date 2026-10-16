@@ -13,6 +13,7 @@ use crate::rules::Name;
 use crate::run::elevated;
 use crate::scan::{Needs, Settings, WalkSkip};
 
+use super::Error;
 use crate::hint::{Flag, Hint, Step};
 
 #[derive(Debug, Parser)]
@@ -88,9 +89,64 @@ pub struct ScanArgs {
     #[command(flatten)]
     pub flags: ScanFlags,
 
-    /// Print the plan as a shell script to inspect and run yourself.
+    #[command(flatten)]
+    pub format: FormatFlags,
+}
+
+/// How `scan` prints the plan (`docs/spec/cli.md#flags`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Format {
+    /// The plan table, for reading.
+    Table,
+    /// The plan file.
+    Toml,
+    /// A shell script to inspect and run by hand.
+    Sh,
+}
+
+impl Format {
+    pub const ALL: [Format; 3] = [Format::Table, Format::Toml, Format::Sh];
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Format::Table => "table",
+            Format::Toml => "toml",
+            Format::Sh => "sh",
+        }
+    }
+}
+
+/// `--format` and its shortcuts. Clap does not check a group of global flags given after
+/// the mode, so [`FormatFlags::or`] refuses more than one.
+#[derive(Debug, Args)]
+pub struct FormatFlags {
+    /// `table`, `toml`, or `sh` (default: a table on a terminal, TOML otherwise).
+    #[arg(long, global = true, value_name = "FORMAT", value_parser = parse_format)]
+    format: Option<Format>,
+
+    /// Print the plan file: --format=toml.
     #[arg(long, global = true)]
-    pub sh: bool,
+    toml: bool,
+
+    /// Print a shell script to inspect and run yourself: --format=sh.
+    #[arg(long, global = true)]
+    sh: bool,
+}
+
+impl FormatFlags {
+    /// The one format asked for, or `by_default` when no format flag was given.
+    pub fn or(&self, by_default: Format) -> Result<Format, Error> {
+        let toml = self.toml.then_some(Format::Toml);
+        let sh = self.sh.then_some(Format::Sh);
+        let asked: Vec<Format> = [self.format, toml, sh].into_iter().flatten().collect();
+        match asked[..] {
+            [] => Ok(by_default),
+            [format] => Ok(format),
+            _ => Err(Error::Usage(
+                "give at most one of --format, --toml, and --sh".to_owned(),
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Args)]
@@ -315,6 +371,16 @@ fn parse_enter_links(text: &str) -> Result<EnterLinks, String> {
         let levels: Vec<&str> = EnterLinks::ALL.into_iter().map(EnterLinks::label).collect();
         format!("expected one of: {}", levels.join(", "))
     })
+}
+
+fn parse_format(text: &str) -> Result<Format, String> {
+    Format::ALL
+        .into_iter()
+        .find(|format| format.label() == text)
+        .ok_or_else(|| {
+            let formats: Vec<&str> = Format::ALL.into_iter().map(Format::label).collect();
+            format!("expected one of: {}", formats.join(", "))
+        })
 }
 
 #[cfg(test)]

@@ -15,15 +15,18 @@
 use std::path::{Path, PathBuf};
 
 use super::args::{CheckArgs, enter_hint};
+use super::columns::{Align, Row, layout};
 use super::console::{Console, Finish};
+use super::entry_text::{sides, status_hints, sudo_note};
 use super::findings::problem_line;
 use super::session::Session;
+use super::shown::Shown;
 use super::{Error, ExitStatus};
 use crate::apps;
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
-use crate::hint::{Command, Flag, Hint, hints_text};
+use crate::hint::{Command, Hint, hints_text};
 use crate::packs::Network;
-use crate::plan::{Delete, Disagreement, PlanStats, RunAs, StatusKind, Tally};
+use crate::plan::{Delete, PlanStats, StatusKind, Tally};
 use crate::scan::{
     self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Scanner, Settings, Skipped,
     WalkSkip,
@@ -65,7 +68,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let cleaned = lines
             .iter()
             .any(|line| matches!(line.word, Word::Plan(StatusKind::Clean)));
-        for text in layout(&lines) {
+        for text in in_columns(&lines) {
             self.say(&text)?;
         }
         Ok(ExitStatus::failed_if(!cleaned))
@@ -168,13 +171,6 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Err(unfollowed) => format!("{error}; {unfollowed}"),
         }
     }
-
-    /// How this session prints paths: under the injected home as `~`.
-    fn tilde(&self) -> Shown<'a> {
-        Shown {
-            home: self.env.paths.home(),
-        }
-    }
 }
 
 /// One printed line: status, path, and the reason with any hint.
@@ -204,40 +200,16 @@ impl Word {
     }
 }
 
-/// The lines in columns: each column as wide as its widest entry, two spaces apart. A
-/// reason's later lines start at the reason column.
-fn layout(lines: &[Line]) -> Vec<String> {
-    let width = |column: fn(&Line) -> usize| lines.iter().map(column).max().unwrap_or(0);
-    let status_width = width(|line| line.word.label().chars().count());
-    let path_width = width(|line| line.path.chars().count());
-    let reason_column = format!("\n{}", " ".repeat(status_width + 2 + path_width + 2));
-
-    lines
+/// The lines in columns: status, path, then the reason with any hint.
+fn in_columns(lines: &[Line]) -> Vec<String> {
+    let rows: Vec<Row<2>> = lines
         .iter()
-        .map(|line| {
-            let reason = line.reason.replace('\n', &reason_column);
-            format!(
-                "{:<status_width$}  {:<path_width$}  {reason}",
-                line.word.label(),
-                line.path,
-            )
+        .map(|line| Row {
+            cells: [line.word.label().to_owned(), line.path.clone()],
+            text: line.reason.clone(),
         })
-        .collect()
-}
-
-/// Paths as `check` prints them: under home as `~`.
-struct Shown<'h> {
-    home: &'h Path,
-}
-
-impl Shown<'_> {
-    fn path(&self, path: &Path) -> String {
-        match path.strip_prefix(self.home) {
-            Ok(rest) if rest.as_os_str().is_empty() => "~".to_owned(),
-            Ok(rest) => format!("~/{}", rest.display()),
-            Err(_) => path.display().to_string(),
-        }
-    }
+        .collect();
+    layout([Align::Left, Align::Left], &rows)
 }
 
 /// Whether the walk leaves `path` to app mode: it is named as an `.app`, nothing at or
@@ -297,26 +269,15 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
         (Place::At, Planned::OutsideRoots) => None,
         (Place::At, Planned::Conflict(disagreement)) => Some(sides(disagreement)),
     };
-    let sudo = (delete.run_as == RunAs::Sudo).then(|| "needs sudo".to_owned());
-    let hints = match planned {
-        Planned::Clean(_) => Vec::new(),
-        Planned::Keep => vec![Hint::flag("to clean it", Flag::Aggressive)],
-        Planned::OutsideRoots => Hint::allow_in_roots(&PathBuf::from(shown.path(&delete.path))),
-        Planned::Conflict(_) => vec![Hint::by_hand("choose clean or keep in the plan")],
-    };
+    let sudo = sudo_note(delete.run_as);
+    let hints = status_hints(
+        delete.status.kind(),
+        &PathBuf::from(shown.path(&delete.path)),
+    );
     let hints = (!hints.is_empty()).then(|| hints_text(&hints));
 
     let parts: Vec<String> = [what, sudo, hints].into_iter().flatten().collect();
     parts.join("; ")
-}
-
-/// `rosie/a (normal) vs alice/b (aggressive)`.
-fn sides(disagreement: &Disagreement) -> String {
-    format!(
-        "{} (normal) vs {} (aggressive)",
-        disagreement.normal().join(", "),
-        disagreement.aggressive().join(", ")
-    )
 }
 
 /// `running: Slack (pid 4123)`, after `inside <item> (<rules>)` below the item.
@@ -410,20 +371,4 @@ fn holds_unplanned(in_use: usize, skipped: usize, path: &Path, shown: &Shown) ->
         Command::ScanTree(PathBuf::from(shown.path(path)))
     );
     (word, reason)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn paths_under_home_print_from_tilde() {
-        let shown = Shown {
-            home: Path::new("/Users/me"),
-        };
-
-        assert_eq!(shown.path(Path::new("/Users/me")), "~");
-        assert_eq!(shown.path(Path::new("/Users/me/My App")), "~/My App");
-        assert_eq!(shown.path(Path::new("/Users/meme")), "/Users/meme");
-    }
 }

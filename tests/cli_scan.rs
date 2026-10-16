@@ -118,8 +118,8 @@ fn enter_links_all_follows_links_and_suggests_roots_add_for_one_outside() {
         .fake
         .add_symlink(format!("{CWD}/alias"), format!("{CWD}/mine"));
 
-    let without = sandbox.run(&["scan", "tree", "."]);
-    let with = sandbox.run(&["scan", "tree", ".", "--enter-links=all"]);
+    let without = sandbox.run(&["scan", "tree", ".", "--toml"]);
+    let with = sandbox.run(&["scan", "tree", ".", "--toml", "--enter-links=all"]);
     let invalid = sandbox.run(&["scan", "tree", ".", "--enter-links=yes"]);
 
     let line = "- skipped /Users/me/elsewhere: linked to from the roots, but outside them\n  \
@@ -152,8 +152,8 @@ fn each_walk_flag_enters_what_it_names() {
         }
         let target = format!("{dir}/app/node_modules");
 
-        let without = sandbox.run(&["scan", "tree", "."]);
-        let with = sandbox.run(&["scan", "tree", ".", flag]);
+        let without = sandbox.run(&["scan", "tree", ".", "--toml"]);
+        let with = sandbox.run(&["scan", "tree", ".", "--toml", flag]);
 
         assert!(
             !without.stdout.contains(&target),
@@ -339,6 +339,10 @@ fn usage_errors_exit_with_the_usage_status() {
         &["scan", "app", "X.app", "--enter-bundles"],
         &["clean", "orphans", "--enter-placeholders"],
         &["clean", "tree", "--sh"],
+        &["clean", "tree", "--toml"],
+        &["scan", "tree", "--toml", "--sh"],
+        &["scan", "tree", "--format=sh", "--sh"],
+        &["scan", "tree", "--format=yaml"],
         &["frobnicate"],
     ] {
         let ran = sandbox.run(args);
@@ -370,7 +374,7 @@ fn scan_prints_the_plan_on_stdout_and_the_stats_on_stderr() {
     let sandbox = Sandbox::new();
     sandbox.node_project(&format!("{CWD}/app"));
 
-    let ran = sandbox.run(&["scan", "tree", "."]);
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml"]);
 
     ran.assert_status(ExitStatus::Success);
     assert!(ran.stdout.starts_with("# rosie plan."), "{}", ran.stdout);
@@ -396,6 +400,71 @@ fn plan_is_an_alias_of_scan() {
 }
 
 #[test]
+fn scan_prints_the_plan_table_on_a_terminal_and_toml_otherwise() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+
+    let terminal = sandbox.run(&["scan", "tree", "."]);
+    let piped = sandbox.run_with(Script::piped(), &["scan", "tree", "."]);
+
+    terminal.assert_status(ExitStatus::Success);
+    let first = terminal.stdout.lines().next().unwrap_or_default();
+    assert!(first.starts_with("clean "), "{}", terminal.stdout);
+    assert!(
+        first.contains(" ~/src/app/node_modules "),
+        "{}",
+        terminal.stdout
+    );
+    assert!(
+        !terminal.stdout.contains("[[delete]]"),
+        "{}",
+        terminal.stdout
+    );
+    piped.assert_status(ExitStatus::Success);
+    assert!(
+        piped.stdout.starts_with("# rosie plan."),
+        "{}",
+        piped.stdout
+    );
+}
+
+#[test]
+fn a_format_flag_overrides_the_terminal_default() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+    let terminal = |flag: &str| sandbox.run(&["scan", "tree", ".", flag]).stdout;
+    let piped = |flag: &str| {
+        sandbox
+            .run_with(Script::piped(), &["scan", "tree", ".", flag])
+            .stdout
+    };
+
+    let toml = terminal("--toml");
+    let format_toml = terminal("--format=toml");
+    let format_sh = terminal("--format=sh");
+    let table = piped("--format=table");
+
+    assert!(toml.starts_with("# rosie plan."), "{toml}");
+    assert_eq!(format_toml, toml);
+    assert!(format_sh.starts_with("#!/bin/bash"), "{format_sh}");
+    assert!(table.starts_with("clean "), "{table}");
+}
+
+#[test]
+fn clean_shows_the_plan_table_before_asking() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+
+    let ran = sandbox.run_with(Script::terminal().answer("n"), &["clean", "tree", "."]);
+
+    let first = ran.stdout.lines().next().unwrap_or_default();
+    assert!(first.starts_with("clean "), "{}", ran.stdout);
+    assert!(first.contains(" ~/src/app/node_modules "), "{}", ran.stdout);
+    assert!(!ran.stdout.contains("[[delete]]"), "{}", ran.stdout);
+    assert!(sandbox.removals().is_empty());
+}
+
+#[test]
 fn sh_prints_the_plan_as_a_shell_script() {
     let sandbox = Sandbox::new();
     sandbox.node_project(&format!("{CWD}/app"));
@@ -417,9 +486,9 @@ fn only_limits_the_scan_to_the_named_rules() {
         .fake
         .add_file(format!("{CWD}/app/target/debug/app"), "x");
 
-    let all = sandbox.run(&["scan", "tree", "."]);
-    let only = sandbox.run(&["scan", "tree", ".", "--only", "cargo-target"]);
-    let unknown = sandbox.run(&["scan", "tree", ".", "--only", "nope"]);
+    let all = sandbox.run(&["scan", "tree", ".", "--toml"]);
+    let only = sandbox.run(&["scan", "tree", ".", "--toml", "--only", "cargo-target"]);
+    let unknown = sandbox.run(&["scan", "tree", ".", "--toml", "--only", "nope"]);
 
     assert!(all.stdout.contains("node_modules") && all.stdout.contains("target"));
     only.assert_status(ExitStatus::Success);
@@ -439,8 +508,8 @@ fn aggressive_cleans_the_aggressive_command_in_place_of_the_normal_one() {
     let docker = "[rules.docker]\nstrategy = \"tool\"\ncmd = \"docker system prune --force\"\ncmd_aggressive = \"docker system prune --all --force\"\n";
     sandbox.add_rules("docker.toml", docker);
 
-    let normal = sandbox.run(&["scan", "caches"]);
-    let aggressive = sandbox.run(&["scan", "caches", "--aggressive"]);
+    let normal = sandbox.run(&["scan", "caches", "--toml"]);
+    let aggressive = sandbox.run(&["scan", "caches", "--toml", "--aggressive"]);
 
     assert!(normal.stderr.contains("clean: 1 item"), "{}", normal.stderr);
     assert!(normal.stderr.contains("keep (aggressive, not run): 1 item"));
@@ -484,7 +553,7 @@ fn a_first_run_pulls_the_default_pack_seeds_the_config_and_proceeds() {
     let sandbox = Sandbox::bare().with_net(Canned::serving(ROSIE_URL, default_source()));
     sandbox.node_project(&format!("{CWD}/app"));
 
-    let ran = sandbox.run(&["scan", "tree", "."]);
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml"]);
     let first_requests = sandbox.net.requested();
 
     ran.assert_status(ExitStatus::Success);
@@ -510,7 +579,7 @@ fn a_first_run_pulls_the_default_pack_seeds_the_config_and_proceeds() {
         ran.stdout
     );
 
-    let again = sandbox.run(&["scan", "tree", "."]);
+    let again = sandbox.run(&["scan", "tree", ".", "--toml"]);
     again.assert_status(ExitStatus::Success);
     assert!(!again.stderr.contains("pulled"), "{}", again.stderr);
     assert_eq!(
@@ -542,10 +611,10 @@ fn a_first_run_with_a_seeded_root_through_a_symlink_writes_the_config_and_can_be
         .add_symlink(format!("{HOME}/.cargo"), "dotfiles/cargo/.cargo");
     sandbox.node_project(&format!("{CWD}/app"));
 
-    let first = sandbox.run(&["scan", "tree", "."]);
+    let first = sandbox.run(&["scan", "tree", ".", "--toml"]);
     let written = sandbox.file(CONFIG_FILE);
     let fixed = sandbox.run(&["config", "set", "walk.enter_links", "roots"]);
-    let after = sandbox.run(&["scan", "tree", "."]);
+    let after = sandbox.run(&["scan", "tree", ".", "--toml"]);
 
     first.assert_status(ExitStatus::Failed);
     assert_eq!(written, seeded);
@@ -585,7 +654,7 @@ fn no_pack_present_makes_the_next_run_auto_pull() {
     sandbox.write_config(&format!("roots = [\"{HOME}\"]\n"));
     sandbox.node_project(&format!("{CWD}/app"));
 
-    let ran = sandbox.run(&["scan", "tree", "."]);
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml"]);
 
     ran.assert_status(ExitStatus::Success);
     assert_eq!(

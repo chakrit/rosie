@@ -87,6 +87,7 @@ pub(super) fn problem_line(problem: &Problem) -> Line {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::cli::args::{ModeFlags, TreeArgs};
     use crate::plan::{AgreedTiers, ItemSize, Plan, Size};
     use crate::run::{Outcome, RunStats};
     use crate::scan::Needs;
@@ -106,7 +107,7 @@ mod tests {
         };
 
         assert_eq!(
-            findings_lines(&scan, &Mode::default()),
+            findings_lines(&scan, &Mode::Tree(TreeArgs::default())),
             [Line::new(
                 Mark::Skipped,
                 "skipped login item Bar: rosie cannot remove it; by hand: Open System Settings > \
@@ -130,7 +131,7 @@ mod tests {
         };
 
         assert_eq!(
-            findings_lines(&scan, &Mode::Orphans),
+            findings_lines(&scan, &Mode::Orphans { flags: ModeFlags::default() }),
             [Line::new(
                 Mark::Skipped,
                 "skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not downloaded"
@@ -153,7 +154,7 @@ mod tests {
         };
 
         assert_eq!(
-            findings_lines(&scan, &Mode::default()),
+            findings_lines(&scan, &Mode::Tree(TreeArgs::default())),
             [Line::new(
                 Mark::Skipped,
                 "skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not \

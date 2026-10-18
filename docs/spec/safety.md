@@ -127,7 +127,7 @@ detects links: `canonicalize` and other link-resolving calls are the detector.
 - `rosie roots add` refuses a path with a symlink component. A `roots` entry with one
   fails every command that uses the roots, naming each such entry with its hints.
 - A scan start folder or app argument with a symlink component is refused. Bare `rosie`
-  uses the current directory, which is always the physical path.
+  without a folder uses the current directory, which is always the physical path.
 - The walk never descends into a symlink. Symlinks never match rules.
 - Fixed rule paths that pass through a symlink hit this ban and fail like any refused
   path ([rules.md](rules.md#paths)).

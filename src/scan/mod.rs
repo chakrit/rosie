@@ -153,7 +153,11 @@ impl<B: Backend + Sync> Scanner<B> {
     /// not opened unless the walk may enter placeholders.
     pub fn tree<P: Progress>(&self, dir: &Path, progress: &P) -> Result<Scan, Error> {
         let root = UserInput::path(dir, self.settings.walk.enter_links).perform(&self.ctx)?;
-        let root_meta = Cleanup::lstat(&root).perform(&self.ctx)?;
+        let root_meta = match Cleanup::lstat(&root).perform(&self.ctx) {
+            Ok(meta) => meta,
+            Err(error) if error.has_vanished() => return Err(Error::Missing { path: root }),
+            Err(error) => return Err(error.into()),
+        };
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }

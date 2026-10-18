@@ -4,7 +4,7 @@
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
-use super::args::{RuleFlags, UserCommand};
+use super::args::{Place, RuleFlags, UserCommand, Verb};
 use super::console::Console;
 use super::root::refuse_root;
 use super::shown::Shown;
@@ -92,7 +92,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn dispatch(&mut self, command: UserCommand) -> Result<ExitStatus, Error> {
         match command {
             UserCommand::Scan(args) => self.scan(args),
-            UserCommand::Clean(args) => self.clean(args),
+            UserCommand::Clean(args) => self.clean(args.target, Place::Mode(Verb::Clean)),
             UserCommand::Check(args) => self.check(args),
             UserCommand::Run { plan, conflicts } => self.run_plan(&plan, conflicts.conflicts),
             UserCommand::Rules { action } => self.rules_command(action),

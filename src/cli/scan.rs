@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::args::{CleanArgs, Format, Mode, PlanSource, ScanArgs, ScanFlags};
+use super::args::{Format, Mode, Place, PlanSource, ScanArgs, Target, TreeArgs, Verb};
 use super::console::{Console, Finish, PromptError};
 use super::findings::{findings_lines, problem_line, stats_lines};
 use super::plan_list::{LeftOut, plan_listing};
@@ -16,7 +16,7 @@ use crate::output::Mark;
 use crate::packs::Network;
 use crate::plan::{ItemSize, Plan, PlanStats, Selection, Sides};
 use crate::run::{Elevation, Outcome, Runner, SkipReason};
-use crate::scan::{Refused, Scan, WalkSkips};
+use crate::scan::{self, Refused, Scan, WalkSkips};
 
 /// What the scan behind a run skipped, which the end-of-run stats count beside the
 /// run's own items (`docs/spec/plan.md#stats`). A saved plan's run has none.
@@ -79,13 +79,16 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         let format = args.format.or(by_terminal)?;
         let config = self.config()?;
-        let scan = self.find(&config, &args.mode, &args.flags, "rosie scan app <X.app>")?;
-        let plan = answered(&scan.plan, args.conflicts.conflicts);
+        let mode = args.target.mode();
+        let scan = self
+            .find(&config, &mode, "rosie scan app <X.app>")
+            .map_err(|error| named_nothing(error, &args.target, Place::Mode(Verb::Scan)))?;
+        let plan = answered(&scan.plan, mode.flags().conflicts.conflicts);
 
         let left_out = LeftOut {
             skipped: &scan.skipped,
             refused: &scan.refused,
-            mode: &args.mode,
+            mode: &mode,
         };
         match format {
             Format::List => {
@@ -94,11 +97,11 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             }
             Format::Toml => {
                 self.say(plan.to_toml()?.trim_end())?;
-                self.show_findings(&scan, &args.mode)?;
+                self.show_findings(&scan, &mode)?;
             }
             Format::Sh => {
                 self.say(plan.to_sh()?.trim_end())?;
-                self.show_findings(&scan, &args.mode)?;
+                self.show_findings(&scan, &mode)?;
             }
         }
         self.show_stats(&plan, scan.skip_counts())?;
@@ -106,7 +109,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     /// Scans, shows the plan, and runs it once the user answers `y`; `e` trims it first.
-    pub fn clean(&mut self, args: CleanArgs) -> Result<ExitStatus, Error> {
+    pub fn clean(&mut self, target: Target, place: Place) -> Result<ExitStatus, Error> {
         if !self.console.terminals().interactive() {
             return Err(Error::Usage(
                 "rosie clean asks for confirmation and needs a terminal; save a plan with \
@@ -115,7 +118,10 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             ));
         }
         let config = self.config()?;
-        let scan = self.find(&config, &args.mode, &args.flags, "rosie clean app <X.app>")?;
+        let mode = target.mode();
+        let scan = self
+            .find(&config, &mode, "rosie clean app <X.app>")
+            .map_err(|error| named_nothing(error, &target, place))?;
         let skips = ScanSkips {
             walk: scan.skip_counts(),
             refused: &scan.refused,
@@ -126,9 +132,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let left_out = LeftOut {
             skipped: &scan.skipped,
             refused: &scan.refused,
-            mode: &args.mode,
+            mode: &mode,
         };
-        let plan = answered(&scan.plan, args.conflicts.conflicts);
+        let plan = answered(&scan.plan, mode.flags().conflicts.conflicts);
         let plan = match self.confirm(plan, &left_out, skips.walk)? {
             Confirmation::Run(plan) => plan,
             Confirmation::NothingClean | Confirmation::Declined => {
@@ -188,13 +194,12 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         &mut self,
         config: &Config,
         mode: &Mode,
-        flags: &ScanFlags,
         app_usage: &str,
     ) -> Result<Scan, Error> {
-        let settings = flags.settings(config.walk);
+        let settings = mode.flags().scan.settings(config.walk);
 
         match mode {
-            Mode::Tree { dir, rules } => {
+            Mode::Tree(TreeArgs { dir, rules, .. }) => {
                 let scanner = self.rule_scanner(config, settings, rules)?;
                 let dir = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
                 let progress = self.console.progress();
@@ -202,14 +207,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 progress.finish()?;
                 Ok(scan?)
             }
-            Mode::Caches { rules } => {
+            Mode::Caches { rules, .. } => {
                 let scanner = self.rule_scanner(config, settings, rules)?;
                 let progress = self.console.progress();
                 let scan = scanner.caches(&progress);
                 progress.finish()?;
                 Ok(scan?)
             }
-            Mode::App { app } => {
+            Mode::App { app, .. } => {
                 let ctx = self.roots_ctx(config)?;
                 let app = match app {
                     Some(app) => self.absolute(app),
@@ -217,7 +222,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 };
                 Ok(apps::scan_app(&ctx, &app, &settings)?)
             }
-            Mode::Orphans => {
+            Mode::Orphans { .. } => {
                 let ctx = self.roots_ctx(config)?;
                 Ok(apps::scan_orphans(&ctx, &settings)?)
             }
@@ -391,5 +396,17 @@ fn answered(plan: &Plan, answer: Option<Selection>) -> Plan {
     match answer {
         Some(answer) => plan.answering_conflicts(answer),
         None => plan.clone(),
+    }
+}
+
+/// `error`, unless it says the folder `target` gives in place of a mode does not exist:
+/// that word names no command, mode, or folder (`docs/spec/cli.md#modes`).
+fn named_nothing(error: Error, target: &Target, place: Place) -> Error {
+    match (error, target.folder_word()) {
+        (Error::Scan(scan::Error::Missing { .. }), Some(word)) => Error::UnknownWord {
+            word: word.to_path_buf(),
+            place,
+        },
+        (error, _) => error,
     }
 }

@@ -106,6 +106,10 @@ pub enum Command {
     RulesPull,
     RulesRemove(String),
     ScanTree(PathBuf),
+    /// A command or mode by its words, as the parser names them.
+    Named(Vec<String>),
+    /// These command words, then a folder for the user to fill in.
+    Folder(Vec<String>),
     /// The arguments rosie was given, run again as given.
     Rerun(Vec<String>),
 }
@@ -128,7 +132,7 @@ impl Command {
             Command::RulesPull => &["rules", "pull"],
             Command::RulesRemove(_) => &["rules", "remove"],
             Command::ScanTree(_) => &["scan", "tree"],
-            Command::Rerun(_) => &[],
+            Command::Rerun(_) | Command::Named(_) | Command::Folder(_) => &[],
         };
         let operands: Vec<Word> = match self {
             Command::RootsAdd(path) | Command::RootsRemove(path) | Command::ScanTree(path) => {
@@ -138,6 +142,13 @@ impl Command {
             Command::ConfigSetLinks(level) => vec![Word::Given(level.label().to_owned())],
             Command::RulesRemove(pack) => vec![Word::Given(pack.clone())],
             Command::Rerun(args) => args.iter().cloned().map(Word::Literal).collect(),
+            Command::Named(words) => words.iter().cloned().map(Word::Given).collect(),
+            Command::Folder(words) => words
+                .iter()
+                .cloned()
+                .map(Word::Given)
+                .chain([Word::Placeholder("dir")])
+                .collect(),
             Command::Roots
             | Command::RootsRemovePick
             | Command::Config

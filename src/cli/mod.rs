@@ -34,7 +34,7 @@ use crate::packs::Network;
 use crate::run::RunStats;
 use crate::run::elevated::{self, Invocation};
 
-use args::{Cli, Command, UserCommand};
+use args::{Cli, Command, Place, Target};
 use session::Session;
 
 pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals, Width};
@@ -117,8 +117,12 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
 
         let outcome = match cli.command {
             Some(Command::Elevated { nonce }) => self.elevated(&env, nonce),
-            Some(Command::User(command)) => self.command(&env, command, typed_args(&argv)),
-            None => self.command(&env, UserCommand::default(), typed_args(&argv)),
+            Some(Command::User(command)) => {
+                self.command(&env, typed_args(&argv), |session| session.dispatch(command))
+            }
+            None => self.command(&env, typed_args(&argv), |session| {
+                session.clean(Target::tree(cli.tree), Place::Command)
+            }),
         };
         let status = match outcome {
             Ok(status) => status,
@@ -143,15 +147,16 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
         }
     }
 
+    /// Opens a session for the command line `typed` and runs `command` in it.
     fn command(
         &mut self,
         env: &Env,
-        command: UserCommand,
         typed: Vec<String>,
+        command: impl FnOnce(&mut Session<'_, VersionCheck<B>, N, C>) -> Result<ExitStatus, Error>,
     ) -> Result<ExitStatus, Error> {
         let mut session =
             Session::open(&self.backend, &self.network, &mut self.console, env, typed)?;
-        session.dispatch(command)
+        command(&mut session)
     }
 
     /// The hidden entry the run launches through sudo; it passes its own four gates
@@ -206,7 +211,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
 
     fn show_error(&mut self, error: &Error) -> ExitStatus {
         let status = match error {
-            Error::Usage(_) => ExitStatus::Usage,
+            Error::Usage(_) | Error::UnknownWord { .. } => ExitStatus::Usage,
             _ => ExitStatus::Failed,
         };
         let palette = self.console.stderr_palette();

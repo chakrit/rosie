@@ -2,9 +2,9 @@
 //! plain values clap needs; `super` turns them into typed settings once.
 
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
-use clap::{Args, Parser, Subcommand};
+use clap::{Args, CommandFactory, Parser, Subcommand};
 
 use crate::config::Walk;
 use crate::config::WalkSetting;
@@ -18,11 +18,19 @@ use super::Error;
 use crate::hint::{Flag, Hint, Step};
 
 #[derive(Debug, Parser)]
-#[command(name = "rosie", version, about = "A macOS cleanup CLI for developers.")]
+#[command(
+    name = "rosie",
+    version,
+    about = "A macOS cleanup CLI for developers.",
+    args_conflicts_with_subcommands = true
+)]
 pub struct Cli {
-    /// Without a command, rosie runs `rosie clean tree .`.
     #[command(subcommand)]
     pub command: Option<Command>,
+
+    /// Without a command, rosie runs `rosie clean tree [<dir>]`.
+    #[command(flatten)]
+    pub tree: TreeArgs,
 }
 
 #[derive(Debug, Subcommand)]
@@ -38,10 +46,11 @@ pub enum Command {
 #[derive(Debug, Subcommand)]
 pub enum UserCommand {
     /// Print the plan as TOML on stdout, stats on stderr.
-    #[command(visible_alias = "plan")]
+    #[command(visible_alias = "plan", args_conflicts_with_subcommands = true)]
     Scan(ScanArgs),
 
     /// Scan, confirm, and run.
+    #[command(args_conflicts_with_subcommands = true)]
     Clean(CleanArgs),
 
     /// Say, per path, what a plan would do with it.
@@ -75,30 +84,13 @@ pub enum UserCommand {
     },
 }
 
-impl Default for UserCommand {
-    /// Bare `rosie` is `rosie clean tree .`.
-    fn default() -> Self {
-        UserCommand::Clean(CleanArgs {
-            mode: Mode::default(),
-            flags: ScanFlags::default(),
-            conflicts: ConflictsFlag::default(),
-        })
-    }
-}
-
 #[derive(Debug, Args)]
 pub struct ScanArgs {
-    #[command(subcommand)]
-    pub mode: Mode,
-
     #[command(flatten)]
-    pub flags: ScanFlags,
+    pub target: Target,
 
     #[command(flatten)]
     pub format: FormatFlags,
-
-    #[command(flatten)]
-    pub conflicts: ConflictsFlag,
 }
 
 /// How `scan` prints the plan (`docs/spec/cli.md#flags`).
@@ -159,14 +151,108 @@ impl FormatFlags {
 
 #[derive(Debug, Args)]
 pub struct CleanArgs {
+    #[command(flatten)]
+    pub target: Target,
+}
+
+/// What `scan` and `clean` scan: the mode named, or `tree` when a folder, or nothing, is
+/// given in its place (`docs/spec/cli.md#modes`).
+#[derive(Debug, Args)]
+pub struct Target {
     #[command(subcommand)]
-    pub mode: Mode,
+    mode: Option<Mode>,
 
     #[command(flatten)]
-    pub flags: ScanFlags,
+    tree: TreeArgs,
+}
 
-    #[command(flatten)]
-    pub conflicts: ConflictsFlag,
+impl Target {
+    /// `tree` on the folder in `tree`, as bare `rosie` scans it.
+    pub fn tree(tree: TreeArgs) -> Target {
+        Target { mode: None, tree }
+    }
+
+    pub fn mode(&self) -> Mode {
+        match &self.mode {
+            Some(mode) => mode.clone(),
+            None => Mode::Tree(self.tree.clone()),
+        }
+    }
+
+    /// The folder given in place of a mode name. When no such folder exists, it was
+    /// likely meant as a command or mode.
+    pub fn folder_word(&self) -> Option<&Path> {
+        match self.mode {
+            Some(_) => None,
+            None => self.tree.dir.as_deref(),
+        }
+    }
+}
+
+/// Where a folder given in place of a command or mode name stands on the command line.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Place {
+    /// `rosie <dir>`, in place of a command.
+    Command,
+    /// `rosie scan <dir>` or `rosie clean <dir>`, in place of a mode.
+    Mode(Verb),
+}
+
+impl Place {
+    /// The command words before this place: none, or the verb.
+    pub fn words(self) -> Vec<String> {
+        match self {
+            Place::Command => Vec::new(),
+            Place::Mode(verb) => vec![verb.label().to_owned()],
+        }
+    }
+
+    /// The names that may stand here, as the parser knows them: rosie's commands, or the
+    /// modes.
+    pub fn names(self) -> Vec<String> {
+        let commands = match self {
+            Place::Command => Cli::command(),
+            Place::Mode(_) => Mode::augment_subcommands(clap::Command::new("modes")),
+        };
+        commands
+            .get_subcommands()
+            .filter(|command| !command.is_hide_set())
+            .map(|command| command.get_name().to_owned())
+            .collect()
+    }
+
+    /// The verb a mode named in place of this one goes with: `clean` for bare `rosie`.
+    pub fn verb(self) -> Verb {
+        match self {
+            Place::Command => Verb::Clean,
+            Place::Mode(verb) => verb,
+        }
+    }
+}
+
+/// The names of the modes other than `tree`, which a folder in place of a mode name runs.
+pub fn named_modes() -> Vec<String> {
+    Place::Mode(Verb::Scan)
+        .names()
+        .into_iter()
+        .filter(|name| name != "tree")
+        .collect()
+}
+
+/// The commands that take a mode.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Verb {
+    Scan,
+    Clean,
+}
+
+impl Verb {
+    pub fn label(self) -> &'static str {
+        match self {
+            Verb::Scan => "scan",
+            Verb::Clean => "clean",
+        }
+    }
 }
 
 /// `--conflicts`: one answer for every rule conflict, with no default
@@ -174,7 +260,7 @@ pub struct CleanArgs {
 #[derive(Debug, Clone, Copy, Default, Args)]
 pub struct ConflictsFlag {
     /// Answer every rule conflict `clean` or `skip`.
-    #[arg(long, global = true, value_name = "ANSWER", value_parser = parse_answer)]
+    #[arg(long, value_name = "ANSWER", value_parser = parse_answer)]
     pub conflicts: Option<Selection>,
 }
 
@@ -195,15 +281,15 @@ pub struct CheckArgs {
 #[derive(Debug, Clone, Default, Args)]
 pub struct ScanFlags {
     /// Mark aggressive items `clean`; `cmd_aggressive` replaces `cmd`.
-    #[arg(long, global = true)]
+    #[arg(long)]
     pub aggressive: bool,
 
     /// Walk across volumes (overrides `[walk] enter_mounts`).
-    #[arg(long, global = true)]
+    #[arg(long)]
     pub enter_mounts: bool,
 
     /// `none`, `roots`, or `all` (overrides `[walk] enter_links`).
-    #[arg(long, global = true, value_name = "LEVEL", value_parser = parse_enter_links)]
+    #[arg(long, value_name = "LEVEL", value_parser = parse_enter_links)]
     pub enter_links: Option<EnterLinks>,
 }
 
@@ -234,39 +320,66 @@ impl ScanFlags {
     }
 }
 
+/// The flags every mode of `scan` and `clean` takes.
+#[derive(Debug, Clone, Default, Args)]
+pub struct ModeFlags {
+    #[command(flatten)]
+    pub scan: ScanFlags,
+
+    #[command(flatten)]
+    pub conflicts: ConflictsFlag,
+}
+
 #[derive(Debug, Clone, Subcommand)]
 pub enum Mode {
     /// Everything the rules match under <dir>, the current folder by default.
-    Tree {
-        dir: Option<PathBuf>,
-        #[command(flatten)]
-        rules: RuleFlags,
-    },
+    Tree(TreeArgs),
 
     /// Tool-wide caches.
     Caches {
         #[command(flatten)]
         rules: RuleFlags,
+        #[command(flatten)]
+        flags: ModeFlags,
     },
 
     /// An application and its leftovers.
-    App { app: Option<PathBuf> },
+    App {
+        app: Option<PathBuf>,
+        #[command(flatten)]
+        flags: ModeFlags,
+    },
 
     /// Leftovers of apps no longer installed.
-    Orphans,
+    Orphans {
+        #[command(flatten)]
+        flags: ModeFlags,
+    },
 }
 
-impl Default for Mode {
-    /// Bare `rosie` is `rosie clean tree .`.
-    fn default() -> Self {
-        Mode::Tree {
-            dir: None,
-            rules: RuleFlags::default(),
-        }
-    }
+/// `tree` and its folder.
+#[derive(Debug, Clone, Default, Args)]
+pub struct TreeArgs {
+    /// The folder to clean up; the current folder by default.
+    pub dir: Option<PathBuf>,
+
+    #[command(flatten)]
+    pub rules: RuleFlags,
+
+    #[command(flatten)]
+    pub flags: ModeFlags,
 }
 
 impl Mode {
+    pub fn flags(&self) -> &ModeFlags {
+        match self {
+            Mode::Tree(tree) => &tree.flags,
+            Mode::Caches { flags, .. } | Mode::App { flags, .. } | Mode::Orphans { flags } => {
+                flags
+            }
+        }
+    }
+
     /// The flags that would open the skipped path, or `None` when this mode does not
     /// take every one of them (`docs/spec/cli.md#flags`). Every mode takes
     /// `--enter-mounts`; only `tree` and `caches` take the bundle and placeholder flags. A
@@ -275,7 +388,7 @@ impl Mode {
         let WalkSkip::Closed(needs) = skip else {
             return None;
         };
-        let rule_driven = matches!(self, Mode::Tree { .. } | Mode::Caches { .. });
+        let rule_driven = matches!(self, Mode::Tree(_) | Mode::Caches { .. });
         let accepted = |setting: WalkSetting| match setting {
             WalkSetting::Mounts => true,
             WalkSetting::Placeholders | WalkSetting::Bundles => rule_driven,
@@ -443,6 +556,10 @@ mod tests {
             HintCommand::RulesPull,
             HintCommand::RulesRemove("extra".to_owned()),
             HintCommand::ScanTree(PathBuf::from("~/src")),
+            HintCommand::Named(vec!["scan".to_owned()]),
+            HintCommand::Named(vec!["clean".to_owned(), "caches".to_owned()]),
+            HintCommand::Folder(Vec::new()),
+            HintCommand::Folder(vec!["scan".to_owned()]),
             HintCommand::Rerun(vec!["clean".to_owned(), "tree".to_owned(), ".".to_owned()]),
         ];
         commands.extend(EnterLinks::ALL.map(HintCommand::ConfigSetLinks));

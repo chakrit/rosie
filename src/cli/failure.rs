@@ -4,6 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
+use super::args::{self, Place};
 use super::error::Error;
 use super::root::RootError;
 use super::session::PickKind;
@@ -53,6 +54,7 @@ pub fn failures(error: &Error) -> Vec<Failure> {
 fn hints(error: &Error) -> Vec<Hint> {
     match error {
         Error::NothingToPick { kind } => nothing_to_pick_hints(*kind),
+        Error::UnknownWord { word, place } => unknown_word_hints(word, *place),
         Error::Fs(error) => fs_hints(error),
         Error::Config(error) => config_hints(error),
         Error::Packs(error) => packs_hints(error),
@@ -118,6 +120,44 @@ fn nothing_to_pick_hints(kind: PickKind) -> Vec<Hint> {
         PickKind::Root => vec![Hint::run("add one", [Command::RootsAddAny])],
         PickKind::Pack => vec![Hint::run("pull the default pack", [Command::RulesPull])],
         PickKind::App | PickKind::Key | PickKind::Value => Vec::new(),
+    }
+}
+
+/// How close a name must be to the word typed to be suggested, as clap suggests
+/// subcommands.
+const SIMILAR: f64 = 0.7;
+
+/// The names close to `word` that may stand at `place`, the folder to give instead, and
+/// the other modes.
+fn unknown_word_hints(word: &Path, place: Place) -> Vec<Hint> {
+    let word = word.to_string_lossy();
+    let named = |name: &str| {
+        let words = place.words().into_iter().chain([name.to_owned()]);
+        Command::Named(words.collect())
+    };
+
+    let mut scored: Vec<(f64, String)> = place
+        .names()
+        .into_iter()
+        .map(|name| (strsim::jaro(&word, &name), name))
+        .filter(|(score, _)| *score > SIMILAR)
+        .collect();
+    scored.sort_by(|a, b| b.0.total_cmp(&a.0));
+    let similar: Vec<Command> = scored.iter().map(|(_, name)| named(name)).collect();
+
+    let verb = place.verb().label();
+    let folder = Hint::run(
+        format!("to {verb} a folder"),
+        [Command::Folder(place.words())],
+    );
+    let modes = args::named_modes()
+        .into_iter()
+        .map(|mode| Command::Named(vec![verb.to_owned(), mode]));
+    let modes = Hint::run("another mode", modes);
+
+    match similar.is_empty() {
+        true => vec![folder, modes],
+        false => vec![Hint::run("did you mean", similar), folder, modes],
     }
 }
 

@@ -14,6 +14,7 @@ mlua = { version = "0.12.2", features = ["lua54", "vendored"] }
 rayon = "1.12"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+strsim = "0.11"
 tar = { version = "0.4", default-features = false }
 thiserror = "2"
 toml = "1"

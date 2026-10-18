@@ -18,6 +18,29 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 - **caches** covers tool-wide caches: cargo registry, DerivedData, Docker, Homebrew,
   `~/Library/Caches`.
 - `<dir>` defaults to the current directory.
+- A folder given in place of a mode runs `tree` on it: `rosie scan ../hdiff` is
+  `rosie scan tree ../hdiff`.
+- A command or mode name always means the command or mode; `./app` names the folder.
+- An `.app` given in place of a mode runs `tree` on it, like any folder.
+- A word in place of a command or mode that names no command, mode, or folder is a usage
+  error. Its hints list the close names, the folder form, and the other modes:
+
+```text
+$ rosie scna
+✗ no command or folder named scna
+  did you mean:
+    rosie scan
+  or to clean a folder:
+    rosie <dir>
+  or another mode:
+    rosie clean caches
+    rosie clean app
+    rosie clean orphans
+```
+
+- A name is close when its Jaro similarity to the word is above 0.7, as clap suggests
+  subcommands. *(agent-inferred)*
+- A `tree` folder that does not exist reads `<dir> does not exist`. *(agent-inferred)*
 - A `<dir>` or `<X.app>` argument whose path contains a symlink (unless `enter_links` is
   `roots` or `all`), or whose spelling does not match the disk, is refused
   ([safety.md](safety.md#symlinks)).
@@ -45,7 +68,7 @@ Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 
 ### Bare `rosie`
 
-Bare `rosie` is `rosie clean tree .`.
+Bare `rosie [<dir>]` is `rosie clean tree [<dir>]`, flags included.
 
 ## Check
 
@@ -198,7 +221,7 @@ When stdin or stdout is not a terminal, rosie prints the usage error instead.
 
 ## Flags
 
-Flags for `scan`, `plan`, `clean`, and `check`:
+Flags for `scan`, `plan`, `clean`, bare `rosie`, and `check`:
 
 | Flag                     | Effect                                                         |
 |--------------------------|----------------------------------------------------------------|
@@ -220,6 +243,8 @@ Flags for `scan`, `plan`, `clean`, and `check`:
 - `--only`, `--enter-bundles`, and `--enter-placeholders` exist only on `tree`, `caches`,
   and `check`.
 - Rule names for `--only` are listed by `rosie rules`.
+- A mode's flags follow its name or folder: `rosie scan caches --aggressive`, not
+  `rosie scan --aggressive caches`. *(agent-inferred)*
 - Skip lines name the path and a short reason, with a flag hint only when that flag could
   change the outcome.
 

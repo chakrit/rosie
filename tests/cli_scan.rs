@@ -347,7 +347,8 @@ fn usage_errors_exit_with_the_usage_status() {
     let sandbox = Sandbox::new();
 
     for args in [
-        &["scan"][..],
+        &["scan", "--only", "node-modules", "caches"][..],
+        &["rules", "--aggressive"],
         &["scan", "tree", "--verbose"],
         &["scan", "app", "X.app", "--only", "node-modules"],
         &["scan", "app", "X.app", "--enter-bundles"],
@@ -768,4 +769,73 @@ fn an_app_outside_the_roots_is_refused_with_the_roots_hints() {
         "{}",
         ran.stderr
     );
+}
+
+// a folder in place of a mode or command (`docs/spec/cli.md#modes`)
+
+#[test]
+fn a_folder_in_place_of_a_mode_or_command_is_scanned_as_tree() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/app"));
+    let declined = || Script::terminal().answer("n");
+
+    let scanned = sandbox.run(&["scan", "app"]);
+    let scanned_flagged = sandbox.run(&["scan", ".", "--aggressive"]);
+    let cleaned = sandbox.run_with(declined(), &["clean", "."]);
+    let bare = sandbox.run_with(declined(), &["."]);
+    let bare_flagged = sandbox.run_with(declined(), &["../src", "--aggressive"]);
+    let piped = sandbox.run_with(Script::piped(), &["scan", ".", "--toml"]);
+
+    for ran in [scanned_flagged, cleaned, bare, bare_flagged] {
+        assert!(ran.stdout.starts_with(LISTED_APP), "{}", ran.stdout);
+    }
+    // `app` names the mode, never the folder.
+    assert!(!scanned.stdout.contains("node_modules"), "{}", scanned.stdout);
+    assert!(piped.stdout.starts_with("# rosie plan."), "{}", piped.stdout);
+    assert!(sandbox.removals().is_empty());
+}
+
+#[test]
+fn a_word_naming_no_command_mode_or_folder_lists_what_it_could_mean() {
+    let sandbox = Sandbox::new();
+
+    let bare = sandbox.run(&["scna"]);
+    let scan = sandbox.run(&["scan", "cachse"]);
+
+    bare.assert_status(ExitStatus::Usage);
+    assert_eq!(
+        bare.stderr,
+        "✗ no command or folder named scna\n  \
+            did you mean:\n    \
+            rosie scan\n  \
+            or to clean a folder:\n    \
+            rosie <dir>\n  \
+            or another mode:\n    \
+            rosie clean caches\n    \
+            rosie clean app\n    \
+            rosie clean orphans\n"
+    );
+    scan.assert_status(ExitStatus::Usage);
+    assert_eq!(
+        scan.stderr,
+        "✗ no command or folder named cachse\n  \
+            did you mean:\n    \
+            rosie scan caches\n  \
+            or to scan a folder:\n    \
+            rosie scan <dir>\n  \
+            or another mode:\n    \
+            rosie scan caches\n    \
+            rosie scan app\n    \
+            rosie scan orphans\n"
+    );
+}
+
+#[test]
+fn a_missing_folder_named_after_tree_is_only_missing() {
+    let sandbox = Sandbox::new();
+
+    let ran = sandbox.run(&["scan", "tree", "scna"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert_eq!(ran.stderr, format!("✗ {CWD}/scna does not exist\n"));
 }

@@ -458,6 +458,7 @@ mod tests {
     use std::path::{Path, PathBuf};
 
     use super::*;
+    use crate::cli::args::TreeArgs;
     use crate::output::ColorChoice;
     use crate::plan::{
         AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, RunAs,
@@ -481,7 +482,7 @@ mod tests {
         let left_out = LeftOut {
             skipped: &[],
             refused: &[],
-            mode: &Mode::default(),
+            mode: &Mode::Tree(TreeArgs::default()),
         };
         plan_listing(plan, &left_out, &shown(), palette, width).join("\n")
     }
@@ -694,7 +695,7 @@ status = "clean"
         let left_out = LeftOut {
             skipped: &skipped,
             refused: &refused,
-            mode: &Mode::default(),
+            mode: &Mode::Tree(TreeArgs::default()),
         };
 
         let lines = plan_listing(

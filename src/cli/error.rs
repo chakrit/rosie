@@ -1,8 +1,10 @@
 use std::io;
+use std::path::PathBuf;
 use std::str::Utf8Error;
 
 use thiserror::Error;
 
+use super::args::Place;
 use super::console::PromptError;
 use super::root::RootError;
 use super::session::PickKind;
@@ -13,6 +15,11 @@ pub enum Error {
     /// The command was used wrongly; rosie exits with the usage status.
     #[error("{0}")]
     Usage(String),
+
+    /// A folder given in place of a command or mode name that does not exist; rosie
+    /// exits with the usage status (`docs/spec/cli.md#modes`).
+    #[error("no command or folder named {}", .word.display())]
+    UnknownWord { word: PathBuf, place: Place },
 
     #[error("cancelled")]
     Cancelled,

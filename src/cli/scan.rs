@@ -14,7 +14,7 @@ use crate::config::Config;
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::output::Mark;
 use crate::packs::Network;
-use crate::plan::{ItemSize, Plan, PlanStats, Selection};
+use crate::plan::{ItemSize, Plan, PlanStats, Selection, Sides};
 use crate::run::{Elevation, Outcome, Runner, SkipReason};
 use crate::scan::{Refused, Scan, WalkSkips};
 
@@ -80,6 +80,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let format = args.format.or(by_terminal)?;
         let config = self.config()?;
         let scan = self.find(&config, &args.mode, &args.flags, "rosie scan app <X.app>")?;
+        let plan = answered(&scan.plan, args.conflicts.conflicts);
 
         let left_out = LeftOut {
             skipped: &scan.skipped,
@@ -88,19 +89,19 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         match format {
             Format::List => {
-                self.show_plan(&scan.plan, &left_out)?;
+                self.show_plan(&plan, &left_out)?;
                 self.show_problems(&scan)?;
             }
             Format::Toml => {
-                self.say(scan.plan.to_toml()?.trim_end())?;
+                self.say(plan.to_toml()?.trim_end())?;
                 self.show_findings(&scan, &args.mode)?;
             }
             Format::Sh => {
-                self.say(scan.plan.to_sh()?.trim_end())?;
+                self.say(plan.to_sh()?.trim_end())?;
                 self.show_findings(&scan, &args.mode)?;
             }
         }
-        self.show_stats(&scan.plan, scan.skip_counts())?;
+        self.show_stats(&plan, scan.skip_counts())?;
         Ok(ExitStatus::failed_if(!scan.problems.is_empty()))
     }
 
@@ -127,7 +128,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             refused: &scan.refused,
             mode: &args.mode,
         };
-        let plan = match self.confirm(scan.plan, &left_out, skips.walk)? {
+        let plan = answered(&scan.plan, args.conflicts.conflicts);
+        let plan = match self.confirm(plan, &left_out, skips.walk)? {
             Confirmation::Run(plan) => plan,
             Confirmation::NothingClean | Confirmation::Declined => {
                 return Ok(ExitStatus::failed_if(errored));
@@ -137,14 +139,43 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         Ok(ExitStatus::failed_if(failed || errored))
     }
 
-    /// Runs a saved or piped plan without asking: the plan is the confirmation.
-    pub fn run_plan(&mut self, source: &PlanSource) -> Result<ExitStatus, Error> {
+    /// Runs a saved or piped plan without confirming it: the plan is the confirmation.
+    /// Its conflicts take `answer` when given; on a terminal the user answers each one;
+    /// with neither, nothing runs (`docs/spec/plan.md#rule-conflicts`).
+    pub fn run_plan(
+        &mut self,
+        source: &PlanSource,
+        answer: Option<Selection>,
+    ) -> Result<ExitStatus, Error> {
         let bytes = match source {
             PlanSource::Stdin => self.console.read_stdin()?,
             PlanSource::File(path) => UserInput::read(&self.absolute(path)).perform(&self.own)?,
         };
         let text = str::from_utf8(&bytes).map_err(Error::PlanNotText)?;
-        let plan = Plan::parse(text)?;
+        let plan = answered(&Plan::parse(text)?, answer);
+
+        let lines: Vec<usize> = plan
+            .conflicts()
+            .into_iter()
+            .filter_map(|(_, sides)| match sides {
+                Sides::Read { line } => Some(*line),
+                Sides::Scanned(_) => None,
+            })
+            .collect();
+        let answered_all = plan.conflicts().is_empty();
+        let plan = match (answered_all, self.console.terminals().interactive()) {
+            (true, _) => plan,
+            (false, true) => match self.resolve(&plan)? {
+                Resolved::Plan(resolved) => resolved,
+                Resolved::Cancelled => return Err(Error::Cancelled),
+            },
+            (false, false) => {
+                return Err(Error::UnansweredConflicts {
+                    plan: source.to_string(),
+                    lines,
+                });
+            }
+        };
 
         let config = self.config()?;
         let failed = self.execute(&config, &plan, ScanSkips::default())?;
@@ -270,9 +301,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let options = [CLEAN.to_owned(), SKIP.to_owned()];
 
         let mut choices = Vec::new();
-        for (conflict, disagreement) in plan.conflicts() {
+        for (conflict, sides) in plan.conflicts() {
+            // A plan read back names the tiers only in a comment, so its rules stand in.
+            let rules = match sides {
+                Sides::Scanned(_) => sides.to_string(),
+                Sides::Read { .. } => conflict.rules.join(", "),
+            };
             let prompt = format!(
-                "Rules disagree on {} ({}; {disagreement}):",
+                "Rules disagree on {} ({}; {rules}):",
                 conflict.path.display(),
                 conflict.size,
             );
@@ -347,5 +383,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             stats_lines(PlanStats::of(plan), skips).trim_end(),
         )?;
         Ok(())
+    }
+}
+
+/// `plan` with every conflict answered `answer`, or as it is with no answer given.
+fn answered(plan: &Plan, answer: Option<Selection>) -> Plan {
+    match answer {
+        Some(answer) => plan.answering_conflicts(answer),
+        None => plan.clone(),
     }
 }

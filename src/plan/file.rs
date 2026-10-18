@@ -14,11 +14,10 @@ use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
 
-use super::conflict::conflict_hint;
 use super::{
     Bootout, Delete, Deletes, EntryProblem, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
-    Report, RunAs, Selection, Size, SkipReason, Status, StatusKind, Tool, check_path, comment,
-    skip_note,
+    Report, RunAs, Selection, Sides, Size, SkipReason, Status, StatusKind, Tool, check_path,
+    comment, skip_note,
 };
 use crate::fs::ShellCommand;
 
@@ -28,21 +27,30 @@ impl Plan {
     /// The plan as TOML, for `rosie scan` to print.
     pub fn to_toml(&self) -> Result<String, Error> {
         let clean = StatusKind::Clean.label();
+        let conflicts = match self.conflicts().len() {
+            0 => String::new(),
+            1 => format!("# 1 conflict: {ANSWER_IT}\n"),
+            count => format!("# {count} conflicts: {ANSWER_IT}\n"),
+        };
         let mut text = format!(
             "# rosie plan. Only entries with status = \"{clean}\" run.\n\
              # Delete any entry you do not want, then: rosie run <this file>\n\
+             {conflicts}\
              version = {FORMAT_VERSION}\n"
         );
 
-        for delete in self.deletes.iter() {
+        // Conflicts first, where the user opening the file meets them.
+        let (conflicted, decided): (Vec<&Delete>, Vec<&Delete>) = self
+            .deletes
+            .iter()
+            .partition(|delete| matches!(delete.status, Status::Conflict(_)));
+        for delete in conflicted.into_iter().chain(decided) {
             let note = match &delete.status {
                 Status::Clean => delete.size.to_string(),
                 Status::Skip(reason) => {
                     format!("{}; {}", delete.size, skip_note(*reason, &delete.path))
                 }
-                Status::Conflict(disagreement) => {
-                    format!("{}; {}", delete.size, conflict_hint(disagreement))
-                }
+                Status::Conflict(sides) => format!("{}; {sides}", delete.size),
             };
             push_entry(&mut text, Some(note), PlanFile::delete(delete))?;
         }
@@ -74,17 +82,31 @@ impl Plan {
 
         // Read from the text, not from a parsed table, so errors keep their line and column.
         let file: PlanFile = toml::from_str(text)?;
-        file.into_plan()
+        file.into_plan(text)
     }
 }
 
-/// Appends one entry as its own table, under a `# note` comment.
+/// What a conflict needs, as the header's count says it.
+const ANSWER_IT: &str = "set status to \"clean\" or \"skip\"";
+
+/// The same, on a conflict's `status` line.
+const ANSWER_HERE: &str = "set to \"clean\" or \"skip\"";
+
+/// Appends one entry as its own table, under a `# note` comment, with a conflict's
+/// `status` line saying what to set it to.
 fn push_entry(text: &mut String, note: Option<String>, entry: PlanFile) -> Result<(), Error> {
+    let conflict = format!("status = \"{}\"\n", StatusKind::Conflict.label());
+    let answered = format!(
+        "status = \"{}\"  # {ANSWER_HERE}\n",
+        StatusKind::Conflict.label()
+    );
+
     text.push('\n');
     if let Some(note) = note {
         text.push_str(&comment(&note));
     }
-    text.push_str(&toml::to_string(&entry)?);
+    let table = toml::to_string(&entry)?;
+    text.push_str(&table.replacen(&conflict, &answered, 1));
     Ok(())
 }
 
@@ -123,11 +145,35 @@ struct DeleteTable {
     /// Absent is an error, not zero bytes.
     size: Option<u64>,
     rules: Vec<String>,
-    status: String,
+    status: StatusText,
     #[serde(skip_serializing_if = "is_false")]
     sudo: bool,
     #[serde(skip_serializing_if = "Vec::is_empty")]
     bootout: Vec<BootoutTable>,
+}
+
+/// A delete's `status` and where it sits in the file being read; written plain.
+#[derive(Serialize, Deserialize)]
+#[serde(transparent)]
+struct StatusText(toml::Spanned<String>);
+
+impl StatusText {
+    fn plain(label: &str) -> Self {
+        StatusText(toml::Spanned::new(0..0, label.to_owned()))
+    }
+
+    /// The 1-based line of `text` the value starts on.
+    fn line(&self, text: &str) -> usize {
+        let before = &text[..self.0.span().start];
+        before.matches('\n').count() + 1
+    }
+}
+
+/// Absent reads as empty, which no status is.
+impl Default for StatusText {
+    fn default() -> Self {
+        StatusText::plain("")
+    }
 }
 
 #[derive(Serialize, Deserialize, Default)]
@@ -175,7 +221,7 @@ impl PlanFile {
             kind: delete.kind.label().to_owned(),
             size: Some(delete.size.get()),
             rules: delete.rules.clone(),
-            status: delete.status.label().to_owned(),
+            status: StatusText::plain(delete.status.label()),
             sudo: delete.run_as == RunAs::Sudo,
             bootout: delete.bootouts.iter().map(BootoutTable::of).collect(),
         };
@@ -239,8 +285,9 @@ fn path_text(path: &Path) -> String {
 // reading
 
 impl PlanFile {
-    fn into_plan(self) -> Result<Plan, Error> {
-        let deletes = numbered("delete", self.delete, DeleteTable::into_delete)?;
+    /// `text` is the file `self` was read from, for the line of each conflict.
+    fn into_plan(self, text: &str) -> Result<Plan, Error> {
+        let deletes = numbered("delete", self.delete, |table| table.into_delete(text))?;
         Ok(Plan {
             deletes: Deletes::refusing_nested(deletes)?,
             tools: numbered("tool", self.tool, ToolTable::into_tool)?,
@@ -271,7 +318,7 @@ fn numbered<T, E>(
 }
 
 impl DeleteTable {
-    fn into_delete(self) -> Result<Delete, EntryProblem> {
+    fn into_delete(self, text: &str) -> Result<Delete, EntryProblem> {
         let path = absolute_path("path", self.path)?;
         let Some(kind) = ItemKind::parse(&self.kind) else {
             return Err(EntryProblem::UnknownKind { text: self.kind });
@@ -279,7 +326,7 @@ impl DeleteTable {
         let Some(bytes) = self.size else {
             return Err(EntryProblem::MissingSize);
         };
-        let status = status(&self.status)?;
+        let status = status(&self.status, text)?;
         let run_as = match self.sudo {
             true => RunAs::Sudo,
             false => RunAs::User,
@@ -371,19 +418,21 @@ fn absolute_path(field: &'static str, text: String) -> Result<PathBuf, EntryProb
     }
 }
 
-fn status(text: &str) -> Result<Status, EntryProblem> {
-    let Some(kind) = StatusKind::parse(text) else {
+/// A `conflict` read back keeps its line in `file`, for `rosie run` to point to.
+fn status(text: &StatusText, file: &str) -> Result<Status, EntryProblem> {
+    let label: &String = text.0.as_ref();
+    let Some(kind) = StatusKind::parse(label) else {
         return Err(EntryProblem::UnknownStatus {
-            text: text.to_owned(),
+            text: label.clone(),
         });
     };
 
     match kind {
         StatusKind::Clean => Ok(Status::Clean),
         StatusKind::Skip => Ok(Status::Skip(SkipReason::Chosen)),
-        StatusKind::Conflict => Err(EntryProblem::ConflictStatus {
-            text: text.to_owned(),
-        }),
+        StatusKind::Conflict => Ok(Status::Conflict(Sides::Read {
+            line: text.line(file),
+        })),
     }
 }
 
@@ -694,8 +743,8 @@ mod tests {
         );
     }
 
-    /// A plan with `/w/a` matched by two rules that disagree on its tier.
-    fn conflicted() -> Plan {
+    /// `/w/a` matched by two rules that disagree on its tier.
+    fn conflicted_builder() -> PlanBuilder {
         let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         for (rule, tier) in [("rosie/a", Tier::Normal), ("alice/b", Tier::Aggressive)] {
             let found = PathMatch {
@@ -704,36 +753,55 @@ mod tests {
             };
             builder.add_path(found).expect("valid");
         }
-        builder.build().plan
+        builder
+    }
+
+    fn conflicted() -> Plan {
+        conflicted_builder().build().plan
     }
 
     #[test]
-    fn a_conflict_is_written_naming_the_rules_on_each_side() {
-        let text = conflicted().to_toml().expect("serializable");
+    fn a_conflict_is_written_first_under_a_count_with_what_to_set() {
+        let mut builder = conflicted_builder();
+        builder
+            .add_path(found("/w/0", Reach::InRoots, Tier::Normal))
+            .expect("valid");
+
+        let text = builder.build().plan.to_toml().expect("serializable");
 
         assert!(
+            text.contains("# 1 conflict: set status to \"clean\" or \"skip\"\nversion = 1\n"),
+            "{text}"
+        );
+        assert!(
             text.contains(
-                "# 1.2 MB; conflict, rules disagree (normal: rosie/a; aggressive: alice/b). \
-                 Set status to clean or skip\n[[delete]]\npath = \"/w/a\""
+                "# 1.2 MB; rosie/a: normal, alice/b: aggressive\n[[delete]]\npath = \"/w/a\""
             ),
             "{text}"
         );
-        assert!(text.contains("status = \"conflict\"\n"), "{text}");
+        assert!(
+            text.contains("status = \"conflict\"  # set to \"clean\" or \"skip\"\n"),
+            "{text}"
+        );
+        let conflict = text.find("path = \"/w/a\"").expect("the conflict");
+        let decided = text.find("path = \"/w/0\"").expect("the clean entry");
+        assert!(conflict < decided, "{text}");
     }
 
     #[test]
-    fn a_written_conflict_cannot_be_read_back_until_it_is_resolved() {
+    fn a_conflict_read_back_keeps_the_line_of_its_status() {
         let text = conflicted().to_toml().expect("serializable");
-        let resolved = text.replace("status = \"conflict\"", "status = \"skip\"");
+        let line = 1 + text
+            .lines()
+            .position(|line| line.starts_with("status = \"conflict\""))
+            .expect("a conflict status");
 
-        let refused = Plan::parse(&text);
-        let parsed = Plan::parse(&resolved).expect("resolved plan parses");
+        let parsed = Plan::parse(&text).expect("a conflict reads back");
 
-        assert!(
-            matches!(&refused, Err(Error::InvalidEntry { problem, .. }) if matches!(**problem, EntryProblem::ConflictStatus { .. })),
-            "{refused:?}"
+        assert_eq!(
+            parsed.deletes()[0].status,
+            Status::Conflict(Sides::Read { line })
         );
-        assert_eq!(parsed.deletes()[0].status, Status::Skip(SkipReason::Chosen));
     }
 
     #[test]
@@ -823,10 +891,6 @@ mod tests {
             (
                 "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\n",
                 "[[delete]] entry 1: status \"\" is not one of clean, skip, conflict",
-            ),
-            (
-                "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\nstatus = \"conflict\"\n",
-                "[[delete]] entry 1: status \"conflict\" is a rule conflict; resolve it to clean or skip",
             ),
             (
                 "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"clean\"\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \" \"\nstatus = \"clean\"\n",

@@ -23,6 +23,12 @@ pub enum Error {
     #[error("the plan is not UTF-8 text: {0}")]
     PlanNotText(#[source] Utf8Error),
 
+    /// `rosie run` with no terminal to ask on and no `--conflicts`; `lines` is where each
+    /// conflict's `status` sits in `plan`, the file as typed or `-`
+    /// (`docs/spec/plan.md#rule-conflicts`).
+    #[error("{plan}: unresolved conflicts")]
+    UnansweredConflicts { plan: String, lines: Vec<usize> },
+
     #[error(transparent)]
     Root(#[from] RootError),
 

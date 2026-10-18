@@ -16,7 +16,6 @@
 
 use std::path::Path;
 
-use super::conflict::conflict_hint;
 use super::{Error, Plan, Selection, SkipReason, Status, comment, skip_note};
 use crate::fs::{Argv, SystemTool};
 use crate::shell;
@@ -123,7 +122,7 @@ impl Line {
         let note = match &status {
             Status::Clean => note,
             Status::Skip(reason) => format!("{note}; {}", skip_note(*reason, path)),
-            Status::Conflict(disagreement) => format!("{note}; {}", conflict_hint(disagreement)),
+            Status::Conflict(sides) => format!("{note}; conflict: {sides}"),
         };
         Line { status, note }
     }

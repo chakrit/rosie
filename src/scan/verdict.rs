@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::{Problem, Refused, Scan, Skipped};
-use crate::plan::{Delete, Disagreement, PlanStats, SkipReason, Status};
+use crate::plan::{Delete, PlanStats, Sides, SkipReason, Status};
 use crate::tier::Tier;
 
 /// What the plan would do with a path, judged from a scan of it.
@@ -41,7 +41,7 @@ pub enum PathVerdict<'s> {
 pub enum Planned<'s> {
     Clean(Tier),
     Skip(SkipReason),
-    Conflict(&'s Disagreement),
+    Conflict(&'s Sides),
 }
 
 /// Where the item a verdict names sits against the path.
@@ -130,7 +130,7 @@ impl Scan {
                 Planned::Clean(tier.expect("the plan builder records the tier of each clean entry"))
             }
             Status::Skip(reason) => Planned::Skip(*reason),
-            Status::Conflict(disagreement) => Planned::Conflict(disagreement),
+            Status::Conflict(sides) => Planned::Conflict(sides),
         }
     }
 }

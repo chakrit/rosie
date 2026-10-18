@@ -12,16 +12,25 @@ confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or pipe
 ## Plan file
 
 The plan file is `version = 1` followed by one table per entry, grouped by action;
-deletes are in path order. Each entry except `[[report]]` is preceded by a comment with
-its size (`size unknown` for `[[tool]]` and `[[forget]]`) and, when `skip`, why, with
-the `rosie roots add <path>` hint outside the roots; report entries have no comment. A
-launch job's bootout
-sits inside the delete that holds its plist:
+conflicts come first, then the other deletes in path order. Each entry except
+`[[report]]` is preceded by a comment with its size (`size unknown` for `[[tool]]` and
+`[[forget]]`) and, when `skip`, why, with the `rosie roots add <path>` hint outside the
+roots; report entries have no comment. A launch job's bootout sits inside the delete
+that holds its plist:
 
 ```toml
 # rosie plan. Only entries with status = "clean" run.
 # Delete any entry you do not want, then: rosie run <this file>
+# 1 conflict: set status to "clean" or "skip"
 version = 1
+
+# 3.0 GB; rosie/cargo-target: normal, alice/rust: aggressive
+[[delete]]
+path = "/Users/me/src/api/target"
+type = "folder"
+size = 3000000000
+rules = ["alice/rust", "rosie/cargo-target"]
+status = "conflict"  # set to "clean" or "skip"
 
 # 4.1 KB; skip: outside the roots
 # to allow just it:
@@ -124,17 +133,25 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 
 - An entry is `conflict` when two or more rules' scan matches overlap (the same path, or
   one nested in another) and the rules disagree on tier. No rule's tier wins.
-- The entry's comment names the rules and their tiers.
-- `rosie run` and the interactive `y` refuse while any `conflict` entry remains.
-- The user resolves each conflict to `clean` or `skip`, by editing the plan or
-  through `e`.
+- The plan file lists conflicts first. Its header counts them; each one's comment names
+  the rules and their tiers, and its `status` line says to set it to `clean` or `skip`.
+- `--conflicts=clean|skip` on `scan`, `clean`, and `run` answers every conflict; there is
+  no default. `scan` writes the answer into the plan; `run` answers only entries still
+  `conflict`.
+- `rosie run` on a terminal asks about each unanswered conflict. With no terminal, it
+  stops before doing anything, with one `<plan>:<line>: unresolved conflict` line per
+  conflict; a piped plan is `-`.
+- The interactive `y` refuses while any `conflict` entry remains; `e` asks about each.
 - `rosie scan … --sh` refuses while any `conflict` entry remains.
+- `rosie scan` prints nothing about conflicts beyond counting them in its stats.
 - A rule never conflicts with itself: a rule whose normal and aggressive values match the
   same path counts as normal, and a rule matching inside a path it already matched keeps
   the outer match's tier. *(agent-inferred)*
 - `--aggressive` does not hide a conflict. *(agent-inferred)*
 - A conflict entry's `rules` lists only the outer path's own rules; rules from nested
   paths appear only in its comment. *(agent-inferred)*
+- A conflict read back from a plan file is asked about by its rules, since the file
+  names their tiers only in a comment. *(agent-inferred)*
 
 ## Plan listing
 

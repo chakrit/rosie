@@ -17,7 +17,7 @@ use super::conflict::{Tiers, Verdict};
 use super::deletes::{Found, Located};
 use super::{
     Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, SkipReason, Status, Tool, check_path,
+    Selection, Sides, Size, SkipReason, Status, Tool, check_path,
 };
 use crate::fs::ShellCommand;
 use crate::tier::{Tier, Twin};
@@ -240,7 +240,9 @@ impl FoundPath {
                 Selection::Clean => Status::Clean,
                 Selection::Skip => Status::Skip(SkipReason::Aggressive),
             },
-            (Reach::InRoots, Verdict::Disagreed(disagreement)) => Status::Conflict(disagreement),
+            (Reach::InRoots, Verdict::Disagreed(disagreement)) => {
+                Status::Conflict(Sides::Scanned(disagreement))
+            }
         };
 
         Delete {
@@ -379,7 +381,7 @@ mod tests {
     }
 
     fn disagreement(status: &Status) -> (Vec<String>, Vec<String>) {
-        let Status::Conflict(disagreement) = status else {
+        let Status::Conflict(Sides::Scanned(disagreement)) = status else {
             panic!("expected a conflict, got {status:?}");
         };
         (

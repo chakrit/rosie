@@ -8,7 +8,7 @@ use std::collections::BTreeMap;
 use std::fmt;
 use std::ptr;
 
-use super::{Delete, Plan, Selection, Status};
+use super::{Delete, Plan, Selection, Sides, Status};
 use crate::tier::Tier;
 
 /// The rules that matched one entry, or entries nested in it, at each tier. Both lists
@@ -29,22 +29,24 @@ impl Disagreement {
     }
 }
 
-/// `normal: rosie/node-modules; aggressive: alice/js`.
-impl fmt::Display for Disagreement {
+/// `rosie/a: normal, alice/b: aggressive`, as a conflict's comment and prompt name its
+/// rules, or `rules disagree` for a conflict read back from a file.
+impl fmt::Display for Sides {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(
-            f,
-            "normal: {}; aggressive: {}",
-            self.normal.join(", "),
-            self.aggressive.join(", ")
-        )
+        let Sides::Scanned(disagreement) = self else {
+            return write!(f, "rules disagree");
+        };
+        let normal = disagreement
+            .normal
+            .iter()
+            .map(|rule| format!("{rule}: normal"));
+        let aggressive = disagreement
+            .aggressive
+            .iter()
+            .map(|rule| format!("{rule}: aggressive"));
+        let sides: Vec<String> = normal.chain(aggressive).collect();
+        write!(f, "{}", sides.join(", "))
     }
-}
-
-/// What a conflict entry shows: `conflict, rules disagree (normal: a; aggressive: b).
-/// Set status to clean or skip`.
-pub(super) fn conflict_hint(disagreement: &Disagreement) -> String {
-    format!("conflict, rules disagree ({disagreement}). Set status to clean or skip")
 }
 
 /// Each rule that matched a path, or a path nested in it, with its tier. One rule never
@@ -99,11 +101,11 @@ impl Tiers {
 
 impl Plan {
     /// The entries awaiting the user's choice, with what their rules say, in plan order.
-    pub fn conflicts(&self) -> Vec<(&Delete, &Disagreement)> {
+    pub fn conflicts(&self) -> Vec<(&Delete, &Sides)> {
         self.deletes
             .iter()
             .filter_map(|delete| match &delete.status {
-                Status::Conflict(disagreement) => Some((delete, disagreement)),
+                Status::Conflict(sides) => Some((delete, sides)),
                 Status::Clean | Status::Skip(_) => None,
             })
             .collect()
@@ -122,6 +124,20 @@ impl Plan {
         let deletes = self.deletes.restatusing(|delete| match chosen(delete) {
             Some(status) => status,
             None => delete.status.clone(),
+        });
+
+        Plan {
+            deletes,
+            ..self.clone()
+        }
+    }
+
+    /// The plan with every conflict answered `answer`, as `--conflicts` gives it; any
+    /// other entry stays as it is.
+    pub fn answering_conflicts(&self, answer: Selection) -> Plan {
+        let deletes = self.deletes.restatusing(|delete| match &delete.status {
+            Status::Conflict(_) => answer.answered(),
+            other => other.clone(),
         });
 
         Plan {

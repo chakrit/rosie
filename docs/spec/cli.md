@@ -39,7 +39,8 @@ Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 
 - `rosie scan` prints the plan as a listing when stdout is a terminal and as TOML
   otherwise; a format flag overrides that ([Flags](#flags)).
-- `rosie run` does not ask for confirmation; the plan is the confirmation.
+- `rosie run` does not ask for confirmation; the plan is the confirmation. It asks only
+  about conflicts ([plan.md](plan.md#rule-conflicts)).
 - `rosie clean` with no terminal fails with a usage error.
 
 ### Bare `rosie`
@@ -210,6 +211,8 @@ Flags for `scan`, `plan`, `clean`, and `check`:
 | `--format=<format>`      | `scan` / `plan` only: `list`, `toml`, or `sh`                  |
 | `--toml`                 | `scan` / `plan` only: shortcut for `--format=toml`             |
 | `--sh`                   | `scan` / `plan` only: shortcut for `--format=sh`               |
+| `--conflicts=<answer>`   | `scan`, `clean`, `run` only: answers every conflict `clean` or |
+|                          | `skip`; no default                                             |
 
 - `list` is the plan listing, `toml` the plan file, and `sh` the shell-script export
   ([plan.md](plan.md)).

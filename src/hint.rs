@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use crate::config::{WalkKey, WalkSetting};
 use crate::fs::EnterLinks;
 use crate::output::Palette;
+use crate::plan::Selection;
 use crate::shell::quote_word;
 
 /// One way out of a failure: what it does, then the steps that do it. A hint with no
@@ -193,6 +194,8 @@ impl Word {
 pub enum Flag {
     Aggressive,
     Enter(WalkSetting),
+    /// `--conflicts=clean` or `--conflicts=skip`.
+    Conflicts(Selection),
 }
 
 impl fmt::Display for Flag {
@@ -200,6 +203,7 @@ impl fmt::Display for Flag {
         match self {
             Flag::Aggressive => write!(f, "--aggressive"),
             Flag::Enter(setting) => write!(f, "{}", flag(*setting)),
+            Flag::Conflicts(answer) => write!(f, "--conflicts={}", answer.label()),
         }
     }
 }

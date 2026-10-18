@@ -9,7 +9,8 @@ use super::root::RootError;
 use super::session::PickKind;
 use crate::config::{self, UnusableRoot};
 use crate::fs::{self, EnterLinks, RealPath};
-use crate::hint::{Command, Hint};
+use crate::hint::{Command, Flag, Hint};
+use crate::plan::Selection;
 use crate::{apps, packs, plan, rules, run, scan};
 
 /// One problem and what the user can do about it.
@@ -28,8 +29,16 @@ impl Failure {
     }
 }
 
-/// The problems `error` reports: one, or one per unusable root.
+/// The problems `error` reports: one, one per unusable root, or one per unanswered
+/// conflict.
 pub fn failures(error: &Error) -> Vec<Failure> {
+    if let Error::UnansweredConflicts { plan, lines } = error {
+        return lines
+            .iter()
+            .map(|line| Failure::new(format!("{plan}:{line}: unresolved conflict"), Vec::new()))
+            .collect();
+    }
+
     let config_error = match error {
         Error::Config(error) => Some(error),
         Error::Run(run::Error::Config(error)) => Some(error),
@@ -60,6 +69,7 @@ fn hints(error: &Error) -> Vec<Hint> {
         | Error::Usage(_)
         | Error::Cancelled
         | Error::PlanNotText(_)
+        | Error::UnansweredConflicts { .. }
         | Error::Io(_) => Vec::new(),
     }
 }
@@ -274,9 +284,10 @@ fn apps_hints(error: &apps::Error) -> Vec<Hint> {
 
 fn plan_hints(error: &plan::Error) -> Vec<Hint> {
     match error {
-        plan::Error::UnresolvedConflicts { .. } => vec![Hint::by_hand(
-            "save the plan as TOML and set each \"conflict\" status to clean or skip",
-        )],
+        plan::Error::UnresolvedConflicts { .. } => vec![
+            Hint::flag("to clean them", Flag::Conflicts(Selection::Clean)),
+            Hint::flag("to skip them", Flag::Conflicts(Selection::Skip)),
+        ],
         plan::Error::NulByte { .. }
         | plan::Error::ConflictingLaunchDomain { .. }
         | plan::Error::RelativePath { .. }

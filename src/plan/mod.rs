@@ -448,7 +448,17 @@ pub enum Status {
     Skip(SkipReason),
     /// Rules disagree on its tier, and no one has answered `clean` or `skip` yet
     /// (`docs/spec/plan.md#rule-conflicts`).
-    Conflict(Disagreement),
+    Conflict(Sides),
+}
+
+/// What a conflict knows of its rules' tiers.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Sides {
+    /// From the scan that found it.
+    Scanned(Disagreement),
+    /// Read back from a plan file, whose comment alone names the tiers; `line` is where
+    /// the entry's `status` sits in the file.
+    Read { line: usize },
 }
 
 impl Status {

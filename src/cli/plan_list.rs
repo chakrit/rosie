@@ -13,7 +13,9 @@ use super::findings::walk_skip_hints;
 use super::shown::Shown;
 use crate::hint::{Hint, hint_lines};
 use crate::output::{Palette, Tone};
-use crate::plan::{Delete, Plan, Receipt, Report, Selection, Size, SkipReason, Status, Tool};
+use crate::plan::{
+    Delete, Plan, Receipt, Report, Selection, Sides, Size, SkipReason, Status, Tool,
+};
 use crate::scan::{Refused, Skipped};
 
 /// What the scan left out of the plan, which the listing shows beside it.
@@ -162,7 +164,7 @@ fn sections(plan: &Plan, left_out: &LeftOut, shown: &Shown) -> Vec<Section> {
 
 fn delete_item(delete: &Delete, shown: &Shown) -> Item {
     let rules = match &delete.status {
-        Status::Conflict(disagreement) => {
+        Status::Conflict(Sides::Scanned(disagreement)) => {
             let normal = disagreement
                 .normal()
                 .iter()
@@ -173,7 +175,9 @@ fn delete_item(delete: &Delete, shown: &Shown) -> Item {
                 .map(|rule| format!("{rule} (aggressive)"));
             normal.chain(aggressive).collect()
         }
-        Status::Clean | Status::Skip(_) => delete.rules.clone(),
+        Status::Clean | Status::Skip(_) | Status::Conflict(Sides::Read { .. }) => {
+            delete.rules.clone()
+        }
     };
     let status = match &delete.status {
         Status::Clean => None,

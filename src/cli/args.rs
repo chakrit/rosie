@@ -1,6 +1,7 @@
 //! The command line, exactly as `docs/spec/cli.md` lays it out. Flags parse into the
 //! plain values clap needs; `super` turns them into typed settings once.
 
+use std::fmt;
 use std::path::PathBuf;
 
 use clap::{Args, Parser, Subcommand};
@@ -8,7 +9,7 @@ use clap::{Args, Parser, Subcommand};
 use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::EnterLinks;
-use crate::plan::AggressiveItems;
+use crate::plan::{AggressiveItems, Selection};
 use crate::rules::Name;
 use crate::run::elevated;
 use crate::scan::{Needs, Settings, WalkSkip};
@@ -50,6 +51,9 @@ pub enum UserCommand {
     Run {
         #[arg(value_parser = parse_plan_source)]
         plan: PlanSource,
+
+        #[command(flatten)]
+        conflicts: ConflictsFlag,
     },
 
     /// Show the rules with their packs, or manage the packs.
@@ -77,6 +81,7 @@ impl Default for UserCommand {
         UserCommand::Clean(CleanArgs {
             mode: Mode::default(),
             flags: ScanFlags::default(),
+            conflicts: ConflictsFlag::default(),
         })
     }
 }
@@ -91,6 +96,9 @@ pub struct ScanArgs {
 
     #[command(flatten)]
     pub format: FormatFlags,
+
+    #[command(flatten)]
+    pub conflicts: ConflictsFlag,
 }
 
 /// How `scan` prints the plan (`docs/spec/cli.md#flags`).
@@ -156,6 +164,18 @@ pub struct CleanArgs {
 
     #[command(flatten)]
     pub flags: ScanFlags,
+
+    #[command(flatten)]
+    pub conflicts: ConflictsFlag,
+}
+
+/// `--conflicts`: one answer for every rule conflict, with no default
+/// (`docs/spec/plan.md#rule-conflicts`).
+#[derive(Debug, Clone, Copy, Default, Args)]
+pub struct ConflictsFlag {
+    /// Answer every rule conflict `clean` or `skip`.
+    #[arg(long, global = true, value_name = "ANSWER", value_parser = parse_answer)]
+    pub conflicts: Option<Selection>,
 }
 
 /// `rosie check <path>…` takes the flags of `scan`, without `--sh`
@@ -326,6 +346,16 @@ pub enum PlanSource {
     File(PathBuf),
 }
 
+/// The plan as the user typed it: its path, or `-`.
+impl fmt::Display for PlanSource {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            PlanSource::Stdin => write!(f, "-"),
+            PlanSource::File(path) => write!(f, "{}", path.display()),
+        }
+    }
+}
+
 #[derive(Debug, Subcommand)]
 pub enum RulesAction {
     /// Install a rule pack from a GitHub owner/repo; chakrit/rosie by default.
@@ -371,6 +401,17 @@ fn parse_enter_links(text: &str) -> Result<EnterLinks, String> {
         let levels: Vec<&str> = EnterLinks::ALL.into_iter().map(EnterLinks::label).collect();
         format!("expected one of: {}", levels.join(", "))
     })
+}
+
+fn parse_answer(text: &str) -> Result<Selection, String> {
+    let answers = [Selection::Clean, Selection::Skip];
+    answers
+        .into_iter()
+        .find(|answer| answer.label() == text)
+        .ok_or_else(|| {
+            let labels: Vec<&str> = answers.into_iter().map(Selection::label).collect();
+            format!("expected one of: {}", labels.join(", "))
+        })
 }
 
 fn parse_format(text: &str) -> Result<Format, String> {

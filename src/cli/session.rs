@@ -94,7 +94,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             UserCommand::Scan(args) => self.scan(args),
             UserCommand::Clean(args) => self.clean(args),
             UserCommand::Check(args) => self.check(args),
-            UserCommand::Run { plan } => self.run_plan(&plan),
+            UserCommand::Run { plan, conflicts } => self.run_plan(&plan, conflicts.conflicts),
             UserCommand::Rules { action } => self.rules_command(action),
             UserCommand::Roots { action } => self.roots_command(action),
             UserCommand::Config { action } => self.config_command(action),

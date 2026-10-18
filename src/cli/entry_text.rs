@@ -5,10 +5,14 @@
 use std::path::Path;
 
 use crate::hint::{Flag, Hint};
-use crate::plan::{Disagreement, RunAs, SkipReason, Status};
+use crate::plan::{RunAs, Sides, SkipReason, Status};
 
-/// `rosie/a (normal) vs alice/b (aggressive)`.
-pub fn sides(disagreement: &Disagreement) -> String {
+/// `rosie/a (normal) vs alice/b (aggressive)`, or `rules disagree` for a conflict read
+/// back from a file.
+pub fn sides(sides: &Sides) -> String {
+    let Sides::Scanned(disagreement) = sides else {
+        return "rules disagree".to_owned();
+    };
     format!(
         "{} (normal) vs {} (aggressive)",
         disagreement.normal().join(", "),

@@ -148,7 +148,7 @@ fn clean_edit_makes_the_user_choose_each_conflict() {
         let node_modules = format!("{CWD}/app/node_modules");
         assert!(
             ran.asked[1].contains(&format!("Rules disagree on {node_modules}"))
-                && ran.asked[1].contains("normal: rosie/node-modules; aggressive: rosie/deps"),
+                && ran.asked[1].contains("rosie/node-modules: normal, rosie/deps: aggressive"),
             "{:?}",
             ran.asked
         );
@@ -160,8 +160,16 @@ fn clean_edit_makes_the_user_choose_each_conflict() {
     }
 }
 
+/// The line of `plan` where the conflict's `status` sits, 1-based.
+fn conflict_line(plan: &str) -> usize {
+    1 + plan
+        .lines()
+        .position(|line| line.starts_with("status = \"conflict\""))
+        .expect("a conflict in the plan")
+}
+
 #[test]
-fn run_refuses_a_saved_plan_with_a_conflict() {
+fn run_without_a_terminal_refuses_an_unanswered_conflict_naming_its_line() {
     let sandbox = conflicted_project();
     let scanned = sandbox.run(&["scan", "tree", ".", "--toml"]);
 
@@ -169,7 +177,78 @@ fn run_refuses_a_saved_plan_with_a_conflict() {
 
     ran.assert_status(ExitStatus::Failed);
     assert!(sandbox.removals().is_empty(), "{:?}", sandbox.removals());
-    assert!(ran.stderr.contains("rule conflict"), "{}", ran.stderr);
+    assert_eq!(
+        ran.stderr,
+        format!(
+            "✗ -:{}: unresolved conflict\n",
+            conflict_line(&scanned.stdout)
+        )
+    );
+}
+
+#[test]
+fn run_on_a_terminal_asks_about_each_conflict() {
+    for (pick, cleaned) in [(0, true), (1, false)] {
+        let sandbox = conflicted_project();
+        let scanned = sandbox.run(&["scan", "tree", ".", "--toml"]);
+        sandbox
+            .fake
+            .add_file(format!("{CWD}/plan.toml"), scanned.stdout.as_str());
+
+        let ran = sandbox.run_with(Script::terminal().pick(pick), &["run", "plan.toml"]);
+
+        ran.assert_status(ExitStatus::Success);
+        let node_modules = format!("{CWD}/app/node_modules");
+        assert_eq!(
+            ran.asked,
+            [format!(
+                "Rules disagree on {node_modules} (4.1 KB; rosie/deps, rosie/node-modules): \
+                 clean: remove it | skip: leave it"
+            )]
+        );
+        assert_eq!(!sandbox.exists(&node_modules), cleaned, "pick {pick}");
+    }
+}
+
+#[test]
+fn conflicts_answers_every_conflict_without_asking() {
+    for (answer, cleaned) in [("clean", true), ("skip", false)] {
+        let sandbox = conflicted_project();
+        let scanned = sandbox.run(&["scan", "tree", ".", "--toml"]);
+        let flag = format!("--conflicts={answer}");
+
+        let ran = sandbox.run_with(Script::piped().stdin(&scanned.stdout), &["run", "-", &flag]);
+
+        ran.assert_status(ExitStatus::Success);
+        assert!(ran.asked.is_empty(), "{:?}", ran.asked);
+        let node_modules = format!("{CWD}/app/node_modules");
+        assert_eq!(!sandbox.exists(&node_modules), cleaned, "{flag}");
+    }
+}
+
+#[test]
+fn scan_with_conflicts_writes_the_answer_into_the_plan() {
+    let sandbox = conflicted_project();
+
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml", "--conflicts=skip"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(!ran.stdout.contains("conflict"), "{}", ran.stdout);
+    assert!(ran.stdout.contains("status = \"skip\""), "{}", ran.stdout);
+}
+
+#[test]
+fn clean_with_conflicts_asks_only_to_confirm() {
+    let sandbox = conflicted_project();
+
+    let ran = sandbox.run_with(
+        Script::terminal().answer("y"),
+        &["clean", "tree", ".", "--conflicts=clean"],
+    );
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(ran.asked, ["Clean the items marked clean? [y/N/e]"]);
+    assert!(!sandbox.exists(format!("{CWD}/app/node_modules").as_str()));
 }
 
 #[test]

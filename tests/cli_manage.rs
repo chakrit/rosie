@@ -308,7 +308,7 @@ fn clean_app_deletes_the_app_and_its_leftovers_once_confirmed() {
 }
 
 #[test]
-fn scan_orphans_lists_leftovers_of_apps_no_longer_installed_as_keep() {
+fn scan_orphans_lists_leftovers_of_apps_no_longer_installed_as_skip() {
     let sandbox = Sandbox::with_roots(&["/Users/me/Library"]);
     sandbox
         .fake
@@ -324,7 +324,7 @@ fn scan_orphans_lists_leftovers_of_apps_no_longer_installed_as_keep() {
         ran.stdout
     );
     assert!(
-        ran.stderr.contains("keep (aggressive, not run): 1 item"),
+        ran.stderr.contains("skip (aggressive): 1 item"),
         "{}",
         ran.stderr
     );

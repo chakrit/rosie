@@ -522,7 +522,7 @@ fn aggressive_cleans_the_aggressive_command_in_place_of_the_normal_one() {
     let aggressive = sandbox.run(&["scan", "caches", "--toml", "--aggressive"]);
 
     assert!(normal.stderr.contains("clean: 1 item"), "{}", normal.stderr);
-    assert!(normal.stderr.contains("keep (aggressive, not run): 1 item"));
+    assert!(normal.stderr.contains("skip (aggressive): 1 item"));
     assert!(
         aggressive
             .stdout

@@ -15,7 +15,6 @@
 use std::path::{Path, PathBuf};
 
 use super::args::{CheckArgs, enter_hint};
-use super::columns::{Row, layout};
 use super::console::{Console, Finish};
 use super::entry_text::{sides, status_hints, sudo_note};
 use super::findings::problem_line;
@@ -26,7 +25,7 @@ use crate::apps;
 use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
 use crate::hint::{Command, Hint, hints_text};
 use crate::packs::Network;
-use crate::plan::{Delete, PlanStats, StatusKind, Tally};
+use crate::plan::{Counted, Delete, PlanStats, SkipReason, StatusKind};
 use crate::scan::{
     self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Scanner, Settings, Skipped,
     WalkSkip,
@@ -68,7 +67,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let cleaned = lines
             .iter()
             .any(|line| matches!(line.word, Word::Plan(StatusKind::Clean)));
-        for text in in_columns(&lines) {
+        for text in in_rows(&lines) {
             self.say(&text)?;
         }
         Ok(ExitStatus::failed_if(!cleaned))
@@ -173,7 +172,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 }
 
-/// One printed line: status, path, and the reason with any hint.
+/// One path's verdict: status, path, and the reason with any hint.
 struct Line {
     word: Word,
     path: String,
@@ -200,16 +199,27 @@ impl Word {
     }
 }
 
-/// The lines in columns: status, path, then the reason with any hint.
-fn in_columns(lines: &[Line]) -> Vec<String> {
-    let rows: Vec<Row<2>> = lines
+/// Each line's status and path, the path last, then its reason with any hint on the
+/// lines below, under the path.
+fn in_rows(lines: &[Line]) -> Vec<String> {
+    let width = lines
         .iter()
-        .map(|line| Row {
-            cells: [line.word.label().to_owned(), line.path.clone()],
-            text: line.reason.clone(),
+        .map(|line| line.word.label().chars().count())
+        .max()
+        .unwrap_or(0);
+    let under_path = " ".repeat(width + 2);
+
+    lines
+        .iter()
+        .map(|line| {
+            let reason: String = line
+                .reason
+                .lines()
+                .map(|text| format!("\n{under_path}{text}"))
+                .collect();
+            format!("{:<width$}  {}{reason}", line.word.label(), line.path)
         })
-        .collect();
-    layout(&rows)
+        .collect()
 }
 
 /// Whether the walk leaves `path` to app mode: it is named as an `.app`, nothing at or
@@ -265,15 +275,15 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
     let what = match (place, planned) {
         (Place::Inside, _) => Some(format!("inside {} ({rules})", shown.path(&delete.path))),
         (Place::At, Planned::Clean(tier)) => Some(format!("{rules} ({})", tier.label())),
-        (Place::At, Planned::Keep) => Some(format!("{rules} (aggressive)")),
-        (Place::At, Planned::OutsideRoots) => None,
+        (Place::At, Planned::Skip(SkipReason::Aggressive)) => Some(format!("{rules} (aggressive)")),
+        (Place::At, Planned::Skip(SkipReason::OutsideRoots)) => {
+            Some("outside the roots".to_owned())
+        }
+        (Place::At, Planned::Skip(SkipReason::Chosen)) => Some(rules),
         (Place::At, Planned::Conflict(disagreement)) => Some(sides(disagreement)),
     };
     let sudo = sudo_note(delete.run_as);
-    let hints = status_hints(
-        delete.status.kind(),
-        &PathBuf::from(shown.path(&delete.path)),
-    );
+    let hints = status_hints(&delete.status, &PathBuf::from(shown.path(&delete.path)));
     let hints = (!hints.is_empty()).then(|| hints_text(&hints));
 
     let parts: Vec<String> = [what, sudo, hints].into_iter().flatten().collect();
@@ -319,34 +329,34 @@ fn skip_reason(skipped: &Skipped) -> String {
 }
 
 /// The most consequential status among the entries inside `path`, and `contains 3
-/// items: 2 clean (1.4 GB), 1 keep (210 MB); see rosie scan tree <path>`.
+/// items: 2 clean, 1.4 GB; 1 skip (aggressive), 210 MB; see rosie scan tree <path>`.
 fn holds(stats: &PlanStats, path: &Path, shown: &Shown) -> (Word, String) {
-    let buckets = [
-        (StatusKind::Conflict, stats.conflicts),
-        (StatusKind::Clean, stats.clean),
-        (StatusKind::Keep, stats.keep),
-        (StatusKind::OutsideRoots, stats.outside_roots),
-    ];
-    let present: Vec<(StatusKind, Tally)> = buckets
-        .into_iter()
-        .filter(|(_, tally)| !tally.is_empty())
+    let [clean, skips @ .., conflicts] = stats.counted();
+    let present: Vec<Counted> = std::iter::once(conflicts)
+        .chain(std::iter::once(clean))
+        .chain(skips)
+        .filter(|counted| !counted.tally.is_empty())
         .collect();
-    let &(kind, _) = present
+    let kind = present
         .first()
-        .expect("a folder holding plan entries holds at least one status");
+        .expect("a folder holding plan entries holds at least one status")
+        .kind;
 
-    let items: usize = present.iter().map(|(_, tally)| tally.items).sum();
+    let items: usize = present.iter().map(|counted| counted.tally.items).sum();
     let noun = match items {
         1 => "item",
         _ => "items",
     };
     let counts: Vec<String> = present
         .iter()
-        .map(|(kind, tally)| format!("{} {} ({})", tally.items, kind.label(), tally.size))
+        .map(|counted| {
+            let tally = counted.tally;
+            format!("{} {}, {}", tally.items, counted.label, tally.size)
+        })
         .collect();
     let reason = format!(
         "contains {items} {noun}: {}; see {}",
-        counts.join(", "),
+        counts.join("; "),
         Command::ScanTree(PathBuf::from(shown.path(path)))
     );
     (Word::Plan(kind), reason)

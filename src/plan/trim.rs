@@ -55,7 +55,7 @@ impl Plan {
 
     /// The plan without the `clean` entries missing from `kept`, entries taken from
     /// [`Plan::clean_entries`] and told apart by identity, not by value. An entry of
-    /// another plan keeps nothing. `keep`, `outside-roots`, and report entries stay as
+    /// another plan keeps nothing. `skip`, `conflict`, and report entries stay as
     /// they are.
     pub fn keeping_clean_entries(&self, kept: &[CleanEntry<'_>]) -> Plan {
         let kept = Kept::from(kept);
@@ -139,14 +139,14 @@ path = "/Users/me/b/node_modules"
 type = "folder"
 size = 8192
 rules = ["rosie/node"]
-status = "keep"
+status = "skip"
 
 [[delete]]
 path = "/Library/Caches/x"
 type = "folder"
 size = 4096
 rules = ["rosie/x"]
-status = "outside-roots"
+status = "skip"
 
 [[delete]]
 path = "/Users/me/c/target"

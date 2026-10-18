@@ -2,7 +2,7 @@
 //! (`docs/spec/plan.md#rule-conflicts`).
 //!
 //! No rule's tier wins over another's. A scan marks the entry `conflict`; a run and the
-//! shell export refuse a plan that still holds one; the user picks `clean` or `keep`.
+//! shell export refuse a plan that still holds one; the user picks `clean` or `skip`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -42,9 +42,9 @@ impl fmt::Display for Disagreement {
 }
 
 /// What a conflict entry shows: `conflict, rules disagree (normal: a; aggressive: b).
-/// Set status to clean or keep`.
+/// Set status to clean or skip`.
 pub(super) fn conflict_hint(disagreement: &Disagreement) -> String {
-    format!("conflict, rules disagree ({disagreement}). Set status to clean or keep")
+    format!("conflict, rules disagree ({disagreement}). Set status to clean or skip")
 }
 
 /// Each rule that matched a path, or a path nested in it, with its tier. One rule never
@@ -104,7 +104,7 @@ impl Plan {
             .iter()
             .filter_map(|delete| match &delete.status {
                 Status::Conflict(disagreement) => Some((delete, disagreement)),
-                Status::Clean | Status::Keep | Status::OutsideRoots => None,
+                Status::Clean | Status::Skip(_) => None,
             })
             .collect()
     }
@@ -117,7 +117,7 @@ impl Plan {
             choices
                 .iter()
                 .find(|(conflict, _)| ptr::eq(*conflict, delete))
-                .map(|(_, selection)| Status::from(*selection))
+                .map(|(_, selection)| selection.answered())
         };
         let deletes = self.deletes.restatusing(|delete| match chosen(delete) {
             Some(status) => status,

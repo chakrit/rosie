@@ -13,7 +13,7 @@ use crate::config::Walk;
 use crate::fs::ROOT_UID;
 use crate::fs::fake::{FakeBackend, USER_UID};
 use crate::fs::{self, Op};
-use crate::plan::{AggressiveItems, Delete, LaunchDomain, RunAs, Size, Status};
+use crate::plan::{AggressiveItems, Delete, LaunchDomain, RunAs, Size, SkipReason, Status};
 use crate::scan::{Needs, Scan, Settings, WalkSkip};
 
 mod app_bundle;

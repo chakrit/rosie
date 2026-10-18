@@ -75,7 +75,7 @@ env = { HOMEBREW_NO_ENV_HINTS = "1" }
 
 Every "what to clean" field has an `_aggressive` twin: `target_aggressive`,
 `paths_aggressive`, `cmd_aggressive`. Without `--aggressive`, those items are listed
-`keep`; with it, they are `clean`, and `cmd_aggressive` replaces `cmd`.
+`skip`; with it, they are `clean`, and `cmd_aggressive` replaces `cmd`.
 
 ## Modes
 

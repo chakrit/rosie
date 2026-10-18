@@ -7,7 +7,7 @@ fn symlinks_in_a_location_never_match() {
     fake.add_dir("/Users/me/elsewhere");
     fake.add_symlink(lib("Caches/com.foo.Bar"), "/Users/me/elsewhere");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Clean)]);
 }
@@ -21,7 +21,7 @@ fn refuses_an_app_argument_through_a_symlink() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new("/Users/me/Bar.app"),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(
@@ -52,9 +52,9 @@ fn a_symlinked_info_plist_makes_the_app_unreadable_to_app_and_orphan_scans() {
     let app = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
-    let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep));
+    let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Skip));
 
     assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
     assert!(
@@ -80,12 +80,12 @@ fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
     scan_app(
         &ctx(fake, &ALL_ROOTS),
         Path::new(app),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     )
 }
 
 fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {
-    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(AggressiveItems::Keep))
+    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(AggressiveItems::Skip))
 }
 
 #[test]

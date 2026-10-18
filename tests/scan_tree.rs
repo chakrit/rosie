@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use rosie::config::WalkSetting;
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{self, Op, ROOT_UID};
-use rosie::plan::{AggressiveItems, RunAs, Status};
+use rosie::plan::{AggressiveItems, RunAs, SkipReason, Status};
 use rosie::scan::{Error, Needs, NoProgress, WalkSkip};
 use scan_fixture::*;
 
@@ -70,7 +70,14 @@ fn a_normal_match_inside_an_aggressive_match_is_not_offered() {
     );
 
     let venv = "/Users/me/code/py/.venv";
-    assert_eq!(entries(&keep), [(venv, vec!["rosie/venv"], Status::Keep)]);
+    assert_eq!(
+        entries(&keep),
+        [(
+            venv,
+            vec!["rosie/venv"],
+            Status::Skip(SkipReason::Aggressive)
+        )]
+    );
     assert_eq!(entries(&clean), [(venv, vec!["rosie/venv"], Status::Clean)]);
 }
 
@@ -646,7 +653,10 @@ fn targets_outside_the_roots_are_outside_roots() {
         statuses,
         [
             ("/Users/me/code/app/node_modules", Status::Clean),
-            ("/Users/me/code/lib/node_modules", Status::OutsideRoots),
+            (
+                "/Users/me/code/lib/node_modules",
+                Status::Skip(SkipReason::OutsideRoots)
+            ),
         ]
     );
 }

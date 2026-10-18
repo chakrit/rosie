@@ -12,7 +12,7 @@ is a plan like any other ([plan.md](plan.md)).
 |------------------------------------|--------------------------------------------------------|
 | the bundle itself                  | included, `clean`                                      |
 | bundle-ID matches                  | `clean`                                                |
-| name-only matches                  | aggressive (`keep`)                                    |
+| name-only matches                  | aggressive (`skip`)                                    |
 | launch agents and daemons          | `launchctl bootout` before the plist is deleted        |
 | package receipts                   | `pkgutil --forget`                                     |
 | login items, system extensions     | report-only, with manual steps                         |
@@ -22,7 +22,7 @@ is a plan like any other ([plan.md](plan.md)).
   `<id>.` (dot-bounded), plus the team-prefixed Group Containers form
   (`<team>.<id>`).
 - A name-only match uses `CFBundleName`.
-- A match claimed by an equal-or-longer installed bundle ID is `keep` (for example
+- A match claimed by an equal-or-longer installed bundle ID is `skip` (for example
   Chrome vs Chrome Canary).
 - `group.<id>` containers are not matched.
 - An app whose bundle ID cannot be read is a report entry.

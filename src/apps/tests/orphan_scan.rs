@@ -12,13 +12,19 @@ fn orphans_are_leftovers_no_installed_app_accounts_for() {
     fake.add_file(lib("Preferences/com.gone.App.plist"), "x");
     fake.add_dir(lib("Caches/com.gone.App"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
         [
-            (lib("Caches/com.gone.App"), Status::Keep),
-            (lib("Preferences/com.gone.App.plist"), Status::Keep),
+            (
+                lib("Caches/com.gone.App"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
+            (
+                lib("Preferences/com.gone.App.plist"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
         ]
     );
     assert!(entry(&scanned, &lib("Caches/com.gone.App")).rules == ["orphans"]);
@@ -33,7 +39,7 @@ fn orphans_exclude_apple_and_names_that_are_not_bundle_ids() {
     fake.add_dir(lib("Application Support/Slack"));
     fake.add_file(lib("Logs/install.log"), "x");
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Skip);
 
     assert_eq!(deletes(&scanned), []);
 }
@@ -91,11 +97,14 @@ fn an_entry_that_vanishes_after_listing_is_passed_over() {
     fake.add_dir("/Applications/Removed.app");
     fake.fail_on("/Applications/Removed.app", Op::Lstat, ErrorKind::NotFound);
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
-        [(lib("Caches/com.gone.App"), Status::Keep)]
+        [(
+            lib("Caches/com.gone.App"),
+            Status::Skip(SkipReason::Aggressive)
+        )]
     );
 }
 
@@ -106,7 +115,7 @@ fn a_case_variant_of_an_installed_id_is_not_an_orphan() {
     fake.add_file(lib("Preferences/com.foo.bar.plist"), "x");
     fake.add_dir(lib("Caches/com.BAZ.Baz"));
 
-    let scanned = scanned_orphans(&fake, AggressiveItems::Keep);
+    let scanned = scanned_orphans(&fake, AggressiveItems::Skip);
 
     assert_eq!(deletes(&scanned), []);
 }

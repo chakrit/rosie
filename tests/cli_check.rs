@@ -36,7 +36,7 @@ fn line_for(ran: &Ran, shown: &str) -> Line {
         .unwrap_or_else(|| panic!("no line for {shown}:\n{}", ran.stdout))
 }
 
-/// Each printed line with the indented lines that continue its reason, joined by `\n`.
+/// Each path's line with the indented lines of its reason, joined by `\n`.
 fn rows(stdout: &str) -> Vec<String> {
     let mut rows: Vec<String> = Vec::new();
     for text in stdout.lines() {
@@ -48,26 +48,22 @@ fn rows(stdout: &str) -> Vec<String> {
     rows
 }
 
-/// Columns are separated by at least two spaces; no column holds two spaces in a row.
-/// Lines after the first continue the reason.
+/// The first line is the status and the path, two spaces or more apart; the lines below
+/// it are the reason (`docs/spec/cli.md#check`).
 fn columns(text: &str) -> Line {
-    let (first, more) = text.split_once('\n').unwrap_or((text, ""));
+    let (first, reason) = text.split_once('\n').unwrap_or((text, ""));
     let parts: Vec<&str> = first
         .split("  ")
         .map(str::trim)
         .filter(|part| !part.is_empty())
         .collect();
-    let [status, path, reason] = parts.as_slice() else {
-        panic!("expected three columns in {text:?}");
+    let [status, path] = parts.as_slice() else {
+        panic!("expected a status and a path in {text:?}");
     };
     Line {
         status: (*status).to_owned(),
         path: (*path).to_owned(),
-        reason: [*reason, more]
-            .into_iter()
-            .filter(|part| !part.is_empty())
-            .collect::<Vec<_>>()
-            .join("\n"),
+        reason: reason.to_owned(),
     }
 }
 
@@ -136,7 +132,7 @@ fn needs_sudo_comes_before_the_hints_so_they_can_continue_below() {
 
     assert_eq!(
         line_for(&ran, "~/other/app/node_modules").reason,
-        "needs sudo; to allow just it:\n\
+        "outside the roots; needs sudo; to allow just it:\n\
          rosie roots add ~/other/app/node_modules\n\
          or to allow its folder:\n\
          rosie roots add ~/other/app"
@@ -162,7 +158,7 @@ fn an_item_not_owned_by_the_user_needs_sudo_at_and_inside_it() {
 }
 
 #[test]
-fn an_aggressive_item_is_keep_unless_aggressive_is_given() {
+fn an_aggressive_item_is_skip_unless_aggressive_is_given() {
     let sandbox = Sandbox::new();
     sandbox.add_rules("venv.toml", VENV_RULE);
     sandbox
@@ -179,7 +175,7 @@ fn an_aggressive_item_is_keep_unless_aggressive_is_given() {
     assert_eq!(
         line_for(&kept, "~/src/old/.venv"),
         line(
-            "keep",
+            "skip",
             "~/src/old/.venv",
             "rosie/python-venv (aggressive); to clean it: --aggressive"
         )
@@ -202,9 +198,9 @@ fn an_item_outside_the_roots_names_the_roots_add_that_allows_it() {
     assert_eq!(
         line_for(&ran, "~/other/app/node_modules"),
         line(
-            "outside-roots",
+            "skip",
             "~/other/app/node_modules",
-            "to allow just it:\n\
+            "outside the roots; to allow just it:\n\
              rosie roots add ~/other/app/node_modules\n\
              or to allow its folder:\n\
              rosie roots add ~/other/app"
@@ -226,8 +222,7 @@ fn rules_disagreeing_on_tier_are_a_conflict_naming_each_side() {
         line(
             "conflict",
             "~/src/api/node_modules",
-            "rosie/node-modules (normal) vs rosie/deps (aggressive); choose clean or keep in \
-             the plan"
+            "rosie/node-modules (normal) vs rosie/deps (aggressive)"
         )
     );
 }
@@ -255,14 +250,14 @@ fn a_folder_containing_targets_is_summarized_with_its_most_consequential_status(
         line(
             "clean",
             "~/src/web",
-            "contains 3 items: 2 clean (8.2 KB), 1 keep (210.0 MB); see rosie scan tree \
-             ~/src/web"
+            "contains 3 items: 2 clean, 8.2 KB; 1 skip (aggressive), 210.0 MB; see rosie scan \
+             tree ~/src/web"
         )
     );
 }
 
 #[test]
-fn a_folder_whose_targets_are_all_keep_is_keep() {
+fn a_folder_whose_targets_are_all_skip_is_skip() {
     let sandbox = Sandbox::new();
     sandbox.add_rules("venv.toml", VENV_RULE);
     sandbox
@@ -275,7 +270,7 @@ fn a_folder_whose_targets_are_all_keep_is_keep() {
     let ran = check(&sandbox, &["old"]);
 
     ran.assert_status(ExitStatus::Failed);
-    assert_eq!(line_for(&ran, "~/src/old").status, "keep");
+    assert_eq!(line_for(&ran, "~/src/old").status, "skip");
 }
 
 /// A folder with no plan entry inside is never `no rule` when something inside it was
@@ -517,7 +512,7 @@ fn an_app_not_running_takes_its_status_in_the_app_plan() {
     ran.assert_status(ExitStatus::Success);
     assert_eq!(
         ran.stdout,
-        "clean  ~/Applications/Slack.app  app/com.tinyspeck.slackmacgap (normal)\n"
+        "clean  ~/Applications/Slack.app\n       app/com.tinyspeck.slackmacgap (normal)\n"
     );
 }
 
@@ -668,7 +663,7 @@ fn an_app_mode_error_not_about_the_bundle_fails_check() {
 // one line per path, readable columns, exit status
 
 #[test]
-fn prints_one_line_per_path_in_columns_as_wide_as_the_widest_entry() {
+fn prints_each_path_after_its_status_with_its_reason_below() {
     let sandbox = Sandbox::with_roots(&[CWD]);
     sandbox.node_project(&format!("{CWD}/app"));
     sandbox.node_project(&format!("{HOME}/x"));
@@ -682,22 +677,20 @@ fn prints_one_line_per_path_in_columns_as_wide_as_the_widest_entry() {
         ],
     );
 
-    // Lines that continue a reason start at its column.
-    let reason_column = " ".repeat("outside-roots  ~/src/app/node_modules  ".len());
     ran.assert_status(ExitStatus::Success);
     assert_eq!(
         ran.stdout,
-        format!(
-            "clean          ~/src/app/node_modules  rosie/node-modules (normal)\n\
-             outside-roots  ~/x/node_modules        to allow just it:\n\
-             {reason_column}  rosie roots add ~/x/node_modules\n\
-             {reason_column}or to allow its folder:\n\
-             {reason_column}  rosie roots add ~/x\n\
-             no rule        ~/src/app/src           does not exist\n"
-        )
+        "clean    ~/src/app/node_modules\n\
+         \x20        rosie/node-modules (normal)\n\
+         skip     ~/x/node_modules\n\
+         \x20        outside the roots; to allow just it:\n\
+         \x20          rosie roots add ~/x/node_modules\n\
+         \x20        or to allow its folder:\n\
+         \x20          rosie roots add ~/x\n\
+         no rule  ~/src/app/src\n\
+         \x20        does not exist\n"
     );
 }
-
 #[test]
 fn exits_zero_only_when_some_path_would_be_cleaned() {
     let sandbox = Sandbox::new();

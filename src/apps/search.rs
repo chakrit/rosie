@@ -1,6 +1,6 @@
 //! Collects what an app or orphan scan found into a plan: each item screened by the
 //! context's delete checks (refused while a process runs a program from it,
-//! `outside-roots` outside `roots`), marked `sudo` when the user does not own it, a
+//! `skip` outside `roots`), marked `sudo` when the user does not own it, a
 //! launch plist carrying its bootout, and sized by the scanner's sizer once the search
 //! is done (`docs/spec/app.md`, `docs/spec/plan.md`,
 //! `docs/spec/safety.md#running-processes`).

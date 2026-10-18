@@ -4,9 +4,9 @@
 //! - Nested matches collapse into the outer one, which takes over their launch-job
 //!   bootouts and runs elevated when any of them would.
 //! - Each tool rule's command is its own entry: tool commands are never compared.
-//! - Aggressive items are `keep` unless `--aggressive` is given, which also makes a
+//! - Aggressive items are `skip` unless `--aggressive` is given, which also makes a
 //!   rule's `cmd_aggressive` replace its `cmd`; items outside the roots are
-//!   `outside-roots`.
+//!   `skip` too, each with its reason.
 //! - Rules that disagree on the tier of a path, or of paths nested in it, make the entry
 //!   a conflict (`docs/spec/plan.md#rule-conflicts`).
 
@@ -17,7 +17,7 @@ use super::conflict::{Tiers, Verdict};
 use super::deletes::{Found, Located};
 use super::{
     Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Size, Status, Tool, check_path,
+    Selection, Size, SkipReason, Status, Tool, check_path,
 };
 use crate::fs::ShellCommand;
 use crate::tier::{Tier, Twin};
@@ -25,7 +25,7 @@ use crate::tier::{Tier, Twin};
 /// Whether `--aggressive` was given.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum AggressiveItems {
-    Keep,
+    Skip,
     Clean,
 }
 
@@ -118,7 +118,7 @@ impl PlanBuilder {
     }
 
     /// Adds a tool rule's commands, each its own entry keyed by the rule. Without
-    /// `--aggressive` its `cmd` is `clean` and its `cmd_aggressive` listed `keep`; with
+    /// `--aggressive` its `cmd` is `clean` and its `cmd_aggressive` listed `skip`; with
     /// it, `cmd_aggressive` replaces `cmd`.
     pub fn add_tool(&mut self, rule: &str, cmds: &Twin<ShellCommand>) {
         let fields: Vec<(Tier, &ShellCommand)> = match (cmds, self.aggressive) {
@@ -211,7 +211,7 @@ impl AggressiveItems {
         match (tier, self) {
             (Tier::Normal, _) => Selection::Clean,
             (Tier::Aggressive, AggressiveItems::Clean) => Selection::Clean,
-            (Tier::Aggressive, AggressiveItems::Keep) => Selection::Keep,
+            (Tier::Aggressive, AggressiveItems::Skip) => Selection::Skip,
         }
     }
 }
@@ -231,12 +231,15 @@ struct FoundPath {
 }
 
 impl FoundPath {
-    /// `outside-roots` outside the roots; otherwise the tier its rules agree on, or a
+    /// `skip` outside the roots; otherwise the tier its rules agree on, or a
     /// conflict, as `verdict`, the verdict of its tiers, says.
     fn into_delete(self, verdict: Verdict, aggressive: AggressiveItems) -> Delete {
         let status = match (self.reach, verdict) {
-            (Reach::OutsideRoots, _) => Status::OutsideRoots,
-            (Reach::InRoots, Verdict::Agreed(tier)) => aggressive.selection(tier).into(),
+            (Reach::OutsideRoots, _) => Status::Skip(SkipReason::OutsideRoots),
+            (Reach::InRoots, Verdict::Agreed(tier)) => match aggressive.selection(tier) {
+                Selection::Clean => Status::Clean,
+                Selection::Skip => Status::Skip(SkipReason::Aggressive),
+            },
             (Reach::InRoots, Verdict::Disagreed(disagreement)) => Status::Conflict(disagreement),
         };
 
@@ -337,7 +340,7 @@ mod tests {
     #[test]
     fn keys_paths_and_lists_every_rule_that_matched() {
         let plan = built(
-            AggressiveItems::Keep,
+            AggressiveItems::Skip,
             vec![
                 found("/w/app/node_modules", "rosie/node", Tier::Normal),
                 found("/w/app/node_modules", "user/js", Tier::Normal),
@@ -354,7 +357,7 @@ mod tests {
     #[test]
     fn nested_matches_collapse_into_the_outer_one() {
         let plan = built(
-            AggressiveItems::Keep,
+            AggressiveItems::Skip,
             vec![
                 found("/w/app/target/debug/build", "rosie/x", Tier::Normal),
                 found("/w/app/target", "rosie/cargo", Tier::Normal),
@@ -388,7 +391,7 @@ mod tests {
     #[test]
     fn rules_disagreeing_across_nested_paths_make_the_outer_entry_a_conflict() {
         let plan = built(
-            AggressiveItems::Keep,
+            AggressiveItems::Skip,
             vec![
                 found("/w/app/.venv", "rosie/venv", Tier::Aggressive),
                 found(
@@ -409,20 +412,23 @@ mod tests {
     #[test]
     fn rules_agreeing_across_nested_paths_keep_their_tier() {
         let plan = built(
-            AggressiveItems::Keep,
+            AggressiveItems::Skip,
             vec![
                 found("/w/app/.venv", "rosie/venv", Tier::Aggressive),
                 found("/w/app/.venv/lib", "alice/venv", Tier::Aggressive),
             ],
         );
 
-        assert_eq!(plan.deletes()[0].status, Status::Keep);
+        assert_eq!(
+            plan.deletes()[0].status,
+            Status::Skip(SkipReason::Aggressive)
+        );
     }
 
     #[test]
     fn an_outer_entry_runs_elevated_when_a_collapsed_one_would() {
         let plan = built(
-            AggressiveItems::Keep,
+            AggressiveItems::Skip,
             vec![
                 found("/w/app/build", "rosie/build", Tier::Normal),
                 PathMatch {
@@ -452,16 +458,19 @@ mod tests {
                 .collect()
         };
 
-        let default = built(AggressiveItems::Keep, matches());
+        let default = built(AggressiveItems::Skip, matches());
         let aggressive = built(AggressiveItems::Clean, matches());
 
-        assert_eq!(statuses(default), [Status::Keep, Status::Clean]);
+        assert_eq!(
+            statuses(default),
+            [Status::Skip(SkipReason::Aggressive), Status::Clean]
+        );
         assert_eq!(statuses(aggressive), [Status::Clean, Status::Clean]);
     }
 
     #[test]
     fn rules_disagreeing_on_one_path_make_it_a_conflict_even_with_aggressive() {
-        for aggressive in [AggressiveItems::Keep, AggressiveItems::Clean] {
+        for aggressive in [AggressiveItems::Skip, AggressiveItems::Clean] {
             let plan = built(
                 aggressive,
                 vec![
@@ -480,7 +489,7 @@ mod tests {
     #[test]
     fn one_rule_matching_a_path_at_both_tiers_is_not_a_conflict() {
         let plan = built(
-            AggressiveItems::Keep,
+            AggressiveItems::Skip,
             vec![
                 found("/w/a", "rosie/a", Tier::Aggressive),
                 found("/w/a", "rosie/a", Tier::Normal),
@@ -498,14 +507,17 @@ mod tests {
         };
 
         let plan = built(
-            AggressiveItems::Keep,
+            AggressiveItems::Skip,
             vec![
                 outside("rosie/a", Tier::Normal),
                 outside("alice/b", Tier::Aggressive),
             ],
         );
 
-        assert_eq!(plan.deletes()[0].status, Status::OutsideRoots);
+        assert_eq!(
+            plan.deletes()[0].status,
+            Status::Skip(SkipReason::OutsideRoots)
+        );
     }
 
     #[test]
@@ -520,12 +532,15 @@ mod tests {
             vec![outside(Tier::Normal), outside(Tier::Aggressive)],
         );
 
-        assert_eq!(plan.deletes()[0].status, Status::OutsideRoots);
+        assert_eq!(
+            plan.deletes()[0].status,
+            Status::Skip(SkipReason::OutsideRoots)
+        );
     }
 
     #[test]
     fn refuses_relative_paths() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
 
         let refused = builder.add_path(found("w/app/target", "rosie/cargo", Tier::Normal));
 
@@ -538,7 +553,7 @@ mod tests {
         let dotted = ["/w/app/../../etc", "/w/./app", "/w/app/.", "/w/.."];
 
         for path in dotted {
-            let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+            let mut builder = PlanBuilder::new(AggressiveItems::Skip);
 
             let refusals = [
                 builder.add_path(found(path, "rosie/x", Tier::Normal)),
@@ -559,7 +574,7 @@ mod tests {
     /// refuses an empty package or subject.
     #[test]
     fn refuses_an_empty_receipt_package_or_report_subject() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
 
         let package = builder.add_receipt("", Tier::Normal);
         let report = Report::new(String::new(), vec!["Remove X".to_owned()]);
@@ -573,7 +588,7 @@ mod tests {
     /// would not be the item listed.
     #[test]
     fn refuses_a_nul_byte_in_any_path_or_argument() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
 
         let refusals = [
             builder.add_path(found("/w/a\0b", "rosie/cargo", Tier::Normal)),
@@ -595,7 +610,7 @@ mod tests {
 
     #[test]
     fn a_launch_job_boots_out_with_its_plists_status() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         builder
             .add_launch_job(
                 plist("/L/LaunchAgents/com.x.plist", Tier::Aggressive),
@@ -626,7 +641,7 @@ mod tests {
     // folder before the elevated part has.
     #[test]
     fn a_user_runnable_never_carries_a_system_bootout() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         builder
             .add_path(found("/U/app", "app/x", Tier::Normal))
             .expect("valid match");
@@ -661,7 +676,7 @@ mod tests {
 
     #[test]
     fn a_plist_matched_twice_is_booted_out_once_with_its_final_status() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
             .add_launch_job(plist(path, Tier::Aggressive), LaunchDomain::Gui(501))
@@ -678,7 +693,7 @@ mod tests {
 
     #[test]
     fn a_plist_marked_clean_by_a_plain_path_match_is_still_booted_out() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
             .add_launch_job(plist(path, Tier::Aggressive), LaunchDomain::Gui(501))
@@ -694,7 +709,7 @@ mod tests {
 
     #[test]
     fn a_plist_inside_a_clean_folder_is_booted_out_before_the_folder_goes() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let path = "/w/app/support/com.x.plist";
         builder
             .add_launch_job(plist(path, Tier::Aggressive), LaunchDomain::Gui(501))
@@ -711,7 +726,7 @@ mod tests {
 
     #[test]
     fn refuses_a_plist_booted_out_of_two_domains() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let path = "/L/LaunchAgents/com.x.plist";
         builder
             .add_launch_job(plist(path, Tier::Normal), LaunchDomain::Gui(501))
@@ -731,7 +746,7 @@ mod tests {
     /// with byte-identical commands are two actions, each with its own status.
     #[test]
     fn each_rules_command_is_its_own_entry_even_when_identical() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let prune = tool_command("docker system prune --force");
         let prune_all = tool_command("docker system prune --all --force");
         let cleanup = tool_command("brew cleanup");
@@ -763,12 +778,12 @@ mod tests {
                 (
                     "rosie/docker",
                     "docker system prune --all --force",
-                    Selection::Keep,
+                    Selection::Skip,
                 ),
                 (
                     "alice/docker",
                     "docker system prune --force",
-                    Selection::Keep
+                    Selection::Skip
                 ),
                 ("rosie/brew", "brew cleanup", Selection::Clean),
             ]

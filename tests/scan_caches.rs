@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 
 use rosie::config::Walk;
 use rosie::fs::{EnterLinks, ROOT_UID};
-use rosie::plan::{AggressiveItems, ItemKind, RunAs, Selection, Status};
+use rosie::plan::{AggressiveItems, ItemKind, RunAs, Selection, SkipReason, Status};
 use rosie::scan::WalkSkip;
 use scan_fixture::*;
 
@@ -166,7 +166,11 @@ fn aggressive_fixed_paths_are_keep_without_the_flag() {
     let path = "/Users/me/Library/Caches/JetBrains";
     assert_eq!(
         entries(&plain),
-        [(path, vec!["rosie/jetbrains"], Status::Keep)]
+        [(
+            path,
+            vec!["rosie/jetbrains"],
+            Status::Skip(SkipReason::Aggressive)
+        )]
     );
     assert_eq!(
         entries(&flagged),
@@ -213,9 +217,9 @@ fn tool_rules_list_their_commands() {
             (
                 docker.clone(),
                 "docker system prune --all --volumes --force".into(),
-                Selection::Keep
+                Selection::Skip
             ),
-            (gradle.clone(), "gradle --stop".into(), Selection::Keep),
+            (gradle.clone(), "gradle --stop".into(), Selection::Skip),
             (homebrew.clone(), "brew cleanup".into(), Selection::Clean),
         ]
     );
@@ -310,7 +314,11 @@ fn fixed_paths_get_the_same_marks_as_walked_ones() {
     assert_eq!(
         marks,
         [
-            ("/Library/Caches/tool", Status::OutsideRoots, RunAs::User),
+            (
+                "/Library/Caches/tool",
+                Status::Skip(SkipReason::OutsideRoots),
+                RunAs::User
+            ),
             (
                 "/Users/me/Library/Caches/rooted",
                 Status::Clean,

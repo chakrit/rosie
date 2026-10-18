@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use super::{Delete, Plan, Size, Status, StatusKind};
+use super::{Delete, Plan, Selection, Size, SkipReason, Status, StatusKind};
 
 /// How much one item weighs in the totals. Tool commands are "size unknown" and are
 /// excluded from the byte totals.
@@ -64,12 +64,23 @@ impl fmt::Display for Tally {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
 pub struct PlanStats {
     pub clean: Tally,
-    /// Aggressive items listed without `--aggressive`.
-    pub keep: Tally,
+    /// Aggressive items scanned without `--aggressive`.
+    pub aggressive: Tally,
     /// Items outside the roots.
     pub outside_roots: Tally,
-    /// Items whose rules disagree on their tier, awaiting the user's choice.
+    /// Items the user answered `skip`.
+    pub chosen: Tally,
+    /// Items whose rules disagree on their tier, awaiting an answer.
     pub conflicts: Tally,
+}
+
+/// One tally of a [`PlanStats`] and the words it is shown with.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Counted {
+    pub kind: StatusKind,
+    /// `clean`, `skip (aggressive)`, `skip (outside the roots)`, `skip`, or `conflict`.
+    pub label: &'static str,
+    pub tally: Tally,
 }
 
 impl PlanStats {
@@ -79,12 +90,15 @@ impl PlanStats {
             .tools()
             .iter()
             .map(|tool| tool.selection)
-            .chain(plan.receipts().iter().map(|receipt| receipt.selection))
-            .map(|selection| (Status::from(selection), ItemSize::Unknown));
+            .chain(plan.receipts().iter().map(|receipt| receipt.selection));
 
         let mut stats = PlanStats::of_deletes(plan.deletes());
-        for (status, size) in commands {
-            stats.bucket(&status).add(size);
+        for selection in commands {
+            let tally = match selection {
+                Selection::Clean => &mut stats.clean,
+                Selection::Skip => &mut stats.aggressive,
+            };
+            tally.add(ItemSize::Unknown);
         }
         stats
     }
@@ -100,37 +114,40 @@ impl PlanStats {
         stats
     }
 
+    /// Every tally with its words, in the order the stats show them.
+    pub fn counted(&self) -> [Counted; 5] {
+        let counted = |kind, label, tally| Counted { kind, label, tally };
+        [
+            counted(StatusKind::Clean, "clean", self.clean),
+            counted(StatusKind::Skip, "skip (aggressive)", self.aggressive),
+            counted(
+                StatusKind::Skip,
+                "skip (outside the roots)",
+                self.outside_roots,
+            ),
+            counted(StatusKind::Skip, "skip", self.chosen),
+            counted(StatusKind::Conflict, "conflict", self.conflicts),
+        ]
+    }
+
     fn bucket(&mut self, status: &Status) -> &mut Tally {
         match status {
             Status::Clean => &mut self.clean,
-            Status::Keep => &mut self.keep,
-            Status::OutsideRoots => &mut self.outside_roots,
+            Status::Skip(SkipReason::Aggressive) => &mut self.aggressive,
+            Status::Skip(SkipReason::OutsideRoots) => &mut self.outside_roots,
+            Status::Skip(SkipReason::Chosen) => &mut self.chosen,
             Status::Conflict(_) => &mut self.conflicts,
         }
     }
 }
 
+/// `clean` always, then each other tally that counts anything.
 impl fmt::Display for PlanStats {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        writeln!(f, "{}: {}", StatusKind::Clean.label(), self.clean)?;
-        if !self.keep.is_empty() {
-            writeln!(
-                f,
-                "{} (aggressive, not run): {}",
-                StatusKind::Keep.label(),
-                self.keep
-            )?;
-        }
-        if !self.outside_roots.is_empty() {
-            let label = StatusKind::OutsideRoots.label();
-            writeln!(f, "{label} (not run): {}", self.outside_roots)?;
-        }
-        if !self.conflicts.is_empty() {
-            writeln!(
-                f,
-                "conflicts (rules disagree, resolve before running): {}",
-                self.conflicts
-            )?;
+        let [clean, rest @ ..] = self.counted();
+        writeln!(f, "{}: {}", clean.label, clean.tally)?;
+        for counted in rest.iter().filter(|counted| !counted.tally.is_empty()) {
+            writeln!(f, "{}: {}", counted.label, counted.tally)?;
         }
         Ok(())
     }
@@ -167,8 +184,8 @@ mod tests {
     }
 
     #[test]
-    fn plan_stats_total_clean_keep_and_outside_roots_items() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+    fn plan_stats_total_clean_items_and_skips_by_reason() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let matches = [
             found("/w/a", 1_000, Reach::InRoots, Tier::Normal),
             found("/w/b", 2_500, Reach::InRoots, Tier::Normal),
@@ -202,8 +219,9 @@ mod tests {
             stats,
             PlanStats {
                 clean: tally(5, 3_800, 2),
-                keep: tally(2, 40_000, 1),
+                aggressive: tally(2, 40_000, 1),
                 outside_roots: tally(1, 7, 0),
+                chosen: Tally::default(),
                 conflicts: Tally::default(),
             }
         );

@@ -121,9 +121,7 @@ fn clean_refuses_y_while_a_rule_conflict_remains() {
     ran.assert_status(ExitStatus::Success);
     assert!(sandbox.removals().is_empty(), "{:?}", sandbox.removals());
     assert!(
-        ran.stdout
-            .lines()
-            .any(|line| line.trim_start().starts_with("conflict; ")),
+        ran.stdout.lines().any(|line| line.trim() == "conflict"),
         "{}",
         ran.stdout
     );
@@ -268,7 +266,7 @@ fn run_never_prompts_and_runs_only_clean_entries() {
     let plan = format!(
         "version = 1\n\n\
          [[delete]]\npath = \"{CWD}/a\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"clean\"\n\n\
-         [[delete]]\npath = \"{CWD}/b\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"keep\"\n"
+         [[delete]]\npath = \"{CWD}/b\"\ntype = \"folder\"\nsize = 4096\nrules = [\"rosie/x\"]\nstatus = \"skip\"\n"
     );
     sandbox.fake.add_file(format!("{HOME}/plan.toml"), plan);
 

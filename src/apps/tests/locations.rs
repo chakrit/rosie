@@ -9,7 +9,7 @@ fn webkit_and_http_storages_are_searched() {
     fake.add_dir(lib("WebKit/com.foo.Bar"));
     fake.add_dir(lib("HTTPStorages/com.foo.Bar"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
@@ -28,7 +28,7 @@ fn a_leftover_location_that_is_a_file_holds_nothing() {
     fake.add_file(lib("Caches"), "x");
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
@@ -50,7 +50,7 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(
@@ -79,7 +79,7 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(
@@ -116,7 +116,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
         scan_app(
             &ctx(fake, &ALL_ROOTS),
             Path::new(BAR),
-            &settings(AggressiveItems::Keep),
+            &settings(AggressiveItems::Skip),
         )
     };
 
@@ -129,7 +129,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     assert!(
         fails(scan_orphans(
             &ctx(&orphan, &ALL_ROOTS),
-            &settings(AggressiveItems::Keep)
+            &settings(AggressiveItems::Skip)
         )),
         "an orphan"
     );
@@ -149,13 +149,16 @@ fn no_leftover_is_planned_or_sized_across_a_volume() {
     fake.add_sized_file(lib("Application Support/Bar/disk/big"), 1 << 30);
     fake.mount(lib("Application Support/Bar/disk"), 8);
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
         [
             (BAR.to_owned(), Status::Clean),
-            (lib("Application Support/Bar"), Status::Keep),
+            (
+                lib("Application Support/Bar"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
         ]
     );
     let support = entry(&scanned, &lib("Application Support/Bar"));
@@ -171,7 +174,7 @@ fn a_matched_placeholder_is_skipped_not_planned() {
     fake.add_sized_file(lib("Containers/com.foo.Bar/data"), 4096);
     fake.make_dataless(lib("Containers/com.foo.Bar"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Clean)]);
     assert_eq!(scanned.skip_counts().placeholders, 1);
@@ -197,7 +200,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
                 enter_mounts,
                 ..Walk::default()
             },
-            aggressive: AggressiveItems::Keep,
+            aggressive: AggressiveItems::Skip,
         };
         scan_app(&ctx(fake, &ALL_ROOTS), Path::new(BAR), &settings).expect("app scan")
     };

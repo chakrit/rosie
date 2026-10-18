@@ -74,7 +74,7 @@ fn an_installed_app_whose_id_cannot_be_read_fails_the_orphan_scan_naming_it() {
         let path = unreadable.set_up(&fake);
         fake.add_file(lib("Preferences/com.gone.App.plist"), "x");
 
-        let result = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep));
+        let result = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Skip));
 
         let named = match &result {
             Err(Error::UnreadableApp { bundle, .. }) => bundle == Path::new(path),
@@ -98,7 +98,7 @@ fn an_installed_app_with_no_bundle_id_is_a_note_not_a_failure() {
     fake.add_file(lib("Caches/com.gone.App"), "x");
 
     let scanned =
-        scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep)).expect("scan");
+        scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Skip)).expect("scan");
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     assert_eq!(
@@ -108,7 +108,10 @@ fn an_installed_app_with_no_bundle_id_is_a_note_not_a_failure() {
     );
     assert_eq!(
         deletes(&scanned),
-        [(lib("Caches/com.gone.App"), Status::Keep)]
+        [(
+            lib("Caches/com.gone.App"),
+            Status::Skip(SkipReason::Aggressive)
+        )]
     );
 }
 
@@ -125,7 +128,7 @@ fn an_installed_app_whose_id_cannot_be_read_is_reported_by_app_scans() {
         .collect();
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     for path in paths {
@@ -155,7 +158,7 @@ fn another_installed_apps_missing_bundle_id_is_not_reported_by_app_scans() {
     bar_app(&fake);
     let path = Unreadable::MissingKey.set_up(&fake);
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     assert!(
@@ -193,7 +196,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
     let scanned = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     )
     .expect("app scan");
 
@@ -217,7 +220,7 @@ fn a_wrapper_holding_several_apps_has_no_info_plist() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(NPLAYER),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(
@@ -254,7 +257,7 @@ fn an_install_folder_rosie_may_not_list_fails_the_orphan_scan_and_the_picker() {
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
     fake.fail_on("/Applications", Op::ReadDir, ErrorKind::PermissionDenied);
 
-    let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep));
+    let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Skip));
     let picker = picker_apps(&ctx(&fake, &ALL_ROOTS));
 
     assert!(
@@ -288,13 +291,16 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
     );
     fake.add_dir(lib("Caches/com.gone.App"));
 
-    let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep));
+    let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Skip));
     let picker = picker_apps(&ctx(&fake, &ALL_ROOTS)).expect("listing");
 
     let orphans = orphans.expect("orphan scan");
     assert_eq!(
         deletes(&orphans),
-        [(lib("Caches/com.gone.App"), Status::Keep)]
+        [(
+            lib("Caches/com.gone.App"),
+            Status::Skip(SkipReason::Aggressive)
+        )]
     );
     assert_eq!(
         picker,
@@ -311,7 +317,7 @@ fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scan, Error> {
     scan_app(
         &ctx(fake, &ALL_ROOTS),
         Path::new(NPLAYER),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     )
 }
 
@@ -405,7 +411,7 @@ fn an_app_folder_entry_rosie_cannot_lstat_fails_the_orphan_scan() {
         fake.add_dir(hidden);
         fake.fail_on(hidden, Op::Lstat, ErrorKind::PermissionDenied);
 
-        let result = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Keep));
+        let result = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Skip));
 
         assert!(
             matches!(result, Err(Error::Fs(fs::Error::Io { op: Op::Lstat, .. }))),

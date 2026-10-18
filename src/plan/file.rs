@@ -2,7 +2,8 @@
 //! (`docs/spec/plan.md#plan-file`).
 //!
 //! Each entry is written as its own table. Every entry but a report sits under a comment
-//! with its size and, when it is `outside-roots`, the `rosie roots add` hint, or, when it
+//! with its size and, when it is `skip`, why, with the `rosie roots add` hint outside the
+//! roots, or, when it
 //! is a conflict, the rules on each side. A file is checked for its format version before
 //! anything else in it is read, and unknown keys are refused: a plan never carries roots.
 //! A `conflict` entry is refused too, so a plan read back always has every conflict
@@ -16,8 +17,8 @@ use serde::{Deserialize, Serialize};
 use super::conflict::conflict_hint;
 use super::{
     Bootout, Delete, Deletes, EntryProblem, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
-    Report, RunAs, Selection, Size, Status, StatusKind, Tool, check_path, comment,
-    outside_roots_hint,
+    Report, RunAs, Selection, Size, SkipReason, Status, StatusKind, Tool, check_path, comment,
+    skip_note,
 };
 use crate::fs::ShellCommand;
 
@@ -35,13 +36,13 @@ impl Plan {
 
         for delete in self.deletes.iter() {
             let note = match &delete.status {
-                Status::OutsideRoots => {
-                    format!("{}; {}", delete.size, outside_roots_hint(&delete.path))
+                Status::Clean => delete.size.to_string(),
+                Status::Skip(reason) => {
+                    format!("{}; {}", delete.size, skip_note(*reason, &delete.path))
                 }
                 Status::Conflict(disagreement) => {
                     format!("{}; {}", delete.size, conflict_hint(disagreement))
                 }
-                Status::Clean | Status::Keep => delete.size.to_string(),
             };
             push_entry(&mut text, Some(note), PlanFile::delete(delete))?;
         }
@@ -189,7 +190,7 @@ impl PlanFile {
             rule: tool.rule.clone(),
             shell: path_text(tool.command.shell()),
             cmd: tool.command.cmd().to_owned(),
-            status: Status::from(tool.selection).label().to_owned(),
+            status: tool.selection.label().to_owned(),
             env: tool.command.env().clone(),
         };
         PlanFile {
@@ -201,7 +202,7 @@ impl PlanFile {
     fn receipt(receipt: &Receipt) -> Self {
         let table = ForgetTable {
             package: receipt.package.as_str().to_owned(),
-            status: Status::from(receipt.selection).label().to_owned(),
+            status: receipt.selection.label().to_owned(),
         };
         PlanFile {
             forget: vec![table],
@@ -379,19 +380,18 @@ fn status(text: &str) -> Result<Status, EntryProblem> {
 
     match kind {
         StatusKind::Clean => Ok(Status::Clean),
-        StatusKind::Keep => Ok(Status::Keep),
-        StatusKind::OutsideRoots => Ok(Status::OutsideRoots),
+        StatusKind::Skip => Ok(Status::Skip(SkipReason::Chosen)),
         StatusKind::Conflict => Err(EntryProblem::ConflictStatus {
             text: text.to_owned(),
         }),
     }
 }
 
-/// Commands are outside the roots gate, so they are never `outside-roots`.
+/// Commands are outside the roots gate and never conflict.
 fn selection(text: &str) -> Result<Selection, EntryProblem> {
     match StatusKind::parse(text) {
         Some(StatusKind::Clean) => Ok(Selection::Clean),
-        Some(StatusKind::Keep) => Ok(Selection::Keep),
+        Some(StatusKind::Skip) => Ok(Selection::Skip),
         _ => Err(EntryProblem::UnknownSelection {
             text: text.to_owned(),
         }),
@@ -419,7 +419,7 @@ mod tests {
 
     /// A plan with one entry of every kind and status.
     fn every_kind() -> Plan {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         builder
             .add_path(found("/w/app/node_modules", Reach::InRoots, Tier::Normal))
             .expect("valid");
@@ -507,6 +507,18 @@ mod tests {
         builder.build().plan
     }
 
+    /// `plan` as its file reads back: a skip's reason is only a comment there.
+    fn as_read_back(plan: &Plan) -> Plan {
+        let deletes = plan.deletes.restatusing(|delete| match &delete.status {
+            Status::Skip(_) => Status::Skip(SkipReason::Chosen),
+            other => other.clone(),
+        });
+        Plan {
+            deletes,
+            ..plan.clone()
+        }
+    }
+
     fn parse_error(text: &str) -> Error {
         Plan::parse(text).expect_err("plan should be refused")
     }
@@ -518,7 +530,7 @@ mod tests {
         let text = plan.to_toml().expect("serializable");
         let parsed = Plan::parse(&text).expect("parses its own output");
 
-        assert_eq!(parsed, plan, "{text}");
+        assert_eq!(parsed, as_read_back(&plan), "{text}");
         assert_eq!(parsed.deletes().len(), 6, "{text}");
         let bootouts: usize = parsed.deletes().iter().map(|d| d.bootouts.len()).sum();
         assert_eq!(bootouts, 3, "{text}");
@@ -531,7 +543,7 @@ mod tests {
         assert!(
             text.contains(
                 "path = \"/w/app/support\"\ntype = \"folder\"\nsize = 1234567\n\
-                 rules = [\"rosie/node\"]\nstatus = \"keep\"\n\n\
+                 rules = [\"rosie/node\"]\nstatus = \"skip\"\n\n\
                  [[delete.bootout]]\nplist = \"/w/app/support/com.x.inner.plist\"\n\
                  domain = \"gui/501\"\n"
             ),
@@ -671,7 +683,7 @@ mod tests {
         assert!(text.contains("# size unknown\n[[forget]]"), "{text}");
         assert!(
             text.contains(
-                "# 1.2 MB; outside roots\n\
+                "# 1.2 MB; skip: outside the roots\n\
                  # to allow just it:\n\
                  #   rosie roots add '/elsewhere/it'\\''s \"odd\"'$'\\012''$x'\n\
                  # or to allow its folder:\n\
@@ -684,7 +696,7 @@ mod tests {
 
     /// A plan with `/w/a` matched by two rules that disagree on its tier.
     fn conflicted() -> Plan {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         for (rule, tier) in [("rosie/a", Tier::Normal), ("alice/b", Tier::Aggressive)] {
             let found = PathMatch {
                 rule: rule.to_owned(),
@@ -702,7 +714,7 @@ mod tests {
         assert!(
             text.contains(
                 "# 1.2 MB; conflict, rules disagree (normal: rosie/a; aggressive: alice/b). \
-                 Set status to clean or keep\n[[delete]]\npath = \"/w/a\""
+                 Set status to clean or skip\n[[delete]]\npath = \"/w/a\""
             ),
             "{text}"
         );
@@ -712,7 +724,7 @@ mod tests {
     #[test]
     fn a_written_conflict_cannot_be_read_back_until_it_is_resolved() {
         let text = conflicted().to_toml().expect("serializable");
-        let resolved = text.replace("status = \"conflict\"", "status = \"keep\"");
+        let resolved = text.replace("status = \"conflict\"", "status = \"skip\"");
 
         let refused = Plan::parse(&text);
         let parsed = Plan::parse(&resolved).expect("resolved plan parses");
@@ -721,7 +733,7 @@ mod tests {
             matches!(&refused, Err(Error::InvalidEntry { problem, .. }) if matches!(**problem, EntryProblem::ConflictStatus { .. })),
             "{refused:?}"
         );
-        assert_eq!(parsed.deletes()[0].status, Status::Keep);
+        assert_eq!(parsed.deletes()[0].status, Status::Skip(SkipReason::Chosen));
     }
 
     #[test]
@@ -735,7 +747,7 @@ mod tests {
         let parsed = Plan::parse(&without_receipt).expect("still a plan");
 
         assert!(parsed.receipts().is_empty(), "{without_receipt}");
-        assert_eq!(parsed.deletes(), every_kind().deletes());
+        assert_eq!(parsed.deletes(), as_read_back(&every_kind()).deletes());
     }
 
     #[test]
@@ -810,11 +822,11 @@ mod tests {
             ),
             (
                 "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\n",
-                "[[delete]] entry 1: status \"\" is not one of clean, keep, outside-roots, conflict",
+                "[[delete]] entry 1: status \"\" is not one of clean, skip, conflict",
             ),
             (
                 "version = 1\n[[delete]]\npath = \"/w/a\"\ntype = \"file\"\nsize = 1\nstatus = \"conflict\"\n",
-                "[[delete]] entry 1: status \"conflict\" is a rule conflict; resolve it to clean or keep",
+                "[[delete]] entry 1: status \"conflict\" is a rule conflict; resolve it to clean or skip",
             ),
             (
                 "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"clean\"\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \" \"\nstatus = \"clean\"\n",
@@ -833,8 +845,8 @@ mod tests {
                 "[[tool]] entry 1: env name \"-i\" is not letters, digits, and `_`, starting with no digit",
             ),
             (
-                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"outside-roots\"\n",
-                "[[tool]] entry 1: status \"outside-roots\" is not one of clean, keep",
+                "version = 1\n[[tool]]\nshell = \"/bin/bash\"\ncmd = \"a\"\nstatus = \"conflict\"\n",
+                "[[tool]] entry 1: status \"conflict\" is not one of clean, skip",
             ),
             (
                 "version = 1\n[[delete]]\npath = \"/L/x.plist\"\ntype = \"file\"\nsize = 1\nstatus = \"clean\"\n[[delete.bootout]]\nplist = \"/L/x.plist\"\ndomain = \"gui/me\"\n",

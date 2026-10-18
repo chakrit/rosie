@@ -6,7 +6,7 @@
 //! [`Runnable`], whose fields are private: the only ways to get one are
 //! [`Plan::runnable_as`] and [`Plan::after_elevation`], which yield only the `clean`
 //! entries of one part of a run, and a `Runnable` can only be narrowed from there.
-//! `keep`, `outside-roots`, and `conflict` entries are kept for the user to see, never
+//! `skip` and `conflict` entries are kept for the user to see, never
 //! executed.
 
 mod builder;
@@ -31,7 +31,7 @@ pub use builder::{AggressiveItems, AgreedTiers, Built, PathMatch, PlanBuilder, R
 pub use conflict::Disagreement;
 pub use error::{EntryProblem, Error};
 pub use size::Size;
-pub use stats::{ItemSize, PlanStats, Tally};
+pub use stats::{Counted, ItemSize, PlanStats, Tally};
 pub use trim::CleanEntry;
 
 /// Everything one scan proposes, grouped by what each entry does.
@@ -125,11 +125,17 @@ impl Plan {
     }
 }
 
-/// What an `outside-roots` entry shows: `outside roots`, then the hints that would let
-/// it in on the lines below.
-fn outside_roots_hint(path: &Path) -> String {
-    let hints = hint::hints_text(&Hint::allow_in_roots(path));
-    format!("outside roots\n{hints}")
+/// What a `skip` entry's comment says: `skip: aggressive`, or `skip: outside the roots`
+/// with the hints that would let it in on the lines below.
+fn skip_note(reason: SkipReason, path: &Path) -> String {
+    match reason {
+        SkipReason::Aggressive => "skip: aggressive".to_owned(),
+        SkipReason::OutsideRoots => {
+            let hints = hint::hints_text(&Hint::allow_in_roots(path));
+            format!("skip: outside the roots\n{hints}")
+        }
+        SkipReason::Chosen => "skip".to_owned(),
+    }
 }
 
 /// `text` as comment lines, so no line of it can run or parse as TOML.
@@ -435,16 +441,13 @@ impl ItemKind {
     }
 }
 
-/// Whether a filesystem entry runs.
+/// Whether a filesystem entry runs (`docs/spec/plan.md#statuses`).
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Status {
     Clean,
-    /// An aggressive item listed without `--aggressive`.
-    Keep,
-    /// Outside the `roots` allowlist; shown with a `rosie roots add <path>` hint.
-    OutsideRoots,
-    /// Rules disagree on its tier; only a scan produces one, and the user must resolve
-    /// it before anything runs (`docs/spec/plan.md#rule-conflicts`).
+    Skip(SkipReason),
+    /// Rules disagree on its tier, and no one has answered `clean` or `skip` yet
+    /// (`docs/spec/plan.md#rule-conflicts`).
     Conflict(Disagreement),
 }
 
@@ -456,8 +459,7 @@ impl Status {
     pub fn kind(&self) -> StatusKind {
         match self {
             Status::Clean => StatusKind::Clean,
-            Status::Keep => StatusKind::Keep,
-            Status::OutsideRoots => StatusKind::OutsideRoots,
+            Status::Skip(_) => StatusKind::Skip,
             Status::Conflict(_) => StatusKind::Conflict,
         }
     }
@@ -467,28 +469,33 @@ impl Status {
     }
 }
 
-/// A [`Status`] without what it carries: the kinds a plan's entries are counted by.
+/// Why a scan made an entry `skip`. The plan file writes it as a comment only, so an
+/// entry read back from a file is [`SkipReason::Chosen`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SkipReason {
+    /// An aggressive item, scanned without `--aggressive`.
+    Aggressive,
+    /// Outside the `roots` allowlist.
+    OutsideRoots,
+    /// Answered `skip` by the user, at a prompt, with `--conflicts`, or in a plan file.
+    Chosen,
+}
+
+/// The words a plan file's `status` takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusKind {
     Clean,
-    Keep,
-    OutsideRoots,
+    Skip,
     Conflict,
 }
 
 impl StatusKind {
-    pub const ALL: [StatusKind; 4] = [
-        StatusKind::Clean,
-        StatusKind::Keep,
-        StatusKind::OutsideRoots,
-        StatusKind::Conflict,
-    ];
+    pub const ALL: [StatusKind; 3] = [StatusKind::Clean, StatusKind::Skip, StatusKind::Conflict];
 
     pub fn label(self) -> &'static str {
         match self {
             StatusKind::Clean => "clean",
-            StatusKind::Keep => "keep",
-            StatusKind::OutsideRoots => "outside-roots",
+            StatusKind::Skip => "skip",
             StatusKind::Conflict => "conflict",
         }
     }
@@ -501,21 +508,29 @@ impl StatusKind {
     }
 }
 
-impl From<Selection> for Status {
-    fn from(selection: Selection) -> Self {
-        match selection {
-            Selection::Clean => Status::Clean,
-            Selection::Keep => Status::Keep,
-        }
-    }
-}
-
-/// Whether a command entry runs. Commands are outside the roots gate, so they are never
-/// `outside-roots`.
+/// Whether a command entry runs. Commands are outside the roots gate and never conflict,
+/// so a scan skips one only as aggressive.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Selection {
     Clean,
-    Keep,
+    Skip,
+}
+
+impl Selection {
+    pub fn label(self) -> &'static str {
+        match self {
+            Selection::Clean => StatusKind::Clean.label(),
+            Selection::Skip => StatusKind::Skip.label(),
+        }
+    }
+
+    /// The status a conflict answered `self` takes.
+    pub fn answered(self) -> Status {
+        match self {
+            Selection::Clean => Status::Clean,
+            Selection::Skip => Status::Skip(SkipReason::Chosen),
+        }
+    }
 }
 
 impl Selection {

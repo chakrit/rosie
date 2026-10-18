@@ -52,13 +52,14 @@ Bare `rosie` is `rosie clean tree .`.
 |-----------------------|------------------------------------------------|
 | `rosie check <path>…` | says, per path, what a plan would do with it   |
 
-- One line per path: status, path, and reason plus hint, in readable columns.
-- Plan words for would-be entries: `clean`, `keep`, `outside-roots`, `conflict`. Scan
+- Per path: its status and the path, the path last, then its reason and hint on the
+  lines below, under the path.
+- Plan words for would-be entries: `clean`, `skip`, `conflict`. Scan
   report words otherwise: `in use`, `skipped`, `no rule`.
 - Same flags as `scan`.
 - Walks each given folder's subtree so its verdict equals the plan's.
 - A folder containing targets gets a one-line summary pointing to `rosie scan`.
-- A summary line's status is the most consequential inside: conflict, clean, keep.
+- A summary line's status is the most consequential inside: conflict, clean, skip.
 - Exit 0 if any path would be cleaned, else 1.
 
 Approved example:
@@ -69,29 +70,42 @@ $ rosie check ~/src/app/node_modules ~/src/app/node_modules/react \
     ~/Library/Caches/com.foo.Bar ~/src/api/target ~/src/api/target/debug ~/src/web \
     ~/Applications/Slack.app ~/.cargo/registry /Volumes/Backup/build \
     ~/src/app/src ~/Downloads/missing
-clean          ~/src/app/node_modules                 rosie/node-modules (normal)
-clean          ~/src/app/node_modules/react           inside ~/src/app/node_modules (rosie/node-modules)
-clean          ~/Library/Developer/Xcode/DerivedData  rosie/xcode-derived-data (normal); needs sudo
-keep           ~/src/old/.venv                        rosie/python-venv (aggressive); to clean it: --aggressive
-outside-roots  ~/Library/Caches/com.foo.Bar           to allow just it:
-                                                        rosie roots add ~/Library/Caches/com.foo.Bar
-                                                      or to allow its folder:
-                                                        rosie roots add ~/Library/Caches
-conflict       ~/src/api/target                       rosie/cargo-target (normal) vs alice/rust (aggressive, on target/debug); choose clean or keep in the plan
-conflict       ~/src/api/target/debug                 rosie/cargo-target (normal, on ~/src/api/target) vs alice/rust (aggressive); choose clean or keep in the plan
-clean          ~/src/web                              contains 3 items: 2 clean (1.4 GB), 1 keep (210 MB); see rosie scan tree ~/src/web
-in use         ~/Applications/Slack.app               running: Slack (pid 4123)
-skipped        ~/.cargo/registry                      through symlink ~/.cargo → ~/dotfiles/cargo; to allow it: rosie config set walk.enter_links roots
-skipped        /Volumes/Backup/build                  another volume; to cross it: --enter-mounts
-no rule        ~/src/app/src                          no rule matches it or anything inside
-no rule        ~/Downloads/missing                    does not exist
+clean     ~/src/app/node_modules
+          rosie/node-modules (normal)
+clean     ~/src/app/node_modules/react
+          inside ~/src/app/node_modules (rosie/node-modules)
+clean     ~/Library/Developer/Xcode/DerivedData
+          rosie/xcode-derived-data (normal); needs sudo
+skip      ~/src/old/.venv
+          rosie/python-venv (aggressive); to clean it: --aggressive
+skip      ~/Library/Caches/com.foo.Bar
+          outside the roots; to allow just it:
+            rosie roots add ~/Library/Caches/com.foo.Bar
+          or to allow its folder:
+            rosie roots add ~/Library/Caches
+conflict  ~/src/api/target
+          rosie/cargo-target (normal) vs alice/rust (aggressive, on target/debug)
+conflict  ~/src/api/target/debug
+          rosie/cargo-target (normal, on ~/src/api/target) vs alice/rust (aggressive)
+clean     ~/src/web
+          contains 3 items: 2 clean, 1.4 GB; 1 skip (aggressive), 210 MB; see rosie scan tree ~/src/web
+in use    ~/Applications/Slack.app
+          running: Slack (pid 4123)
+skipped   ~/.cargo/registry
+          through symlink ~/.cargo → ~/dotfiles/cargo; to allow it: rosie config set walk.enter_links roots
+skipped   /Volumes/Backup/build
+          another volume; to cross it: --enter-mounts
+no rule   ~/src/app/src
+          no rule matches it or anything inside
+no rule   ~/Downloads/missing
+          does not exist
 ```
 
 - `check` takes no format flag. *(agent-inferred)*
 - Lines go to stdout; scan problems go to stderr as `scan` prints them.
   *(agent-inferred)*
 - Paths under home print as `~`. *(agent-inferred)*
-- Columns are as wide as the widest printed entry. *(agent-inferred)*
+- Paths and reasons start two spaces past the widest status. *(agent-inferred)*
 - Exit 0 when any printed line's status is `clean`. *(agent-inferred)*
 - The walk starts at home for a path under it and at `/` otherwise, judges each folder
   on the way down as a `tree` walk would, and walks the given path's subtree whole.
@@ -104,19 +118,19 @@ no rule        ~/Downloads/missing                    does not exist
   error's text. *(agent-inferred)*
 - A path inside a plan entry takes the entry's status: `inside <entry> (<rules>)`.
   *(agent-inferred)*
-- A `keep`, `outside-roots`, or `conflict` line carries its hint inside an entry too.
+- A `skip` line carries its hint inside an entry too.
   *(agent-inferred)*
 - `needs sudo` follows the description on every line about an entry not owned by the
   user, inside lines included, before any hint. *(agent-inferred)*
-- An `outside-roots` line lists the ways to allow it, one of which is enough: the entry
+- A line outside the roots lists the ways to allow it, one of which is enough: the entry
   itself (`to allow just it`) or the folder holding it (`or to allow its folder`). When
   that folder is `/`, only the entry is listed, as `to allow it`. The plan file, scan
   skip lines, and errors about a path outside the roots list the same.
 - A conflict found by a `tree` or `caches` walk is at one path, so neither side names an
   `on <path>`, and a conflict nested in another, as in the example's `~/src/api/target`
   and `~/src/api/target/debug` lines, does not arise. *(agent-inferred)*
-- After `keep`, a summary's status is `outside-roots`. Its counts list `conflict`,
-  `clean`, `keep`, and `outside-roots`, in that order, leaving out any that are zero.
+- A summary's counts list `conflict`, `clean`, `skip (aggressive)`, `skip (outside the
+  roots)`, and `skip`, in that order, leaving out any that are zero.
   *(agent-inferred)*
 - A folder with no plan entry inside but items refused or skipped inside is `in use`
   when any item runs, else `skipped`: `contains N in use, M skipped; see rosie scan tree
@@ -136,7 +150,7 @@ no rule        ~/Downloads/missing                    does not exist
   it is claimed or skipped other than as a closed bundle; only the bundle's own line is
   printed. `orphans` is not consulted. An `.app` refused other than for a running
   process, or unreadable, reads `skipped` with the error's text; one refused for lying
-  outside the roots adds the `outside-roots` hints. *(agent-inferred)*
+  outside the roots adds the roots hints. *(agent-inferred)*
 
 ## Management commands
 

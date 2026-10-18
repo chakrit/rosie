@@ -275,7 +275,7 @@ fn apps_hints(error: &apps::Error) -> Vec<Hint> {
 fn plan_hints(error: &plan::Error) -> Vec<Hint> {
     match error {
         plan::Error::UnresolvedConflicts { .. } => vec![Hint::by_hand(
-            "save the plan as TOML and set each \"conflict\" status to clean or keep",
+            "save the plan as TOML and set each \"conflict\" status to clean or skip",
         )],
         plan::Error::NulByte { .. }
         | plan::Error::ConflictingLaunchDomain { .. }

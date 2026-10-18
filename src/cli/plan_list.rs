@@ -8,12 +8,12 @@ use std::path::{Path, PathBuf};
 
 use super::args::Mode;
 use super::console::Width;
-use super::entry_text::{keep_hint, status_hints, sudo_note};
+use super::entry_text::{aggressive_hint, status_hints, sudo_note};
 use super::findings::walk_skip_hints;
 use super::shown::Shown;
 use crate::hint::{Hint, hint_lines};
 use crate::output::{Palette, Tone};
-use crate::plan::{Delete, Plan, Receipt, Report, Selection, Size, Status, StatusKind, Tool};
+use crate::plan::{Delete, Plan, Receipt, Report, Selection, Size, SkipReason, Status, Tool};
 use crate::scan::{Refused, Skipped};
 
 /// What the scan left out of the plan, which the listing shows beside it.
@@ -161,7 +161,6 @@ fn sections(plan: &Plan, left_out: &LeftOut, shown: &Shown) -> Vec<Section> {
 }
 
 fn delete_item(delete: &Delete, shown: &Shown) -> Item {
-    let kind = delete.status.kind();
     let rules = match &delete.status {
         Status::Conflict(disagreement) => {
             let normal = disagreement
@@ -174,13 +173,16 @@ fn delete_item(delete: &Delete, shown: &Shown) -> Item {
                 .map(|rule| format!("{rule} (aggressive)"));
             normal.chain(aggressive).collect()
         }
-        Status::Clean | Status::Keep | Status::OutsideRoots => delete.rules.clone(),
+        Status::Clean | Status::Skip(_) => delete.rules.clone(),
     };
-    let status = match kind {
-        StatusKind::Clean => None,
-        StatusKind::Keep => Some((Tone::Calm, "keep (aggressive)".to_owned())),
-        StatusKind::Conflict => Some((Tone::Caution, "conflict".to_owned())),
-        StatusKind::OutsideRoots => Some((Tone::Alarm, "outside the roots".to_owned())),
+    let status = match &delete.status {
+        Status::Clean => None,
+        Status::Skip(SkipReason::Aggressive) => Some((Tone::Calm, "skip (aggressive)".to_owned())),
+        Status::Skip(SkipReason::OutsideRoots) => {
+            Some((Tone::Alarm, "skip (outside the roots)".to_owned()))
+        }
+        Status::Skip(SkipReason::Chosen) => Some((Tone::Calm, "skip".to_owned())),
+        Status::Conflict(_) => Some((Tone::Caution, "conflict".to_owned())),
     };
     let unloads = delete
         .bootouts
@@ -192,12 +194,12 @@ fn delete_item(delete: &Delete, shown: &Shown) -> Item {
             .into_iter()
             .chain(unloads)
             .collect(),
-        hints: status_hints(kind, &PathBuf::from(shown.path(&delete.path))),
+        hints: status_hints(&delete.status, &PathBuf::from(shown.path(&delete.path))),
     };
 
     Item {
         size: SizeCell::Known(delete.size),
-        saved: kind == StatusKind::Clean,
+        saved: delete.status.is_clean(),
         rules,
         name: name(&delete.path),
         note: Some(note),
@@ -268,13 +270,14 @@ fn forget_item(receipt: &Receipt) -> Item {
     }
 }
 
-/// A tool command or package forget is `clean` or `keep`, never anything else.
+/// A tool command or package forget is `clean` or `skip`; a scan skips one only as
+/// aggressive.
 fn selection_note(selection: Selection) -> Note {
     let (status, hints) = match selection {
         Selection::Clean => (None, Vec::new()),
-        Selection::Keep => (
-            Some((Tone::Calm, "keep (aggressive)".to_owned())),
-            vec![keep_hint()],
+        Selection::Skip => (
+            Some((Tone::Calm, "skip (aggressive)".to_owned())),
+            vec![aggressive_hint()],
         ),
     };
     Note {
@@ -452,7 +455,9 @@ mod tests {
 
     use super::*;
     use crate::output::ColorChoice;
-    use crate::plan::{AggressiveItems, ItemKind, PathMatch, PlanBuilder, Reach, RunAs};
+    use crate::plan::{
+        AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, RunAs,
+    };
     use crate::scan::{Needs, WalkSkip};
     use crate::tier::Tier;
 
@@ -494,41 +499,61 @@ mod tests {
         plain
     }
 
-    const DELETES: &str = r#"
-[[delete]]
-path = "/Users/me/src/app/sub/.venv"
-type = "folder"
-size = 84000000
-rules = ["rosie/python-venv"]
-status = "keep"
+    /// A folder the user owns at `path`, in the roots, matched by `rule` as `tier`.
+    fn found(path: &str, bytes: u64, rule: &str, tier: Tier) -> PathMatch {
+        PathMatch {
+            path: PathBuf::from(path),
+            kind: ItemKind::Folder,
+            size: Size::bytes(bytes),
+            run_as: RunAs::User,
+            reach: Reach::InRoots,
+            rule: rule.to_owned(),
+            tier,
+        }
+    }
 
-[[delete]]
-path = "/Users/me/src/app/target"
-type = "folder"
-size = 5000000
-rules = ["rosie/cargo-target"]
-status = "clean"
+    fn scanned(matches: impl IntoIterator<Item = PathMatch>) -> Plan {
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
+        for found in matches {
+            builder.add_path(found).expect("valid match");
+        }
+        builder.build().plan
+    }
 
-[[delete]]
-path = "/Users/me/src/app/node_modules"
-type = "folder"
-size = 1234567890
-rules = ["rosie/node-modules"]
-status = "clean"
-
-[[delete]]
-path = "/Users/me/x"
-type = "file"
-size = 10
-rules = ["a/one", "b/two"]
-status = "clean"
-sudo = true
-"#;
+    fn deletes() -> Plan {
+        let root_file = |rule| PathMatch {
+            kind: ItemKind::File,
+            run_as: RunAs::Sudo,
+            ..found("/Users/me/x", 10, rule, Tier::Normal)
+        };
+        scanned([
+            found(
+                "/Users/me/src/app/sub/.venv",
+                84_000_000,
+                "rosie/python-venv",
+                Tier::Aggressive,
+            ),
+            found(
+                "/Users/me/src/app/target",
+                5_000_000,
+                "rosie/cargo-target",
+                Tier::Normal,
+            ),
+            found(
+                "/Users/me/src/app/node_modules",
+                1_234_567_890,
+                "rosie/node-modules",
+                Tier::Normal,
+            ),
+            root_file("a/one"),
+            root_file("b/two"),
+        ])
+    }
 
     #[test]
     fn folders_hold_rows_of_size_rule_and_name_a_blank_line_apart() {
         assert_eq!(
-            plain(&parsed(DELETES)),
+            plain(&deletes()),
             [
                 "~",
                 "     10 B  a/one               x",
@@ -541,7 +566,7 @@ sudo = true
                 "",
                 "~/src/app/sub",
                 "  84.0 MB  rosie/python-venv   .venv",
-                "           keep (aggressive); to clean it: --aggressive",
+                "           skip (aggressive); to clean it: --aggressive",
             ]
             .join("\n")
         );
@@ -573,29 +598,30 @@ status = "clean"
     }
 
     #[test]
-    fn an_outside_roots_entry_says_so_and_lists_its_roots_hints_below() {
-        let plan = parsed(
-            r#"
-[[delete]]
-path = "/Library/LaunchDaemons/com.x.plist"
-type = "file"
-size = 4096
-rules = ["app/com.x"]
-status = "outside-roots"
-sudo = true
-
-[[delete.bootout]]
-plist = "/Library/LaunchDaemons/com.x.plist"
-domain = "system"
-"#,
-        );
+    fn an_entry_outside_the_roots_says_so_and_lists_its_roots_hints_below() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
+        let plist = PathMatch {
+            kind: ItemKind::File,
+            run_as: RunAs::Sudo,
+            reach: Reach::OutsideRoots,
+            ..found(
+                "/Library/LaunchDaemons/com.x.plist",
+                4096,
+                "app/com.x",
+                Tier::Normal,
+            )
+        };
+        builder
+            .add_launch_job(plist, LaunchDomain::System)
+            .expect("valid plist");
+        let plan = builder.build().plan;
 
         assert_eq!(
             plain(&plan),
             [
                 "/Library/LaunchDaemons",
                 "  4.1 KB  app/com.x  com.x.plist",
-                "          outside the roots; needs sudo; unloads system job",
+                "          skip (outside the roots); needs sudo; unloads system job",
                 "          to allow just it:",
                 "            rosie roots add /Library/LaunchDaemons/com.x.plist",
                 "          or to allow its folder:",
@@ -606,8 +632,8 @@ domain = "system"
     }
 
     #[test]
-    fn a_conflict_lists_each_rule_with_its_tier_and_how_to_settle_it() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+    fn a_conflict_lists_each_rule_with_its_tier() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let sides = [
             ("rosie/cargo-target", Tier::Normal),
             ("alice/rust", Tier::Aggressive),
@@ -631,7 +657,7 @@ domain = "system"
                 "~/api",
                 "  3.0 GB  rosie/cargo-target (normal)  target",
                 "          alice/rust (aggressive)",
-                "          conflict; choose clean or keep in the plan",
+                "          conflict",
             ]
             .join("\n")
         );
@@ -704,7 +730,7 @@ status = "clean"
 rule = "user/homebrew"
 shell = "/bin/zsh"
 cmd = "brew cleanup"
-status = "keep"
+status = "skip"
 
 [tool.env]
 HOMEBREW_NO_ENV_HINTS = "1"
@@ -727,7 +753,7 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
                 "",
                 "commands",
                 "       ?  user/homebrew  $ brew cleanup",
-                "          keep (aggressive); to clean it: --aggressive",
+                "          skip (aggressive); to clean it: --aggressive",
                 "       ?                 forget package com.x.pkg",
                 "",
                 "by hand",
@@ -741,7 +767,7 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 
     #[test]
     fn color_leaves_the_same_text_in_the_same_columns() {
-        let plan = parsed(DELETES);
+        let plan = deletes();
 
         let colored = listing(
             &plan,

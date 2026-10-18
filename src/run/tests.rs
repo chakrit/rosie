@@ -127,7 +127,7 @@ fn deletes_only_clean_entries() {
     fake.add_file("/w/a/node_modules/x.js", "x");
     fake.add_file("/w/b/node_modules/x.js", "x");
     let plan = plan(
-        &(folder("/w/a/node_modules", 10, "clean") + &folder("/w/b/node_modules", 20, "keep")),
+        &(folder("/w/a/node_modules", 10, "clean") + &folder("/w/b/node_modules", 20, "skip")),
     );
 
     let (stats, _) = run(&fake, &["/w"], &plan);
@@ -494,12 +494,9 @@ fn does_the_users_items_before_elevating_once_for_the_rest() {
 fn does_not_elevate_for_sudo_items_that_are_not_clean() {
     let fake = FakeBackend::new();
     fake.respond_to_sudo(output(1, "", ""));
-    let outside_roots = format!(
-        "{}sudo = true\n",
-        folder("/Library/Caches/b", 2, "outside-roots")
-    );
+    let outside_roots = format!("{}sudo = true\n", folder("/Library/Caches/b", 2, "skip"));
     let plan = plan(
-        &(format!("{}sudo = true\n", folder("/Library/Caches/u", 1, "keep")) + &outside_roots),
+        &(format!("{}sudo = true\n", folder("/Library/Caches/u", 1, "skip")) + &outside_roots),
     );
 
     let (stats, _) = run(&fake, &["/Library/Caches"], &plan);

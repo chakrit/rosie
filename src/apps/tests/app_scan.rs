@@ -7,7 +7,7 @@ fn lists_the_bundle_itself_clean_under_the_apps_rule() {
     let fake = FakeBackend::new();
     bar_app(&fake);
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let bundle = entry(&scanned, BAR);
     assert_eq!(bundle.status, Status::Clean);
@@ -25,7 +25,7 @@ fn bundle_id_matches_are_dot_bounded_and_clean() {
     fake.add_file(lib("Preferences/com.foo.Barista.plist"), "x");
     fake.add_dir(lib("Caches/com.foo.Barista"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
@@ -49,7 +49,7 @@ fn group_containers_match_the_team_prefixed_id() {
     fake.add_dir(lib("Group Containers/ABCDE12345.com.foo.Barista"));
     fake.add_dir(lib("Caches/ABCDE12345.com.foo.Bar"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
@@ -71,14 +71,17 @@ fn name_only_matches_are_aggressive() {
     fake.add_dir(lib("Logs/Bar"));
     fake.add_dir(lib("Application Support/Barista"));
 
-    let keep = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let keep = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
     let clean = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Clean);
 
     assert_eq!(
         deletes(&keep)[1..],
         [
-            (lib("Application Support/Bar"), Status::Keep),
-            (lib("Logs/Bar"), Status::Keep),
+            (
+                lib("Application Support/Bar"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
+            (lib("Logs/Bar"), Status::Skip(SkipReason::Aggressive)),
         ]
     );
     assert_eq!(
@@ -95,7 +98,7 @@ fn an_app_without_a_bundle_name_has_no_name_only_matches() {
     quiet(&fake);
     fake.add_dir(lib("Application Support/Bar"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Clean)]);
 }
@@ -134,13 +137,16 @@ fn an_app_with_no_bundle_id_plans_itself_and_its_name_matches_only() {
     fake.add_dir(lib("Application Support/Bar"));
     fake.add_dir(lib("Application Support/com.foo.Bar"));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
         [
             (BAR.to_owned(), Status::Clean),
-            (lib("Application Support/Bar"), Status::Keep),
+            (
+                lib("Application Support/Bar"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
         ]
     );
     assert_eq!(entry(&scanned, BAR).rules, ["app"]);
@@ -158,7 +164,7 @@ fn launch_agents_boot_out_of_the_users_gui_domain_and_daemons_out_of_system() {
     fake.chown("/Library/LaunchDaemons/com.foo.Bar.helper.plist", ROOT_UID);
     fake.add_file("/Library/PrivilegedHelperTools/com.foo.Bar.helper", "x");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let agent = entry(&scanned, &lib("LaunchAgents/com.foo.Bar.agent.plist"));
     let daemon = entry(&scanned, "/Library/LaunchDaemons/com.foo.Bar.helper.plist");
@@ -188,7 +194,7 @@ fn items_the_user_does_not_own_are_marked_sudo() {
     fake.chown("/Library/LaunchDaemons/com.foo.Bar.helper.plist", ROOT_UID);
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(entry(&scanned, BAR).run_as, RunAs::Sudo);
     assert_eq!(
@@ -210,7 +216,7 @@ fn receipts_matching_the_bundle_id_are_forgotten() {
         "com.apple.pkg.Core\ncom.foo.Bar\ncom.foo.Bar.pkg\ncom.foo.Barista.pkg\nABCDE12345.com.foo.Bar\n",
     );
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let packages: Vec<&str> = scanned
         .plan
@@ -237,7 +243,7 @@ fn a_failing_receipt_listing_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(
@@ -255,7 +261,7 @@ fn login_items_and_system_extensions_are_report_only() {
         "{BAR}/Contents/Library/SystemExtensions/com.foo.Bar.net.systemextension"
     ));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     assert_eq!(
@@ -302,7 +308,7 @@ fn refuses_the_plan_while_the_app_is_running() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(
@@ -323,7 +329,7 @@ fn refuses_the_whole_plan_when_the_bundle_is_outside_the_roots() {
     let result = scan_app(
         &ctx(&fake, &["/Users/me/Library"]),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(
@@ -342,7 +348,7 @@ fn a_process_from_a_sibling_app_does_not_block_the_plan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(result.is_ok(), "{result:?}");
@@ -388,7 +394,7 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new("/Users/me/code"),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
@@ -404,7 +410,7 @@ fn leftovers_outside_the_roots_are_outside_roots() {
     let scanned = scanned_app(
         &fake,
         &["/Users/me/Library", "/Applications"],
-        AggressiveItems::Keep,
+        AggressiveItems::Skip,
     );
 
     assert_eq!(
@@ -413,7 +419,7 @@ fn leftovers_outside_the_roots_are_outside_roots() {
             (BAR.to_owned(), Status::Clean),
             (
                 "/Library/LaunchDaemons/com.foo.Bar.helper.plist".to_owned(),
-                Status::OutsideRoots
+                Status::Skip(SkipReason::OutsideRoots)
             ),
             (lib("Preferences/com.foo.Bar.plist"), Status::Clean),
         ]
@@ -436,7 +442,7 @@ fn a_location_rosie_may_not_list_is_a_walk_skip() {
     fake.add_dir(lib("Containers/com.foo.Bar"));
     fake.fail_on(lib("Containers"), Op::ReadDir, ErrorKind::PermissionDenied);
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(scanned.skip_counts().denied, 1);
     assert_eq!(deletes(&scanned), [(BAR.to_owned(), Status::Clean)]);
@@ -456,7 +462,7 @@ fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_as_keep() {
     let scanned = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(beta),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     )
     .expect("app scan");
 
@@ -464,7 +470,10 @@ fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_as_keep() {
         deletes(&scanned),
         [
             (beta.to_owned(), Status::Clean),
-            (lib("Preferences/com.foo.Bar.plist"), Status::Keep),
+            (
+                lib("Preferences/com.foo.Bar.plist"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
         ]
     );
     assert!(!scanned.plan.receipts()[0].selection.is_clean());
@@ -479,7 +488,7 @@ fn folders_in_launch_folders_are_deleted_without_a_bootout() {
     fake.add_dir(lib("LaunchAgents/com.foo.Bar.agent"));
     fake.add_dir("/Library/LaunchDaemons/com.foo.Bar.helper");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let agent = entry(&scanned, &lib("LaunchAgents/com.foo.Bar.agent"));
     let daemon = entry(&scanned, "/Library/LaunchDaemons/com.foo.Bar.helper");
@@ -507,7 +516,7 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
         let result = scan_app(
             &ctx(&fake, &ALL_ROOTS),
             Path::new(BAR),
-            &settings(AggressiveItems::Keep),
+            &settings(AggressiveItems::Skip),
         );
 
         assert!(matches!(result, Err(Error::Fs(_))), "{folder}: {result:?}");
@@ -531,19 +540,25 @@ fn matches_of_a_longer_installed_bundle_id_are_aggressive() {
     fake.add_dir(lib("Group Containers/ABCDE12345.com.foo.Bar.canary"));
     receipts(&fake, "com.foo.Bar.pkg\ncom.foo.Bar.canary.pkg\n");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         deletes(&scanned),
         [
             (BAR.to_owned(), Status::Clean),
-            (lib("Caches/com.foo.Bar.canary"), Status::Keep),
+            (
+                lib("Caches/com.foo.Bar.canary"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
             (lib("Caches/com.foo.Bar.canaryish"), Status::Clean),
             (
                 lib("Group Containers/ABCDE12345.com.foo.Bar.canary"),
-                Status::Keep
+                Status::Skip(SkipReason::Aggressive)
             ),
-            (lib("Preferences/com.foo.Bar.canary.plist"), Status::Keep),
+            (
+                lib("Preferences/com.foo.Bar.canary.plist"),
+                Status::Skip(SkipReason::Aggressive)
+            ),
             (lib("Preferences/com.foo.Bar.plist"), Status::Clean),
         ]
     );
@@ -567,7 +582,7 @@ fn a_system_extension_is_reported_when_the_bundle_has_no_login_items() {
         "{BAR}/Contents/Library/SystemExtensions/com.foo.Bar.net.systemextension"
     ));
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     assert_eq!(
@@ -586,7 +601,7 @@ fn a_bundle_id_match_that_is_also_a_name_match_is_clean() {
     quiet(&fake);
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert_eq!(
         entry(&scanned, &lib("Preferences/com.foo.Bar.plist")).status,
@@ -610,7 +625,7 @@ fn a_receipt_is_taken_by_another_installed_app_only_through_its_plain_id() {
     quiet(&fake);
     receipts(&fake, "ABCDE12345.ABCDE12345.ABCDE12345.x\n");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Keep);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(scanned.plan.receipts()[0].selection.is_clean());
 }
@@ -624,7 +639,7 @@ fn a_package_id_a_plan_cannot_hold_fails_the_scan() {
     let result = scan_app(
         &ctx(&fake, &ALL_ROOTS),
         Path::new(BAR),
-        &settings(AggressiveItems::Keep),
+        &settings(AggressiveItems::Skip),
     );
 
     assert!(matches!(result, Err(Error::Plan(_))), "{result:?}");

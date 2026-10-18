@@ -89,12 +89,12 @@ fn an_out_of_roots_target_is_outside_roots_and_survives_a_hand_cleaned_run() {
     );
     assert!(scanned.status.success(), "{}", stderr(&scanned));
     let plan = stdout(&scanned);
-    assert!(plan.contains("status = \"outside-roots\""), "{plan}");
+    assert!(plan.contains("status = \"skip\""), "{plan}");
     assert!(plan.contains("rosie roots add"), "{plan}");
 
     // Marking the entry clean by hand takes it past the plan's own status, to the roots
     // gate.
-    let cleaned = plan.replace("status = \"outside-roots\"", "status = \"clean\"");
+    let cleaned = plan.replace("status = \"skip\"", "status = \"clean\"");
 
     let ran = home.run(&["run", "-"], Some(&cleaned));
 

@@ -4,7 +4,7 @@
 use std::path::Path;
 
 use super::{Problem, Refused, Scan, Skipped};
-use crate::plan::{Delete, Disagreement, PlanStats, Status};
+use crate::plan::{Delete, Disagreement, PlanStats, SkipReason, Status};
 use crate::tier::Tier;
 
 /// What the plan would do with a path, judged from a scan of it.
@@ -40,8 +40,7 @@ pub enum PathVerdict<'s> {
 #[derive(Debug)]
 pub enum Planned<'s> {
     Clean(Tier),
-    Keep,
-    OutsideRoots,
+    Skip(SkipReason),
     Conflict(&'s Disagreement),
 }
 
@@ -130,8 +129,7 @@ impl Scan {
                 let tier = self.tiers.of(&delete.path);
                 Planned::Clean(tier.expect("the plan builder records the tier of each clean entry"))
             }
-            Status::Keep => Planned::Keep,
-            Status::OutsideRoots => Planned::OutsideRoots,
+            Status::Skip(reason) => Planned::Skip(*reason),
             Status::Conflict(disagreement) => Planned::Conflict(disagreement),
         }
     }

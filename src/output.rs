@@ -45,7 +45,7 @@ impl Mark {
 /// (`docs/spec/plan.md#plan-listing`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Tone {
-    /// Left alone as asked: keep, skipped.
+    /// Left alone as asked: skip, skipped by the walk.
     Calm,
     /// Waits on the user: a conflict, a running process.
     Caution,

@@ -52,7 +52,7 @@ const PROMPT: &str = "Clean the items marked clean? [y/N/e]";
 
 /// The two choices for a rule conflict; the first makes it `clean`.
 const CLEAN: &str = "clean: remove it";
-const KEEP: &str = "keep: leave it";
+const SKIP: &str = "skip: leave it";
 
 /// How resolving the rule conflicts ended.
 enum Resolved {
@@ -255,7 +255,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
         let kept = match self
             .console
-            .checklist("Uncheck what to keep:", plan.clean_entries())
+            .checklist("Uncheck what to skip:", plan.clean_entries())
         {
             Ok(kept) => kept,
             Err(PromptError::Cancelled) => return Ok(plan),
@@ -264,10 +264,10 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         Ok(plan.keeping_clean_entries(&kept))
     }
 
-    /// The plan with every conflict made `clean` or `keep` as the user picks it, one at a
+    /// The plan with every conflict made `clean` or `skip` as the user picks it, one at a
     /// time (`docs/spec/plan.md#rule-conflicts`).
     fn resolve(&mut self, plan: &Plan) -> Result<Resolved, Error> {
-        let options = [CLEAN.to_owned(), KEEP.to_owned()];
+        let options = [CLEAN.to_owned(), SKIP.to_owned()];
 
         let mut choices = Vec::new();
         for (conflict, disagreement) in plan.conflicts() {
@@ -278,7 +278,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             );
             let selection = match self.console.pick(&prompt, &options) {
                 Ok(0) => Selection::Clean,
-                Ok(_) => Selection::Keep,
+                Ok(_) => Selection::Skip,
                 Err(PromptError::Cancelled) => return Ok(Resolved::Cancelled),
                 Err(error) => return Err(error.into()),
             };

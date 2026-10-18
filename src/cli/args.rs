@@ -188,11 +188,11 @@ pub struct ScanFlags {
 }
 
 impl ScanFlags {
-    /// How the plan lists aggressive items: `clean` with `--aggressive`, else `keep`.
+    /// How the plan lists aggressive items: `clean` with `--aggressive`, else `skip`.
     pub fn aggressive_items(&self) -> AggressiveItems {
         match self.aggressive {
             true => AggressiveItems::Clean,
-            false => AggressiveItems::Keep,
+            false => AggressiveItems::Skip,
         }
     }
 

@@ -13,8 +13,9 @@ confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or pipe
 
 The plan file is `version = 1` followed by one table per entry, grouped by action;
 deletes are in path order. Each entry except `[[report]]` is preceded by a comment with
-its size (`size unknown` for `[[tool]]` and `[[forget]]`) and, when `outside-roots`,
-the `rosie roots add <path>` hint; report entries have no comment. A launch job's bootout
+its size (`size unknown` for `[[tool]]` and `[[forget]]`) and, when `skip`, why, with
+the `rosie roots add <path>` hint outside the roots; report entries have no comment. A
+launch job's bootout
 sits inside the delete that holds its plist:
 
 ```toml
@@ -22,7 +23,7 @@ sits inside the delete that holds its plist:
 # Delete any entry you do not want, then: rosie run <this file>
 version = 1
 
-# 4.1 KB; outside roots
+# 4.1 KB; skip: outside the roots
 # to allow just it:
 #   rosie roots add /Library/LaunchDaemons/com.x.plist
 # or to allow its folder:
@@ -32,7 +33,7 @@ path = "/Library/LaunchDaemons/com.x.plist"
 type = "file"
 size = 4096
 rules = ["app/com.x"]
-status = "outside-roots"
+status = "skip"
 sudo = true
 
 [[delete.bootout]]
@@ -87,9 +88,10 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 | `[[forget]]`          | `package` for `pkgutil --forget`, `status`                         |
 | `[[report]]`          | `subject`, `steps`; report-only, never run                         |
 
-- Plan status words are user-facing: `clean`, `keep`, `outside-roots`, `conflict`.
-- `status` is `clean`, `keep`, `outside-roots`, or `conflict`; `[[tool]]` and
-  `[[forget]]` are never `outside-roots` or `conflict`.
+- Plan status words are user-facing: `clean`, `skip`, `conflict`.
+- `status` is `clean`, `skip`, or `conflict`; `[[tool]]` and `[[forget]]` are never
+  `conflict`.
+- Why an entry is `skip` is shown only in the scan's output and the entry's comment.
 - Unknown keys are refused.
 
 - A plan carries a format version.
@@ -102,15 +104,15 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
   refused. *(agent-inferred)*
 - A `[[tool]]` entry's `rule` is not validated when a plan is read. *(agent-inferred)*
 - Every found item goes through all delete checks: an item outside `roots` is
-  `outside-roots`, a running process leaves it out of the plan (sized and reported), a
+  `skip`, a running process leaves it out of the plan (sized and reported), a
   mount point is a walk skip, and any other refusal is a scan problem. *(agent-inferred)*
 - Nested matches collapse into the outer one. The outer entry is `sudo` if any inner one
   was.
-- Aggressive items appear as `keep` unless `--aggressive` is given
+- Aggressive items appear as `skip` unless `--aggressive` is given
   ([rules.md](rules.md#aggressive-twins)).
-- Items outside `roots` appear as `outside-roots`, with a `rosie roots add <path>` hint
+- Items outside `roots` appear as `skip`, with a `rosie roots add <path>` hint
   ([safety.md](safety.md#roots)).
-- `keep`, `outside-roots`, and `conflict` entries are kept in the plan but not executed.
+- `skip` and `conflict` entries are kept in the plan but not executed.
 - A plan never carries roots; run checks against the `roots` in `config.toml`.
 - Scan marks an item `sudo` when it is not owned by the user
   ([safety.md](safety.md#elevation)).
@@ -124,7 +126,7 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
   one nested in another) and the rules disagree on tier. No rule's tier wins.
 - The entry's comment names the rules and their tiers.
 - `rosie run` and the interactive `y` refuse while any `conflict` entry remains.
-- The user resolves each conflict to `clean` or `keep`, by editing the plan or
+- The user resolves each conflict to `clean` or `skip`, by editing the plan or
   through `e`.
 - `rosie scan … --sh` refuses while any `conflict` entry remains.
 - A rule never conflicts with itself: a rule whose normal and aggressive values match the
@@ -142,7 +144,7 @@ The plan listing shows a plan for reading:
 $ rosie scan tree ~
 /Library/LaunchDaemons
     4.1 KB  app/com.x                    com.x.plist
-            outside the roots; needs sudo; unloads system job
+            skip (outside the roots); needs sudo; unloads system job
             to allow just it:
               rosie roots add /Library/LaunchDaemons/com.x.plist
             or to allow its folder:
@@ -151,7 +153,7 @@ $ rosie scan tree ~
 ~/src/clients/acme/api
     3.0 GB  rosie/cargo-target (normal)  target
             alice/rust (aggressive)
-            conflict; choose clean or keep in the plan
+            conflict
 
 ~/src/clients/acme/web
                                          Foo.app
@@ -162,7 +164,7 @@ $ rosie scan tree ~
 
 ~/src/old
    84.0 MB  rosie/python-venv            .venv
-            keep (aggressive); to clean it: --aggressive
+            skip (aggressive); to clean it: --aggressive
 
 commands
          ?  rosie/docker                 $ docker system prune --force
@@ -181,8 +183,9 @@ by hand
 - Size and rule columns are aligned across the whole listing.
 - A folder or name too long for the terminal is trimmed from the front to `…` and its
   end.
-- Below the rules, a note says why the item is not cleaned (`keep (aggressive)`,
-  `conflict`, `outside the roots`, `in use: <program> (pid N)`, `skipped: <reason>`),
+- Below the rules, a note says why the item is not cleaned (`skip (aggressive)`,
+  `skip (outside the roots)`, `skip`, `conflict`, `in use: <program> (pid N)`,
+  `skipped: <reason>`),
   then `needs sudo` and the jobs it unloads, then one hint on the same line or several
   in the stderr hint form below.
 - A conflict lists each rule with its tier.
@@ -192,16 +195,17 @@ by hand
   each `forget package <id>`. Their size is `?`.
 - `by hand` lists each report's subject with its steps below it. *(agent-inferred)*
 - On a terminal ([cli.md](cli.md#output)): folders blue; names plain; rules, notes'
-  details, and sizes not saved dim; sizes of 1 GB and up bold; status words dim (keep,
-  skipped), yellow (conflict, in use), or red (outside the roots); hint commands cyan.
+  details, and sizes not saved dim; sizes of 1 GB and up bold; status words dim (skip,
+  skipped), yellow (conflict, in use), or red (skip outside the roots); hint commands
+  cyan.
 
 ## Stats
 
 Plans and clean runs report saved space. Simple stats suffice. Stats are printed to
 stderr, never written into the plan TOML.
 
-- Scan and confirmation show the item count and total size of `clean` items, `keep`
-  aggressive items, `outside-roots` items, and conflicts.
+- Scan and confirmation show the item count and total size of `clean` items, `skip`
+  items by reason (aggressive, outside the roots, chosen), and conflicts.
 - The end of a run shows the total freed and the items done, plus skipped and failed
   items (stale, running process, sudo refused, errors) with their sizes, and walk-skip
   counts per reason.
@@ -220,7 +224,7 @@ Users may delete entries from a plan before `rosie run`. Run never adds anything
 `rosie clean` shows the plan listing, then the scan stats, then the prompt.
 
 The interactive prompt is `[y/N/e]`. `e` first asks, for each `conflict` entry, whether
-to clean or keep it; the user must choose one. It then opens a checklist with every
+to clean or skip it; the user must choose one. It then opens a checklist with every
 entry checked; after the user edits it, rosie re-shows the trimmed plan and re-prompts.
 
 - A conflict pick has no default; cancelling any pick cancels the whole edit.
@@ -252,7 +256,7 @@ with sudo themselves. An `.sh` plan is export-only, for power users; rosie canno
 #!/bin/bash
 # rosie plan, exported as a shell script. rosie cannot run this file.
 # Inspect every line, then run it yourself: sudo bash path/to/this-file.sh
-# keep and outside-roots entries are commented out.
+# skip entries are commented out.
 
 main() {
 :
@@ -260,7 +264,7 @@ main() {
 # 1.2 GB · rosie/node-modules
 /bin/rm -rfx -- /Users/me/src/app/node_modules
 
-# keep: 84.0 MB · rosie/python-venv
+# 84.0 MB · rosie/python-venv; skip: aggressive
 # /bin/rm -rfx -- /Users/me/src/old/.venv
 
 # size unknown · user/homebrew

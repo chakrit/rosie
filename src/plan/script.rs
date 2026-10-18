@@ -9,7 +9,7 @@
 //!   whole script before running any of it, so a script piped to bash and cut short runs
 //!   nothing, and a command that reads its input cannot consume the rest of the script
 //!   and make bash resume inside a commented-out line.
-//! - `keep` and `outside-roots` entries are commented out; report-only entries are
+//! - `skip` entries are commented out; report-only entries are
 //!   comments.
 //! - A plan with an unresolved rule conflict is refused: only a TOML plan can be
 //!   resolved (`docs/spec/plan.md#rule-conflicts`).
@@ -17,7 +17,7 @@
 use std::path::Path;
 
 use super::conflict::conflict_hint;
-use super::{Error, Plan, Status, comment, outside_roots_hint};
+use super::{Error, Plan, Selection, SkipReason, Status, comment, skip_note};
 use crate::fs::{Argv, SystemTool};
 use crate::shell;
 
@@ -26,7 +26,7 @@ const HEADER: &str = "\
 #!/bin/bash
 # rosie plan, exported as a shell script. rosie cannot run this file.
 # Inspect every line, then run it yourself: sudo bash path/to/this-file.sh
-# keep and outside-roots entries are commented out.
+# skip entries are commented out.
 
 main() {
 :
@@ -86,12 +86,12 @@ impl Plan {
         }
         for tool in &self.tools {
             let note = format!("size unknown · {}", shell::comment_text(&tool.rule));
-            let line = Line::pathless(tool.selection.into(), note);
+            let line = Line::pathless(tool.selection, note);
             script.push_str(&line.render(&command_line(&tool.command.argv())));
         }
         for receipt in &self.receipts {
             let note = "size unknown · forget receipt".to_owned();
-            let line = Line::pathless(receipt.selection.into(), note);
+            let line = Line::pathless(receipt.selection, note);
             let argv = receipt.argv_for(programs.pkgutil);
             script.push_str(&line.render(&command_line(&argv)));
         }
@@ -117,30 +117,36 @@ struct Line {
 }
 
 impl Line {
-    /// An entry with a path, whose `outside-roots` note carries the `rosie roots add`
-    /// hint.
+    /// An entry with a path, whose note says why it is skipped, with the `rosie roots
+    /// add` hint outside the roots.
     fn of(status: Status, path: &Path, note: String) -> Self {
         let note = match &status {
-            Status::OutsideRoots => format!("{note}; {}", outside_roots_hint(path)),
+            Status::Clean => note,
+            Status::Skip(reason) => format!("{note}; {}", skip_note(*reason, path)),
             Status::Conflict(disagreement) => format!("{note}; {}", conflict_hint(disagreement)),
-            Status::Clean | Status::Keep => note,
         };
         Line { status, note }
     }
 
-    /// A command entry, which the roots gate does not cover.
-    fn pathless(status: Status, note: String) -> Self {
-        Line { status, note }
+    /// A command entry, which the roots gate does not cover; a scan skips one only as
+    /// aggressive.
+    fn pathless(selection: Selection, note: String) -> Self {
+        match selection {
+            Selection::Clean => Line {
+                status: Status::Clean,
+                note,
+            },
+            Selection::Skip => Line {
+                status: Status::Skip(SkipReason::Aggressive),
+                note: format!("{note}; skip: aggressive"),
+            },
+        }
     }
 
     fn render(&self, command: &str) -> String {
         match &self.status {
             Status::Clean => format!("\n{}{command}\n", comment(&self.note)),
-            Status::Keep => format!(
-                "\n{}# {command}\n",
-                comment(&format!("keep: {}", self.note))
-            ),
-            Status::OutsideRoots | Status::Conflict(_) => {
+            Status::Skip(_) | Status::Conflict(_) => {
                 format!("\n{}# {command}\n", comment(&self.note))
             }
         }
@@ -210,7 +216,7 @@ mod tests {
     }
 
     fn plan() -> Plan {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         let paths = [
             found(HOSTILE, Reach::InRoots, Tier::Normal),
             found(&format!("/x{HOSTILE}"), Reach::OutsideRoots, Tier::Normal),
@@ -265,7 +271,7 @@ mod tests {
     /// A folder of stub programs, one per program the export of [`plan`] runs. Each
     /// appends its name to the file `$LOG`. The `docker` stub also reads its input a line
     /// at a time, logging each line as `read <line>`, and stops two bytes into the line
-    /// after `# keep:`, just past the `# ` that comments out the next command.
+    /// ending `; skip: aggressive`, just past the `# ` that comments out the next command.
     ///
     /// Tests running at the same time share one folder: macOS pays a first-execution cost
     /// per fresh binary, so writing this folder anew in every test dominated their
@@ -288,7 +294,7 @@ mod tests {
         let logs_name = "#!/bin/bash\nprintf '%s\\n' \"${0##*/}\" >>\"$LOG\"\n";
         let reads_input = "while IFS= read -r line; do\n\
                            \x20 printf 'read %s\\n' \"$line\" >>\"$LOG\"\n\
-                           \x20 case $line in '# keep:'*) read -r -n 2 _; exit ;; esac\n\
+                           \x20 case $line in *'; skip: aggressive') read -r -n 2 _; exit ;; esac\n\
                            done\n";
         for program in ["launchctl", "rm", "docker", "tool", "pkgutil"] {
             let body = match program {
@@ -395,7 +401,7 @@ mod tests {
     }
 
     #[test]
-    fn keep_and_outside_roots_entries_are_commented_out() {
+    fn skip_entries_are_commented_out() {
         let script = plan().to_sh().expect("no conflicts");
 
         assert!(
@@ -467,7 +473,7 @@ mod tests {
 
     #[test]
     fn a_plist_inside_a_clean_folder_is_booted_out_before_the_folder_goes() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Keep);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         builder
             .add_launch_job(
                 found("/w/app/com.x.plist", Reach::InRoots, Tier::Aggressive),

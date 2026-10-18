@@ -7,7 +7,6 @@
 
 mod args;
 mod check;
-mod columns;
 mod console;
 mod entry_text;
 mod error;

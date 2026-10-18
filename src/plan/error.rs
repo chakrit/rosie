@@ -98,14 +98,14 @@ pub enum EntryProblem {
     #[error(
         "status {text:?} is a rule conflict; resolve it to {} or {}",
         StatusKind::Clean.label(),
-        StatusKind::Keep.label()
+        StatusKind::Skip.label()
     )]
     ConflictStatus { text: String },
 
     #[error(
         "status {text:?} is not one of {}, {}",
         StatusKind::Clean.label(),
-        StatusKind::Keep.label()
+        StatusKind::Skip.label()
     )]
     UnknownSelection { text: String },
 

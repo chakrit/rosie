@@ -7,7 +7,7 @@
 //! - `caches` takes the fixed rule paths and the tool rules.
 //!
 //! Every target is sized as soon as it is found, while the walk goes on, and is marked
-//! `outside-roots` when outside the roots and `sudo` when not owned by the user. Every
+//! `skip` when outside the roots and `sudo` when not owned by the user. Every
 //! target passes the context's delete checks: one a running process runs a program
 //! from is refused and listed apart from the plan.
 

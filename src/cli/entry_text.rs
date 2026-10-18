@@ -25,8 +25,13 @@ pub fn sudo_note(run_as: RunAs) -> Option<String> {
 pub fn status_hints(kind: StatusKind, shown_path: &Path) -> Vec<Hint> {
     match kind {
         StatusKind::Clean => Vec::new(),
-        StatusKind::Keep => vec![Hint::flag("to clean it", Flag::Aggressive)],
+        StatusKind::Keep => vec![keep_hint()],
         StatusKind::OutsideRoots => Hint::allow_in_roots(shown_path),
         StatusKind::Conflict => vec![Hint::by_hand("choose clean or keep in the plan")],
     }
+}
+
+/// What makes a `keep` item clean.
+pub fn keep_hint() -> Hint {
+    Hint::flag("to clean it", Flag::Aggressive)
 }

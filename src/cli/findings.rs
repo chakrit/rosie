@@ -3,6 +3,7 @@
 //! (`docs/spec/plan.md`).
 
 use std::fmt;
+use std::path::Path;
 
 use super::args::Mode;
 use crate::hint::{Hint, hint_lines};
@@ -38,13 +39,19 @@ pub(super) fn stats_lines(stats: impl fmt::Display, skips: WalkSkips) -> String 
     }
 }
 
+/// What would let the walk in: the roots hints for a link out of the roots, naming it as
+/// `shown_path`, or the flag `mode` accepts.
+pub(super) fn walk_skip_hints(skipped: &Skipped, shown_path: &Path, mode: &Mode) -> Vec<Hint> {
+    match skipped.reason {
+        WalkSkip::LinkOutsideRoots => Hint::allow_in_roots(shown_path),
+        skip => mode.walk_skip_hint(skip).into_iter().collect(),
+    }
+}
+
 fn walk_skip_line(skipped: &Skipped, mode: &Mode) -> String {
     let path = skipped.path.display();
     let reason = skipped.reason.reason();
-    let hints = match skipped.reason {
-        WalkSkip::LinkOutsideRoots => Hint::allow_in_roots(&skipped.path),
-        skip => mode.walk_skip_hint(skip).into_iter().collect(),
-    };
+    let hints = walk_skip_hints(skipped, &skipped.path, mode);
     match hints.as_slice() {
         [] => format!("skipped {path}: {reason}"),
         [hint] => format!("skipped {path}: {reason} ({})", hint.compact()),

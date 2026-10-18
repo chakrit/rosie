@@ -1,92 +1,298 @@
-//! The plan listing: a plan for reading, its deletes grouped under their folders, then
-//! its commands, then the steps to take by hand (`docs/spec/plan.md#plan-listing`).
+//! The plan listing: a plan for reading (`docs/spec/plan.md#plan-listing`). What the
+//! scan found sits under the folder holding it, a blank line between folders; each item
+//! is a row of space saved, rule, and name, with a further rule on each line below it,
+//! then a note on why it is not cleaned. The commands follow, then the steps by hand.
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::entry_text::{sides, status_hints, sudo_note};
+use super::args::Mode;
+use super::console::Width;
+use super::entry_text::{keep_hint, status_hints, sudo_note};
+use super::findings::walk_skip_hints;
 use super::shown::Shown;
 use crate::hint::{Hint, hint_lines};
-use crate::output::{Bullet, Palette};
+use crate::output::{Palette, Tone};
 use crate::plan::{Delete, Plan, Receipt, Report, Selection, Size, Status, StatusKind, Tool};
+use crate::scan::{Refused, Skipped};
+
+/// What the scan left out of the plan, which the listing shows beside it.
+pub struct LeftOut<'s> {
+    pub skipped: &'s [Skipped],
+    pub refused: &'s [Refused],
+    /// Decides which flags a skip may point to.
+    pub mode: &'s Mode,
+}
 
 /// Sizes from here up are shown strong.
 const LARGE: Size = Size::bytes(1_000_000_000);
 
-/// Rows start under their heading; the lines about a row start under its name.
-const ROW: &str = "  ";
-const BELOW_ROW: &str = "      ";
+/// Rows start here, under their heading.
+const INDENT: &str = "  ";
 
-/// The listing's lines: each folder holding deletes and its rows, then the commands, then
-/// the steps by hand.
-pub fn plan_listing(plan: &Plan, shown: &Shown, palette: Palette) -> Vec<String> {
-    let deletes = by_folder(plan.deletes())
-        .into_iter()
-        .flat_map(|(folder, deletes)| folder_lines(folder, &deletes, shown, palette));
-    let commands = command_lines(plan.tools(), plan.receipts(), palette);
-    let by_hand = by_hand_lines(plan.reports(), palette);
+/// A name trimmed to fit keeps at least this many characters.
+const MIN_NAME: usize = 12;
 
-    deletes.chain(commands).chain(by_hand).collect()
-}
-
-// deletes
-
-/// The deletes under each folder that holds them, folders and names in path order.
-fn by_folder(deletes: &[Delete]) -> BTreeMap<&Path, Vec<&Delete>> {
-    let mut folders: BTreeMap<&Path, Vec<&Delete>> = BTreeMap::new();
-    for delete in deletes {
-        let folder = delete.path.parent().unwrap_or(&delete.path);
-        folders.entry(folder).or_default().push(delete);
-    }
-    for deletes in folders.values_mut() {
-        deletes.sort_by(|a, b| a.path.file_name().cmp(&b.path.file_name()));
-    }
-    folders
-}
-
-/// The folder as a heading, then a row per delete: bullet, name, and size in columns,
-/// then its rules and notes, with the hints that would make it clean below it.
-fn folder_lines(
-    folder: &Path,
-    deletes: &[&Delete],
+/// The listing's lines, each fitting `width` when it is bounded.
+pub fn plan_listing(
+    plan: &Plan,
+    left_out: &LeftOut,
     shown: &Shown,
     palette: Palette,
+    width: Width,
 ) -> Vec<String> {
-    let names: Vec<String> = deletes.iter().map(|delete| name(&delete.path)).collect();
-    let sizes: Vec<String> = deletes
+    let sections = sections(plan, left_out, shown);
+    let columns = Columns::of(&sections);
+
+    let blocks: Vec<Vec<String>> = sections
         .iter()
-        .map(|delete| delete.size.to_string())
+        .map(|section| section.lines(&columns, palette, width))
         .collect();
-    let name_width = widest(&names);
-    let size_width = widest(&sizes);
+    blocks.join(&String::new())
+}
 
-    let rows = deletes
+// the model
+
+/// A heading and the items under it.
+struct Section {
+    heading: Heading,
+    items: Vec<Item>,
+}
+
+enum Heading {
+    /// A folder's shown path; its items' names are paths, trimmed to fit.
+    Folder(String),
+    Commands,
+    ByHand,
+}
+
+/// One item before it is laid out.
+struct Item {
+    size: SizeCell,
+    /// Whether running the plan frees the size; a size not freed is shown quiet.
+    saved: bool,
+    rules: Vec<String>,
+    /// The last column.
+    name: String,
+    note: Option<Note>,
+    /// Lines below the note: a report's steps.
+    steps: Vec<String>,
+}
+
+enum SizeCell {
+    Known(Size),
+    /// A tool command or package forget: rosie cannot know it.
+    Unknown,
+    Blank,
+}
+
+impl SizeCell {
+    fn text(&self) -> String {
+        match self {
+            SizeCell::Known(size) => size.to_string(),
+            SizeCell::Unknown => "?".to_owned(),
+            SizeCell::Blank => String::new(),
+        }
+    }
+}
+
+/// Why an item is not cleaned, or what cleaning it takes: status words in their tone,
+/// then details, then the hints that would change it.
+struct Note {
+    status: Option<(Tone, String)>,
+    details: Vec<String>,
+    hints: Vec<Hint>,
+}
+
+impl Note {
+    fn is_empty(&self) -> bool {
+        self.status.is_none() && self.details.is_empty() && self.hints.is_empty()
+    }
+}
+
+// building the model
+
+/// Folders in path order, items by name within each, then the commands, then the steps
+/// by hand.
+fn sections(plan: &Plan, left_out: &LeftOut, shown: &Shown) -> Vec<Section> {
+    let deletes = plan
+        .deletes()
         .iter()
-        .zip(names.iter().zip(&sizes))
-        .flat_map(|(delete, (name, size))| {
-            let size = format!("{size:>size_width$}");
-            let size = match delete.size >= LARGE {
-                true => palette.strong(&size),
-                false => size,
-            };
-            let row = format!(
-                "{ROW}{} {name:<name_width$}  {size}  {}",
-                palette.bullet(bullet(delete.status.kind())),
-                palette.quiet(&notes(delete)),
-            );
-            let hints = status_hints(
-                delete.status.kind(),
-                &PathBuf::from(shown.path(&delete.path)),
-            );
-            let below = hint_text(&hints, palette)
-                .into_iter()
-                .map(|line| format!("{BELOW_ROW}{line}"));
-            std::iter::once(row).chain(below)
-        });
+        .map(|delete| (delete.path.as_path(), delete_item(delete, shown)));
+    let refused = left_out
+        .refused
+        .iter()
+        .map(|refused| (refused.path.as_path(), refused_item(refused)));
+    let skipped = left_out.skipped.iter().map(|skipped| {
+        (
+            skipped.path.as_path(),
+            skipped_item(skipped, shown, left_out.mode),
+        )
+    });
 
-    std::iter::once(palette.strong(&shown.path(folder)))
-        .chain(rows)
+    let mut folders: BTreeMap<PathBuf, Vec<Item>> = BTreeMap::new();
+    for (path, item) in deletes.chain(refused).chain(skipped) {
+        let folder = path.parent().unwrap_or(path);
+        folders.entry(folder.to_path_buf()).or_default().push(item);
+    }
+    let folders = folders.into_iter().map(|(folder, mut items)| {
+        items.sort_by(|a, b| a.name.cmp(&b.name));
+        Section {
+            heading: Heading::Folder(shown.path(&folder)),
+            items,
+        }
+    });
+
+    let tools = plan.tools().iter().map(tool_item);
+    let forgets = plan.receipts().iter().map(forget_item);
+    let commands = Section {
+        heading: Heading::Commands,
+        items: tools.chain(forgets).collect(),
+    };
+    let by_hand = Section {
+        heading: Heading::ByHand,
+        items: plan.reports().iter().map(report_item).collect(),
+    };
+
+    folders
+        .chain([commands, by_hand])
+        .filter(|section| !section.items.is_empty())
         .collect()
+}
+
+fn delete_item(delete: &Delete, shown: &Shown) -> Item {
+    let kind = delete.status.kind();
+    let rules = match &delete.status {
+        Status::Conflict(disagreement) => {
+            let normal = disagreement
+                .normal()
+                .iter()
+                .map(|rule| format!("{rule} (normal)"));
+            let aggressive = disagreement
+                .aggressive()
+                .iter()
+                .map(|rule| format!("{rule} (aggressive)"));
+            normal.chain(aggressive).collect()
+        }
+        Status::Clean | Status::Keep | Status::OutsideRoots => delete.rules.clone(),
+    };
+    let status = match kind {
+        StatusKind::Clean => None,
+        StatusKind::Keep => Some((Tone::Calm, "keep (aggressive)".to_owned())),
+        StatusKind::Conflict => Some((Tone::Caution, "conflict".to_owned())),
+        StatusKind::OutsideRoots => Some((Tone::Alarm, "outside the roots".to_owned())),
+    };
+    let unloads = delete
+        .bootouts
+        .iter()
+        .map(|bootout| format!("unloads {} job", bootout.domain));
+    let note = Note {
+        status,
+        details: sudo_note(delete.run_as)
+            .into_iter()
+            .chain(unloads)
+            .collect(),
+        hints: status_hints(kind, &PathBuf::from(shown.path(&delete.path))),
+    };
+
+    Item {
+        size: SizeCell::Known(delete.size),
+        saved: kind == StatusKind::Clean,
+        rules,
+        name: name(&delete.path),
+        note: Some(note),
+        steps: Vec::new(),
+    }
+}
+
+fn refused_item(refused: &Refused) -> Item {
+    let program = refused
+        .program
+        .file_name()
+        .unwrap_or(refused.program.as_os_str());
+    let status = format!(
+        "in use: {} (pid {})",
+        program.to_string_lossy(),
+        refused.pid
+    );
+    Item {
+        size: SizeCell::Known(refused.size),
+        saved: false,
+        rules: refused.rules.clone(),
+        name: name(&refused.path),
+        note: Some(Note {
+            status: Some((Tone::Caution, status)),
+            details: Vec::new(),
+            hints: Vec::new(),
+        }),
+        steps: Vec::new(),
+    }
+}
+
+fn skipped_item(skipped: &Skipped, shown: &Shown, mode: &Mode) -> Item {
+    let status = format!("skipped: {}", skipped.reason.reason());
+    let hints = walk_skip_hints(skipped, Path::new(&shown.path(&skipped.path)), mode);
+    Item {
+        size: SizeCell::Blank,
+        saved: false,
+        rules: Vec::new(),
+        name: name(&skipped.path),
+        note: Some(Note {
+            status: Some((Tone::Calm, status)),
+            details: Vec::new(),
+            hints,
+        }),
+        steps: Vec::new(),
+    }
+}
+
+fn tool_item(tool: &Tool) -> Item {
+    Item {
+        size: SizeCell::Unknown,
+        saved: tool.selection == Selection::Clean,
+        rules: vec![tool.rule.clone()],
+        name: format!("$ {}", tool.command.cmd()),
+        note: Some(selection_note(tool.selection)),
+        steps: Vec::new(),
+    }
+}
+
+fn forget_item(receipt: &Receipt) -> Item {
+    Item {
+        size: SizeCell::Unknown,
+        saved: receipt.selection == Selection::Clean,
+        rules: Vec::new(),
+        name: format!("forget package {}", receipt.package.as_str()),
+        note: Some(selection_note(receipt.selection)),
+        steps: Vec::new(),
+    }
+}
+
+/// A tool command or package forget is `clean` or `keep`, never anything else.
+fn selection_note(selection: Selection) -> Note {
+    let (status, hints) = match selection {
+        Selection::Clean => (None, Vec::new()),
+        Selection::Keep => (
+            Some((Tone::Calm, "keep (aggressive)".to_owned())),
+            vec![keep_hint()],
+        ),
+    };
+    Note {
+        status,
+        details: Vec::new(),
+        hints,
+    }
+}
+
+fn report_item(report: &Report) -> Item {
+    Item {
+        size: SizeCell::Blank,
+        saved: false,
+        rules: Vec::new(),
+        name: report.subject().to_owned(),
+        note: None,
+        steps: report.steps().to_vec(),
+    }
 }
 
 /// The last part of `path`; the whole path when it has none.
@@ -97,110 +303,147 @@ fn name(path: &Path) -> String {
     }
 }
 
-/// The rules, what keeps the entry from being clean, `needs sudo`, then the jobs it
-/// unloads.
-fn notes(delete: &Delete) -> String {
-    let rules = delete.rules.join(", ");
-    let what = match &delete.status {
-        Status::Clean => rules,
-        Status::Keep => format!("{rules} (aggressive)"),
-        Status::OutsideRoots => format!("{rules}; outside the roots"),
-        Status::Conflict(disagreement) => sides(disagreement),
-    };
-    let unloads = delete
-        .bootouts
-        .iter()
-        .map(|bootout| format!("unloads {} job", bootout.domain));
-    let notes: Vec<String> = std::iter::once(what)
-        .chain(sudo_note(delete.run_as))
-        .chain(unloads)
-        .collect();
-    notes.join("; ")
+// laying it out
+
+/// The size and rule columns' widths, the same for every section.
+struct Columns {
+    size: usize,
+    rule: usize,
 }
 
-/// One hint on one quiet line; several in the stderr hint form.
-fn hint_text(hints: &[Hint], palette: Palette) -> Vec<String> {
-    match hints {
-        [hint] => vec![palette.quiet(&hint.compact())],
-        several => hint_lines(palette, several),
-    }
-}
-
-fn bullet(kind: StatusKind) -> Bullet {
-    match kind {
-        StatusKind::Clean => Bullet::Clean,
-        StatusKind::Keep => Bullet::Keep,
-        StatusKind::Conflict => Bullet::Conflict,
-        StatusKind::OutsideRoots => Bullet::OutsideRoots,
-    }
-}
-
-// commands and steps by hand
-
-/// `commands`, then a row per tool command and package forget: bullet, what runs, and
-/// the tool's rule. No size: rosie cannot know one.
-fn command_lines(tools: &[Tool], receipts: &[Receipt], palette: Palette) -> Vec<String> {
-    let tools = tools.iter().map(|tool| {
-        (
-            tool.selection,
-            format!("$ {}", tool.command.cmd()),
-            tool.rule.as_str(),
-        )
-    });
-    let forgets = receipts.iter().map(|receipt| {
-        let forget = format!("forget package {}", receipt.package.as_str());
-        (receipt.selection, forget, "")
-    });
-    let rows: Vec<(Selection, String, &str)> = tools.chain(forgets).collect();
-    if rows.is_empty() {
-        return Vec::new();
-    }
-
-    let texts: Vec<String> = rows.iter().map(|(_, text, _)| text.clone()).collect();
-    let width = widest(&texts);
-    let lines = rows.iter().map(|(selection, text, rule)| {
-        let bullet = palette.bullet(bullet(Status::from(*selection).kind()));
-        match rule.is_empty() {
-            true => format!("{ROW}{bullet} {text}"),
-            false => format!("{ROW}{bullet} {text:<width$}  {}", palette.quiet(rule)),
+impl Columns {
+    fn of(sections: &[Section]) -> Columns {
+        let items = || sections.iter().flat_map(|section| &section.items);
+        let size = items().map(|item| width_of(&item.size.text())).max();
+        let rule = items()
+            .flat_map(|item| &item.rules)
+            .map(|rule| width_of(rule))
+            .max();
+        Columns {
+            size: size.unwrap_or(0),
+            rule: rule.unwrap_or(0),
         }
-    });
-
-    std::iter::once(palette.strong("commands"))
-        .chain(lines)
-        .collect()
-}
-
-/// `by hand`, then each report's subject with its steps below it.
-fn by_hand_lines(reports: &[Report], palette: Palette) -> Vec<String> {
-    if reports.is_empty() {
-        return Vec::new();
     }
 
-    let lines = reports.iter().flat_map(|report| {
-        let subject = format!(
-            "{ROW}{} {}",
-            palette.bullet(Bullet::ByHand),
-            report.subject()
-        );
-        let steps = report
-            .steps()
-            .iter()
-            .map(|step| format!("{BELOW_ROW}{step}"));
-        std::iter::once(subject).chain(steps)
-    });
+    /// Where notes and further rules start: the rule column.
+    fn under_rule(&self) -> String {
+        format!("{INDENT}{}  ", " ".repeat(self.size))
+    }
 
-    std::iter::once(palette.strong("by hand"))
-        .chain(lines)
+    /// How much of `width` the name column may take.
+    fn name_room(&self, width: Width) -> Option<usize> {
+        let before_name = INDENT.len() + self.size + 2 + self.rule + 2;
+        match width {
+            Width::Unbounded => None,
+            Width::Columns(columns) => Some(columns.saturating_sub(before_name).max(MIN_NAME)),
+        }
+    }
+}
+
+impl Section {
+    fn lines(&self, columns: &Columns, palette: Palette, width: Width) -> Vec<String> {
+        let (heading, name_room) = match &self.heading {
+            Heading::Folder(path) => {
+                let room = match width {
+                    Width::Unbounded => None,
+                    Width::Columns(columns) => Some(columns.max(MIN_NAME)),
+                };
+                (palette.folder(&fit(path, room)), columns.name_room(width))
+            }
+            Heading::Commands => ("commands".to_owned(), None),
+            Heading::ByHand => ("by hand".to_owned(), None),
+        };
+
+        let items = self
+            .items
+            .iter()
+            .flat_map(|item| item.lines(columns, name_room, palette));
+        std::iter::once(heading).chain(items).collect()
+    }
+}
+
+impl Item {
+    /// The row, a line per further rule, the note, then the steps.
+    fn lines(&self, columns: &Columns, name_room: Option<usize>, palette: Palette) -> Vec<String> {
+        let under_rule = columns.under_rule();
+
+        let size = format!("{:>width$}", self.size.text(), width = columns.size);
+        let size = match (&self.size, self.saved) {
+            (SizeCell::Known(bytes), true) if *bytes >= LARGE => palette.strong(&size),
+            (_, true) => size,
+            (_, false) => palette.quiet(&size),
+        };
+        let first_rule = self.rules.first().map(String::as_str).unwrap_or_default();
+        let rule = format!("{first_rule:<width$}", width = columns.rule);
+        let row = format!(
+            "{INDENT}{size}  {}  {}",
+            palette.quiet(&rule),
+            fit(&self.name, name_room)
+        );
+
+        let further_rules = self
+            .rules
+            .iter()
+            .skip(1)
+            .map(|rule| format!("{under_rule}{}", palette.quiet(rule)));
+        let note = self
+            .note
+            .iter()
+            .filter(|note| !note.is_empty())
+            .flat_map(|note| note_lines(note, palette))
+            .map(|line| format!("{under_rule}{line}"));
+        let steps = self
+            .steps
+            .iter()
+            .map(|step| format!("{under_rule}{}", palette.quiet(step)));
+
+        std::iter::once(row)
+            .chain(further_rules)
+            .chain(note)
+            .chain(steps)
+            .collect()
+    }
+}
+
+/// The status words, the details, and one hint on one line; several hints on the lines
+/// below in the stderr hint form.
+fn note_lines(note: &Note, palette: Palette) -> Vec<String> {
+    let one_hint = match note.hints.as_slice() {
+        [hint] => Some(hint.compact()),
+        _ => None,
+    };
+    let quiet: Vec<String> = note.details.iter().cloned().chain(one_hint).collect();
+    let status = note
+        .status
+        .as_ref()
+        .map(|(tone, words)| palette.tone(*tone, words));
+    let quiet = (!quiet.is_empty()).then(|| palette.quiet(&quiet.join("; ")));
+    let first: Vec<String> = status.into_iter().chain(quiet).collect();
+
+    let several = match note.hints.as_slice() {
+        [] | [_] => Vec::new(),
+        several => hint_lines(palette, several),
+    };
+    std::iter::once(first.join(&palette.quiet("; ")))
+        .filter(|line| !line.is_empty())
+        .chain(several)
         .collect()
 }
 
-fn widest(cells: &[String]) -> usize {
-    cells
-        .iter()
-        .map(|cell| cell.chars().count())
-        .max()
-        .unwrap_or(0)
+/// `text`, or its end after `…` when it is longer than `room`.
+fn fit(text: &str, room: Option<usize>) -> String {
+    let length = width_of(text);
+    match room {
+        Some(room) if length > room => {
+            let kept: String = text.chars().skip(length - (room - 1)).collect();
+            format!("…{kept}")
+        }
+        Some(_) | None => text.to_owned(),
+    }
+}
+
+fn width_of(text: &str) -> usize {
+    text.chars().count()
 }
 
 #[cfg(test)]
@@ -209,21 +452,33 @@ mod tests {
 
     use super::*;
     use crate::output::ColorChoice;
-    use crate::plan::{AggressiveItems, ItemKind, PathMatch, PlanBuilder, Reach, RunAs, Size};
+    use crate::plan::{AggressiveItems, ItemKind, PathMatch, PlanBuilder, Reach, RunAs};
+    use crate::scan::{Needs, WalkSkip};
     use crate::tier::Tier;
 
     const HOME: &str = "/Users/me";
 
-    fn listing(plan_toml: &str, palette: Palette) -> String {
-        let plan = Plan::parse(&format!("version = 1\n{plan_toml}")).expect("valid plan");
-        let shown = Shown {
+    fn shown() -> Shown<'static> {
+        Shown {
             home: Path::new(HOME),
-        };
-        plan_listing(&plan, &shown, palette).join("\n")
+        }
     }
 
-    fn plain(plan_toml: &str) -> String {
-        listing(plan_toml, Palette::plain())
+    fn parsed(plan_toml: &str) -> Plan {
+        Plan::parse(&format!("version = 1\n{plan_toml}")).expect("valid plan")
+    }
+
+    fn listing(plan: &Plan, palette: Palette, width: Width) -> String {
+        let left_out = LeftOut {
+            skipped: &[],
+            refused: &[],
+            mode: &Mode::default(),
+        };
+        plan_listing(plan, &left_out, &shown(), palette, width).join("\n")
+    }
+
+    fn plain(plan: &Plan) -> String {
+        listing(plan, Palette::plain(), Width::Unbounded)
     }
 
     /// `text` without its terminal color sequences.
@@ -271,18 +526,47 @@ sudo = true
 "#;
 
     #[test]
-    fn deletes_sit_under_their_folders_by_name_with_bullet_size_and_rules() {
+    fn folders_hold_rows_of_size_rule_and_name_a_blank_line_apart() {
         assert_eq!(
-            plain(DELETES),
+            plain(&parsed(DELETES)),
             [
                 "~",
-                "  ● x  10 B  a/one, b/two; needs sudo",
+                "     10 B  a/one               x",
+                "           b/two",
+                "           needs sudo",
+                "",
                 "~/src/app",
-                "  ● node_modules  1.2 GB  rosie/node-modules",
-                "  ● target        5.0 MB  rosie/cargo-target",
+                "   1.2 GB  rosie/node-modules  node_modules",
+                "   5.0 MB  rosie/cargo-target  target",
+                "",
                 "~/src/app/sub",
-                "  ○ .venv  84.0 MB  rosie/python-venv (aggressive)",
-                "      to clean it: --aggressive",
+                "  84.0 MB  rosie/python-venv   .venv",
+                "           keep (aggressive); to clean it: --aggressive",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn a_name_too_long_for_the_screen_keeps_its_end() {
+        let plan = parsed(
+            r#"
+[[delete]]
+path = "/Users/me/src/clients/acme/monorepo/packages/web/apps/some-really-long-artifact-folder-name"
+type = "folder"
+size = 1234567890
+rules = ["x/y"]
+status = "clean"
+"#,
+        );
+
+        let listed = listing(&plan, Palette::plain(), Width::Columns(40));
+
+        assert_eq!(
+            listed,
+            [
+                "…clients/acme/monorepo/packages/web/apps",
+                "  1.2 GB  x/y  …ong-artifact-folder-name",
             ]
             .join("\n")
         );
@@ -290,7 +574,7 @@ sudo = true
 
     #[test]
     fn an_outside_roots_entry_says_so_and_lists_its_roots_hints_below() {
-        let listed = plain(
+        let plan = parsed(
             r#"
 [[delete]]
 path = "/Library/LaunchDaemons/com.x.plist"
@@ -307,21 +591,22 @@ domain = "system"
         );
 
         assert_eq!(
-            listed,
+            plain(&plan),
             [
                 "/Library/LaunchDaemons",
-                "  ✗ com.x.plist  4.1 KB  app/com.x; outside the roots; needs sudo; unloads system job",
-                "      to allow just it:",
-                "        rosie roots add /Library/LaunchDaemons/com.x.plist",
-                "      or to allow its folder:",
-                "        rosie roots add /Library/LaunchDaemons",
+                "  4.1 KB  app/com.x  com.x.plist",
+                "          outside the roots; needs sudo; unloads system job",
+                "          to allow just it:",
+                "            rosie roots add /Library/LaunchDaemons/com.x.plist",
+                "          or to allow its folder:",
+                "            rosie roots add /Library/LaunchDaemons",
             ]
             .join("\n")
         );
     }
 
     #[test]
-    fn a_conflict_shows_both_sides_and_how_to_settle_it() {
+    fn a_conflict_lists_each_rule_with_its_tier_and_how_to_settle_it() {
         let mut builder = PlanBuilder::new(AggressiveItems::Keep);
         let sides = [
             ("rosie/cargo-target", Tier::Normal),
@@ -339,27 +624,74 @@ domain = "system"
             };
             builder.add_path(found).expect("valid match");
         }
-        let plan = builder.build().plan;
-        let shown = Shown {
-            home: Path::new(HOME),
-        };
-
-        let listed = plan_listing(&plan, &shown, Palette::plain()).join("\n");
 
         assert_eq!(
-            listed,
+            plain(&builder.build().plan),
             [
                 "~/api",
-                "  ! target  3.0 GB  rosie/cargo-target (normal) vs alice/rust (aggressive)",
-                "      choose clean or keep in the plan",
+                "  3.0 GB  rosie/cargo-target (normal)  target",
+                "          alice/rust (aggressive)",
+                "          conflict; choose clean or keep in the plan",
             ]
             .join("\n")
         );
     }
 
     #[test]
-    fn commands_then_steps_by_hand_follow_the_deletes() {
-        let listed = plain(
+    fn skipped_and_in_use_items_sit_with_the_plan_under_their_folders() {
+        let plan = parsed(
+            r#"
+[[delete]]
+path = "/Users/me/src/a/node_modules"
+type = "folder"
+size = 2000
+rules = ["rosie/node-modules"]
+status = "clean"
+"#,
+        );
+        let skipped = [Skipped {
+            path: PathBuf::from("/Users/me/src/a/Foo.app"),
+            met_at: PathBuf::from("/Users/me/src/a/Foo.app"),
+            reason: WalkSkip::Closed(Needs::BUNDLES),
+        }];
+        let refused = [Refused {
+            path: PathBuf::from("/Users/me/src/a/target"),
+            rules: vec!["rosie/cargo-target".to_owned()],
+            pid: 4123,
+            program: PathBuf::from("/Users/me/src/a/target/debug/app"),
+            size: Size::bytes(3000),
+        }];
+        let left_out = LeftOut {
+            skipped: &skipped,
+            refused: &refused,
+            mode: &Mode::default(),
+        };
+
+        let lines = plan_listing(
+            &plan,
+            &left_out,
+            &shown(),
+            Palette::plain(),
+            Width::Unbounded,
+        );
+
+        assert_eq!(
+            lines.join("\n"),
+            [
+                "~/src/a",
+                "                              Foo.app",
+                "          skipped: bundle; to enter it: --enter-bundles",
+                "  2.0 KB  rosie/node-modules  node_modules",
+                "  3.0 KB  rosie/cargo-target  target",
+                "          in use: app (pid 4123)",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn commands_then_steps_by_hand_follow_the_folders() {
+        let plan = parsed(
             r#"
 [[delete]]
 path = "/Users/me/a"
@@ -388,17 +720,20 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
         );
 
         assert_eq!(
-            listed,
+            plain(&plan),
             [
                 "~",
-                "  ● a  2.0 KB  rosie/a",
+                "  2.0 KB  rosie/a        a",
+                "",
                 "commands",
-                "  ○ $ brew cleanup            user/homebrew",
-                "  ● forget package com.x.pkg",
+                "       ?  user/homebrew  $ brew cleanup",
+                "          keep (aggressive); to clean it: --aggressive",
+                "       ?                 forget package com.x.pkg",
+                "",
                 "by hand",
-                "  · login item X",
-                "      Open System Settings > General > Login Items",
-                "      Remove X",
+                "                         login item X",
+                "          Open System Settings > General > Login Items",
+                "          Remove X",
             ]
             .join("\n")
         );
@@ -406,9 +741,15 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 
     #[test]
     fn color_leaves_the_same_text_in_the_same_columns() {
-        let colored = listing(DELETES, Palette::for_stream(true, ColorChoice::Auto));
+        let plan = parsed(DELETES);
+
+        let colored = listing(
+            &plan,
+            Palette::for_stream(true, ColorChoice::Auto),
+            Width::Unbounded,
+        );
 
         assert!(colored.contains('\u{1b}'), "{colored}");
-        assert_eq!(uncolored(&colored), plain(DELETES));
+        assert_eq!(uncolored(&colored), plain(&plan));
     }
 }

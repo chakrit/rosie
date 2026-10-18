@@ -38,7 +38,7 @@ use crate::run::elevated::{self, Invocation};
 use args::{Cli, Command, UserCommand};
 use session::Session;
 
-pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals};
+pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals, Width};
 pub use error::Error;
 
 /// Everything rosie takes from its environment, gathered by `main`.

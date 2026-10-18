@@ -141,44 +141,59 @@ The plan listing shows a plan for reading:
 ```text
 $ rosie scan tree ~
 /Library/LaunchDaemons
-  ✗ com.x.plist  4.1 KB  app/com.x; outside the roots; needs sudo; unloads system job
-      to allow just it:
-        rosie roots add /Library/LaunchDaemons/com.x.plist
-      or to allow its folder:
-        rosie roots add /Library/LaunchDaemons
-~/Library/Developer/Xcode
-  ● DerivedData  210.0 MB  rosie/xcode-derived-data; needs sudo
-~/src/api
-  ! target  3.0 GB  rosie/cargo-target (normal) vs alice/rust (aggressive)
-      choose clean or keep in the plan
-~/src/app
-  ● node_modules  1.2 GB  rosie/node-modules
-  ● target        5.0 MB  rosie/cargo-target
+    4.1 KB  app/com.x                    com.x.plist
+            outside the roots; needs sudo; unloads system job
+            to allow just it:
+              rosie roots add /Library/LaunchDaemons/com.x.plist
+            or to allow its folder:
+              rosie roots add /Library/LaunchDaemons
+
+~/src/clients/acme/api
+    3.0 GB  rosie/cargo-target (normal)  target
+            alice/rust (aggressive)
+            conflict; choose clean or keep in the plan
+
+~/src/clients/acme/web
+                                         Foo.app
+            skipped: bundle; to enter it: --enter-bundles
+    1.2 GB  rosie/node-modules           node_modules
+            alice/deps
+  310.0 MB  rosie/next-cache             .next
+
 ~/src/old
-  ○ .venv  84.0 MB  rosie/python-venv (aggressive)
-      to clean it: --aggressive
+   84.0 MB  rosie/python-venv            .venv
+            keep (aggressive); to clean it: --aggressive
+
 commands
-  ● $ docker system prune --force  rosie/docker
-  ● $ brew cleanup                 user/homebrew
-  ● forget package com.x.pkg
+         ?  rosie/docker                 $ docker system prune --force
+         ?                               forget package com.x.pkg
+
 by hand
-  · login item X
-      Open System Settings > General > Login Items
-      Remove X
+                                         login item X
+            Open System Settings > General > Login Items
+            Remove X
 ```
 
-- Deletes are grouped under their folder's full path; folders and names are in path
-  order. Paths are never shortened.
-- A delete row is its bullet, its name, its size, then its rules and notes. Name and size
-  are aligned within a folder.
-- Bullets: `●` clean, `○` keep, `!` conflict, `✗` outside-roots, `·` a step by hand.
-- Hints go below their row: one hint on one line, several in the stderr hint form.
+- What the scan found sits under the folder holding it, with a blank line between
+  folders; folders and names are in path order.
+- A row is the space saved, one rule, then the name. Each further rule that matches the
+  item is on its own line below.
+- Size and rule columns are aligned across the whole listing.
+- A folder or name too long for the terminal is trimmed from the front to `…` and its
+  end.
+- Below the rules, a note says why the item is not cleaned (`keep (aggressive)`,
+  `conflict`, `outside the roots`, `in use: <program> (pid N)`, `skipped: <reason>`),
+  then `needs sudo` and the jobs it unloads, then one hint on the same line or several
+  in the stderr hint form below.
+- A conflict lists each rule with its tier.
+- Skipped and in-use items appear in the listing, not on stderr; in TOML and `--sh`
+  output they stay stderr lines.
 - `commands` lists each tool as `$ <cmd>` and its rule, not its `shell` or `env`, then
-  each `forget package <id>`. No size.
+  each `forget package <id>`. Their size is `?`.
 - `by hand` lists each report's subject with its steps below it. *(agent-inferred)*
-- On a terminal ([cli.md](cli.md#output)): bullets green (clean), dim (keep, by hand),
-  yellow (conflict), red (outside-roots); folder and section headings bold; sizes of
-  1 GB and up bold; rules and notes dim; hint commands cyan.
+- On a terminal ([cli.md](cli.md#output)): folders blue; names plain; rules, notes'
+  details, and sizes not saved dim; sizes of 1 GB and up bold; status words dim (keep,
+  skipped), yellow (conflict, in use), or red (outside the roots); hint commands cyan.
 
 ## Stats
 

@@ -15,7 +15,7 @@ use tarball::{TOP, Tarball};
 
 /// How the plan listing starts for one node project at `~/src/app`
 /// (`docs/spec/plan.md#plan-listing`).
-const LISTED_APP: &str = "~/src/app\n  ● node_modules  ";
+const LISTED_APP: &str = "~/src/app\n  4.1 KB  rosie/node-modules  node_modules\n";
 
 // walk skips name the path and why
 
@@ -34,7 +34,8 @@ fn each_walk_skip_names_its_path_and_reason() {
         ErrorKind::PermissionDenied,
     );
 
-    let ran = sandbox.run(&["scan", "tree", "."]);
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml"]);
+    let listed = sandbox.run(&["scan", "tree", "."]);
 
     ran.assert_status(ExitStatus::Success);
     for line in [
@@ -57,6 +58,15 @@ fn each_walk_skip_names_its_path_and_reason() {
         "{}",
         ran.stderr
     );
+    // On a terminal the skips sit in the listing (`docs/spec/plan.md#plan-listing`).
+    assert!(
+        listed
+            .stdout
+            .contains("skipped: bundle; to enter it: --enter-bundles"),
+        "{}",
+        listed.stdout
+    );
+    assert!(!listed.stderr.contains("- skipped "), "{}", listed.stderr);
 }
 
 /// A folder closed several ways at once names every closure and every flag it needs.
@@ -67,7 +77,7 @@ fn a_skip_closed_several_ways_names_every_flag_it_needs() {
     sandbox.fake.mount(format!("{CWD}/Old.app"), 2);
     sandbox.fake.make_dataless(format!("{CWD}/Old.app"));
 
-    let ran = sandbox.run(&["scan", "tree", "."]);
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml"]);
 
     ran.assert_status(ExitStatus::Success);
     let line = format!(
@@ -95,7 +105,7 @@ fn a_matched_mount_root_names_no_flag_to_try() {
     sandbox.node_project(&format!("{CWD}/app"));
     sandbox.fake.mount(&node_modules, 2);
 
-    let ran = sandbox.run(&["scan", "tree", ".", "--enter-mounts"]);
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml", "--enter-mounts"]);
 
     ran.assert_status(ExitStatus::Success);
     let line = format!("- skipped {node_modules}: mount point, never entered or a target");
@@ -176,7 +186,7 @@ fn a_target_a_process_runs_from_is_skipped_naming_the_process() {
         .fake
         .respond_running(&[(77, &format!("{CWD}/app/node_modules/.bin/vite"))]);
 
-    let ran = sandbox.run(&["scan", "tree", "."]);
+    let ran = sandbox.run(&["scan", "tree", ".", "--toml"]);
 
     ran.assert_status(ExitStatus::Success);
     let line = format!(

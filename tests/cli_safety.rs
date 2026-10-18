@@ -123,7 +123,7 @@ fn clean_refuses_y_while_a_rule_conflict_remains() {
     assert!(
         ran.stdout
             .lines()
-            .any(|line| line.starts_with("  ! node_modules ")),
+            .any(|line| line.trim_start().starts_with("conflict; ")),
         "{}",
         ran.stdout
     );

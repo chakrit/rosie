@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rosie::apps::{launch_jobs_argv, system_jobs_argv};
-use rosie::cli::{App, Console, Env, ExitStatus, PromptError, Terminals};
+use rosie::cli::{App, Console, Env, ExitStatus, PromptError, Terminals, Width};
 use rosie::fs::fake::{Call, FakeBackend};
 use rosie::fs::{Argv, CommandOutput, Exit, Paths};
 use rosie::output::Palette;
@@ -342,6 +342,10 @@ impl Console for ScriptedConsole {
 
     fn stdout_palette(&self) -> Palette {
         Palette::plain()
+    }
+
+    fn stdout_width(&self) -> Width {
+        Width::Unbounded
     }
 
     fn stderr_palette(&self) -> Palette {

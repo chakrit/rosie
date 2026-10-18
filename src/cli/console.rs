@@ -29,6 +29,14 @@ impl Terminals {
     }
 }
 
+/// How many columns a stdout line may take before the terminal wraps it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Width {
+    /// Not a terminal, or one that does not say.
+    Unbounded,
+    Columns(usize),
+}
+
 /// Why a prompt returned no answer.
 #[derive(Debug)]
 pub enum PromptError {
@@ -52,6 +60,9 @@ pub trait Console {
 
     /// How the plan listing on stdout looks (`docs/spec/cli.md#output`).
     fn stdout_palette(&self) -> Palette;
+
+    /// Stdout's width now: a terminal can be resized between two listings.
+    fn stdout_width(&self) -> Width;
 
     /// How stderr lines, spinners, and prompts look (`docs/spec/cli.md#output`).
     fn stderr_palette(&self) -> Palette;
@@ -121,6 +132,17 @@ impl Console for SystemConsole {
 
     fn stdout_palette(&self) -> Palette {
         self.stdout_palette
+    }
+
+    fn stdout_width(&self) -> Width {
+        let size = match self.terminals.stdout {
+            true => console::Term::stdout().size_checked(),
+            false => None,
+        };
+        match size {
+            Some((_rows, columns)) => Width::Columns(usize::from(columns)),
+            None => Width::Unbounded,
+        }
     }
 
     fn stderr_palette(&self) -> Palette {

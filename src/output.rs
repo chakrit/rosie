@@ -1,6 +1,6 @@
 //! The look of what rosie prints (`docs/spec/cli.md#output`): every stderr line's marker
 //! in the first column, the column where `inquire` puts its `?` and `indicatif` its
-//! spinner; the plan listing's bullets on stdout; and one palette for all of them.
+//! spinner; the plan listing on stdout; and one palette for all of them.
 //!
 //! Color is decided once per stream, from whether it is a terminal and the user's
 //! `NO_COLOR`; nothing here asks `console` or the environment, so a [`Palette`] is the
@@ -41,34 +41,24 @@ impl Mark {
     }
 }
 
-/// What a plan listing row says becomes of its item (`docs/spec/plan.md#plan-listing`).
+/// How loudly a plan listing note says why its item is not cleaned
+/// (`docs/spec/plan.md#plan-listing`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Bullet {
-    Clean,
-    Keep,
-    Conflict,
-    OutsideRoots,
-    /// A step the user takes by hand.
-    ByHand,
+pub enum Tone {
+    /// Left alone as asked: keep, skipped.
+    Calm,
+    /// Waits on the user: a conflict, a running process.
+    Caution,
+    /// Refused by the safety gate: outside the roots.
+    Alarm,
 }
 
-impl Bullet {
-    pub fn glyph(self) -> &'static str {
-        match self {
-            Bullet::Clean => "●",
-            Bullet::Keep => "○",
-            Bullet::Conflict => "!",
-            Bullet::OutsideRoots => "✗",
-            Bullet::ByHand => "·",
-        }
-    }
-
+impl Tone {
     fn style(self) -> Style {
         match self {
-            Bullet::Clean => Style::new().green(),
-            Bullet::Keep | Bullet::ByHand => Style::new().dim(),
-            Bullet::Conflict => Style::new().yellow(),
-            Bullet::OutsideRoots => Style::new().red(),
+            Tone::Calm => Style::new().dim(),
+            Tone::Caution => Style::new().yellow(),
+            Tone::Alarm => Style::new().red(),
         }
     }
 }
@@ -132,17 +122,22 @@ impl Palette {
         format!("{mark} {text}")
     }
 
-    /// `bullet`'s glyph in its color.
-    pub fn bullet(self, bullet: Bullet) -> String {
-        self.paint(bullet.style(), bullet.glyph())
+    /// A folder heading, in the color `ls` gives folders.
+    pub fn folder(self, text: &str) -> String {
+        self.paint(Style::new().blue(), text)
     }
 
-    /// A heading, or a figure that should catch the eye.
+    /// A note's status words, as loud as `tone`.
+    pub fn tone(self, tone: Tone, text: &str) -> String {
+        self.paint(tone.style(), text)
+    }
+
+    /// A figure that should catch the eye.
     pub fn strong(self, text: &str) -> String {
         self.paint(Style::new().bold(), text)
     }
 
-    /// Detail the eye may skip: a listing row's rules and notes.
+    /// Detail the eye may skip: a listing's rules and notes.
     pub fn quiet(self, text: &str) -> String {
         self.paint(Style::new().dim(), text)
     }

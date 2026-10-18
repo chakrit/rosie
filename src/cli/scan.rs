@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 
 use super::args::{CleanArgs, Format, Mode, PlanSource, ScanArgs, ScanFlags};
 use super::console::{Console, Finish, PromptError};
-use super::findings::{findings_lines, stats_lines};
-use super::plan_list::plan_listing;
+use super::findings::{findings_lines, problem_line, stats_lines};
+use super::plan_list::{LeftOut, plan_listing};
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps;
@@ -81,12 +81,25 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let config = self.config()?;
         let scan = self.find(&config, &args.mode, &args.flags, "rosie scan app <X.app>")?;
 
+        let left_out = LeftOut {
+            skipped: &scan.skipped,
+            refused: &scan.refused,
+            mode: &args.mode,
+        };
         match format {
-            Format::List => self.show_plan(&scan.plan)?,
-            Format::Toml => self.say(scan.plan.to_toml()?.trim_end())?,
-            Format::Sh => self.say(scan.plan.to_sh()?.trim_end())?,
+            Format::List => {
+                self.show_plan(&scan.plan, &left_out)?;
+                self.show_problems(&scan)?;
+            }
+            Format::Toml => {
+                self.say(scan.plan.to_toml()?.trim_end())?;
+                self.show_findings(&scan, &args.mode)?;
+            }
+            Format::Sh => {
+                self.say(scan.plan.to_sh()?.trim_end())?;
+                self.show_findings(&scan, &args.mode)?;
+            }
         }
-        self.show_findings(&scan, &args.mode)?;
         self.show_stats(&scan.plan, scan.skip_counts())?;
         Ok(ExitStatus::failed_if(!scan.problems.is_empty()))
     }
@@ -107,9 +120,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             refused: &scan.refused,
         };
         let errored = !scan.problems.is_empty();
-        self.show_findings(&scan, &args.mode)?;
+        self.show_problems(&scan)?;
 
-        let plan = match self.confirm(scan.plan, skips.walk)? {
+        let left_out = LeftOut {
+            skipped: &scan.skipped,
+            refused: &scan.refused,
+            mode: &args.mode,
+        };
+        let plan = match self.confirm(scan.plan, &left_out, skips.walk)? {
             Confirmation::Run(plan) => plan,
             Confirmation::NothingClean | Confirmation::Declined => {
                 return Ok(ExitStatus::failed_if(errored));
@@ -189,9 +207,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     /// Shows the plan and asks until the user answers `y` or `N`, or nothing is `clean`
     /// and nothing awaits a choice. `y` is refused while a rule conflict remains.
-    fn confirm(&mut self, mut plan: Plan, skips: WalkSkips) -> Result<Confirmation, Error> {
+    fn confirm(
+        &mut self,
+        mut plan: Plan,
+        left_out: &LeftOut<'_>,
+        skips: WalkSkips,
+    ) -> Result<Confirmation, Error> {
         loop {
-            self.show_plan(&plan)?;
+            self.show_plan(&plan, left_out)?;
             self.show_stats(&plan, skips)?;
             let conflicts = plan.conflicts().len();
             if plan.clean_entries().is_empty() && conflicts == 0 {
@@ -299,10 +322,20 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         Ok(())
     }
 
+    /// The scan's problems alone, for when the listing shows its skips.
+    fn show_problems(&mut self, scan: &Scan) -> Result<(), Error> {
+        for problem in &scan.problems {
+            let line = problem_line(problem);
+            self.note(line.mark, &line.text)?;
+        }
+        Ok(())
+    }
+
     /// The plan listing on stdout (`docs/spec/plan.md#plan-listing`).
-    fn show_plan(&mut self, plan: &Plan) -> Result<(), Error> {
+    fn show_plan(&mut self, plan: &Plan, left_out: &LeftOut<'_>) -> Result<(), Error> {
         let palette = self.console.stdout_palette();
-        for line in plan_listing(plan, &self.tilde(), palette) {
+        let width = self.console.stdout_width();
+        for line in plan_listing(plan, left_out, &self.tilde(), palette, width) {
             self.say(&line)?;
         }
         Ok(())

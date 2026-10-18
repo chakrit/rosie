@@ -50,8 +50,11 @@ pub trait Console {
 
     fn terminals(&self) -> Terminals;
 
+    /// How the plan listing on stdout looks (`docs/spec/cli.md#output`).
+    fn stdout_palette(&self) -> Palette;
+
     /// How stderr lines, spinners, and prompts look (`docs/spec/cli.md#output`).
-    fn palette(&self) -> Palette;
+    fn stderr_palette(&self) -> Palette;
 
     fn stdout(&mut self) -> &mut Self::Out;
     fn stderr(&mut self) -> &mut Self::Err;
@@ -82,7 +85,8 @@ pub trait Console {
 /// The process's own standard streams, with `inquire` prompts.
 pub struct SystemConsole {
     terminals: Terminals,
-    palette: Palette,
+    stdout_palette: Palette,
+    stderr_palette: Palette,
     stdout: Stdout,
     stderr: Stderr,
 }
@@ -97,7 +101,8 @@ impl SystemConsole {
         };
         SystemConsole {
             terminals,
-            palette: Palette::for_stderr(terminals.stderr, colors),
+            stdout_palette: Palette::for_stream(terminals.stdout, colors),
+            stderr_palette: Palette::for_stream(terminals.stderr, colors),
             stdout: io::stdout(),
             stderr: io::stderr(),
         }
@@ -114,8 +119,12 @@ impl Console for SystemConsole {
         self.terminals
     }
 
-    fn palette(&self) -> Palette {
-        self.palette
+    fn stdout_palette(&self) -> Palette {
+        self.stdout_palette
+    }
+
+    fn stderr_palette(&self) -> Palette {
+        self.stderr_palette
     }
 
     fn stdout(&mut self) -> &mut Stdout {
@@ -138,14 +147,14 @@ impl Console for SystemConsole {
 
     fn ask(&mut self, prompt: &str) -> Result<String, PromptError> {
         Text::new(prompt)
-            .with_render_config(self.palette.prompts())
+            .with_render_config(self.stderr_palette.prompts())
             .prompt()
             .map_err(prompt_error)
     }
 
     fn pick(&mut self, prompt: &str, options: &[String]) -> Result<usize, PromptError> {
         Select::new(prompt, options.to_vec())
-            .with_render_config(self.palette.prompts())
+            .with_render_config(self.stderr_palette.prompts())
             .raw_prompt()
             .map(|chosen| chosen.index)
             .map_err(prompt_error)
@@ -157,20 +166,20 @@ impl Console for SystemConsole {
         items: Vec<T>,
     ) -> Result<Vec<T>, PromptError> {
         MultiSelect::new(prompt, items)
-            .with_render_config(self.palette.prompts())
+            .with_render_config(self.stderr_palette.prompts())
             .with_all_selected_by_default()
             .prompt()
             .map_err(prompt_error)
     }
 
     fn progress(&self) -> StderrProgress {
-        StderrProgress::new(self.palette)
+        StderrProgress::new(self.stderr_palette)
     }
 
     fn reporter(&self) -> StderrReporter {
         match self.terminals.stderr {
-            true => StderrReporter::Terminal(TerminalReporter::new(self.palette)),
-            false => StderrReporter::Plain(PlainReporter::new(io::stderr(), self.palette)),
+            true => StderrReporter::Terminal(TerminalReporter::new(self.stderr_palette)),
+            false => StderrReporter::Plain(PlainReporter::new(io::stderr(), self.stderr_palette)),
         }
     }
 }

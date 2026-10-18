@@ -1,12 +1,4 @@
-//! Lines in readable columns, as `rosie check` and the plan table print them
-//! (`docs/spec/cli.md#check`, `docs/spec/plan.md#plan-table`).
-
-/// Which side of its column a cell keeps to.
-#[derive(Clone, Copy)]
-pub enum Align {
-    Left,
-    Right,
-}
+//! Lines in readable columns, as `rosie check` prints them (`docs/spec/cli.md#check`).
 
 /// One printed line: `N` cells in columns, then free text that may span several lines.
 pub struct Row<const N: usize> {
@@ -16,7 +8,7 @@ pub struct Row<const N: usize> {
 
 /// The rows in columns: each column as wide as its widest cell, two spaces apart. The
 /// text's later lines start at the text column.
-pub fn layout<const N: usize>(aligns: [Align; N], rows: &[Row<N>]) -> Vec<String> {
+pub fn layout<const N: usize>(rows: &[Row<N>]) -> Vec<String> {
     let widths: [usize; N] = std::array::from_fn(|column| {
         rows.iter()
             .map(|row| row.cells[column].chars().count())
@@ -31,11 +23,8 @@ pub fn layout<const N: usize>(aligns: [Align; N], rows: &[Row<N>]) -> Vec<String
             let cells: String = row
                 .cells
                 .iter()
-                .zip(aligns.iter().zip(widths))
-                .map(|(cell, (align, width))| match align {
-                    Align::Left => format!("{cell:<width$}  "),
-                    Align::Right => format!("{cell:>width$}  "),
-                })
+                .zip(widths)
+                .map(|(cell, width)| format!("{cell:<width$}  "))
                 .collect();
             let line = format!("{cells}{}", row.text.replace('\n', &text_break));
             line.trim_end().to_owned()
@@ -55,32 +44,29 @@ mod tests {
     }
 
     #[test]
-    fn columns_are_as_wide_as_their_widest_cell_and_keep_their_side() {
+    fn columns_are_as_wide_as_their_widest_cell() {
         let rows = [
-            row(["clean", "1.2 GB"], "a"),
-            row(["outside-roots", "?"], "b"),
+            row(["clean", "~/a"], "x"),
+            row(["outside-roots", "~/bb"], "y"),
         ];
 
         assert_eq!(
-            layout([Align::Left, Align::Right], &rows),
-            ["clean          1.2 GB  a", "outside-roots       ?  b"]
+            layout(&rows),
+            ["clean          ~/a   x", "outside-roots  ~/bb  y"]
         );
     }
 
     #[test]
     fn later_text_lines_start_at_the_text_column() {
-        let rows = [row(["keep", "1 B"], "first\n  second")];
+        let rows = [row(["keep", "~/a"], "first\n  second")];
 
-        assert_eq!(
-            layout([Align::Left, Align::Right], &rows),
-            ["keep  1 B  first\n             second"]
-        );
+        assert_eq!(layout(&rows), ["keep  ~/a  first\n             second"]);
     }
 
     #[test]
     fn a_line_ends_at_its_last_printed_character() {
-        let rows = [row(["report", ""], ""), row(["clean", "1.2 GB"], "a")];
+        let rows = [row(["skipped", ""], ""), row(["clean", "~/a"], "x")];
 
-        assert_eq!(layout([Align::Left, Align::Left], &rows)[0], "report");
+        assert_eq!(layout(&rows)[0], "skipped");
     }
 }

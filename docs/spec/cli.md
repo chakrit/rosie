@@ -37,7 +37,7 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 `rosie scan tree ~ | rosie run -`.
 
-- `rosie scan` prints the plan as a table when stdout is a terminal and as TOML
+- `rosie scan` prints the plan as a listing when stdout is a terminal and as TOML
   otherwise; a format flag overrides that ([Flags](#flags)).
 - `rosie run` does not ask for confirmation; the plan is the confirmation.
 - `rosie clean` with no terminal fails with a usage error.
@@ -193,11 +193,11 @@ Flags for `scan`, `plan`, `clean`, and `check`:
 | `--enter-mounts`         | walk across volumes (overrides `[walk] enter_mounts`)          |
 | `--enter-placeholders`   | open dataless cloud placeholders (`[walk] enter_placeholders`) |
 | `--enter-links=<level>`  | `none`, `roots`, or `all` (overrides `[walk] enter_links`)     |
-| `--format=<format>`      | `scan` / `plan` only: `table`, `toml`, or `sh`                 |
+| `--format=<format>`      | `scan` / `plan` only: `list`, `toml`, or `sh`                  |
 | `--toml`                 | `scan` / `plan` only: shortcut for `--format=toml`             |
 | `--sh`                   | `scan` / `plan` only: shortcut for `--format=sh`               |
 
-- `table` is the plan table, `toml` the plan file, and `sh` the shell-script export
+- `list` is the plan listing, `toml` the plan file, and `sh` the shell-script export
   ([plan.md](plan.md)).
 - At most one of `--format`, `--toml`, and `--sh` is given. *(agent-inferred)*
 - `--only`, `--enter-bundles`, and `--enter-placeholders` exist only on `tree`, `caches`,
@@ -236,7 +236,8 @@ Every line rosie writes to stderr starts with a marker in the first column:
 - One module owns the markers and the palette; `inquire`'s render config takes the same
   palette.
 - Color only when stderr is a terminal and `NO_COLOR` is unset. Markers always.
-- Stdout data (plan table, plan TOML, lists, `check` columns) stays plain.
+- The plan listing is colored only when stdout is a terminal and `NO_COLOR` is unset.
+- Other stdout data (plan TOML, the `--sh` script, lists, `check` columns) stays plain.
 
 ## Errors
 

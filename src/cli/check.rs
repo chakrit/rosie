@@ -15,7 +15,7 @@
 use std::path::{Path, PathBuf};
 
 use super::args::{CheckArgs, enter_hint};
-use super::columns::{Align, Row, layout};
+use super::columns::{Row, layout};
 use super::console::{Console, Finish};
 use super::entry_text::{sides, status_hints, sudo_note};
 use super::findings::problem_line;
@@ -209,7 +209,7 @@ fn in_columns(lines: &[Line]) -> Vec<String> {
             text: line.reason.clone(),
         })
         .collect();
-    layout([Align::Left, Align::Left], &rows)
+    layout(&rows)
 }
 
 /// Whether the walk leaves `path` to app mode: it is named as an `.app`, nothing at or

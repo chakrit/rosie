@@ -211,7 +211,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     /// A line on stderr, marked as `mark` (`docs/spec/cli.md#output`).
     pub fn note(&mut self, mark: Mark, text: &str) -> io::Result<()> {
-        let line = self.console.palette().line(&Line::new(mark, text));
+        let line = self.console.stderr_palette().line(&Line::new(mark, text));
         writeln!(self.console.stderr(), "{line}")
     }
 

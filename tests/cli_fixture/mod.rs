@@ -340,7 +340,11 @@ impl Console for ScriptedConsole {
         self.script.terminals
     }
 
-    fn palette(&self) -> Palette {
+    fn stdout_palette(&self) -> Palette {
+        Palette::plain()
+    }
+
+    fn stderr_palette(&self) -> Palette {
         Palette::plain()
     }
 

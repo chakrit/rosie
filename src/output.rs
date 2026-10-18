@@ -1,10 +1,10 @@
-//! The look of every line rosie writes to stderr (`docs/spec/cli.md#output`): a marker in
-//! the first column, the column where `inquire` puts its `?` and `indicatif` its
-//! spinner, and one palette for all three.
+//! The look of what rosie prints (`docs/spec/cli.md#output`): every stderr line's marker
+//! in the first column, the column where `inquire` puts its `?` and `indicatif` its
+//! spinner; the plan listing's bullets on stdout; and one palette for all of them.
 //!
-//! Color is decided once, from whether stderr is a terminal and the user's `NO_COLOR`;
-//! nothing here asks `console` or the environment, so a [`Palette`] is the whole
-//! decision.
+//! Color is decided once per stream, from whether it is a terminal and the user's
+//! `NO_COLOR`; nothing here asks `console` or the environment, so a [`Palette`] is the
+//! whole decision.
 
 use console::Style;
 use indicatif::ProgressStyle;
@@ -41,6 +41,38 @@ impl Mark {
     }
 }
 
+/// What a plan listing row says becomes of its item (`docs/spec/plan.md#plan-listing`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Bullet {
+    Clean,
+    Keep,
+    Conflict,
+    OutsideRoots,
+    /// A step the user takes by hand.
+    ByHand,
+}
+
+impl Bullet {
+    pub fn glyph(self) -> &'static str {
+        match self {
+            Bullet::Clean => "●",
+            Bullet::Keep => "○",
+            Bullet::Conflict => "!",
+            Bullet::OutsideRoots => "✗",
+            Bullet::ByHand => "·",
+        }
+    }
+
+    fn style(self) -> Style {
+        match self {
+            Bullet::Clean => Style::new().green(),
+            Bullet::Keep | Bullet::ByHand => Style::new().dim(),
+            Bullet::Conflict => Style::new().yellow(),
+            Bullet::OutsideRoots => Style::new().red(),
+        }
+    }
+}
+
 /// One stderr line before it is styled: its mark and its text, which may span several
 /// lines.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -65,7 +97,7 @@ pub enum ColorChoice {
     Never,
 }
 
-/// How stderr lines, spinners, and prompts look: colored or plain.
+/// How one stream's lines, spinners, and prompts look: colored or plain.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Palette {
     color: bool,
@@ -79,9 +111,9 @@ const SPINNER_FRAMES: [&str; 9] = ["⠁", "⠂", "⠄", "⡀", "⢀", "⠠", "�
 const CONTINUATION: &str = "\n  ";
 
 impl Palette {
-    /// Colored only when stderr is a terminal and the user did not opt out.
-    pub fn for_stderr(stderr_is_terminal: bool, choice: ColorChoice) -> Palette {
-        let color = match (stderr_is_terminal, choice) {
+    /// Colored only when the stream is a terminal and the user did not opt out.
+    pub fn for_stream(is_terminal: bool, choice: ColorChoice) -> Palette {
+        let color = match (is_terminal, choice) {
             (true, ColorChoice::Auto) => true,
             (true, ColorChoice::Never) | (false, _) => false,
         };
@@ -98,6 +130,21 @@ impl Palette {
         let mark = self.paint(line.mark.style(), line.mark.glyph());
         let text = line.text.replace('\n', CONTINUATION);
         format!("{mark} {text}")
+    }
+
+    /// `bullet`'s glyph in its color.
+    pub fn bullet(self, bullet: Bullet) -> String {
+        self.paint(bullet.style(), bullet.glyph())
+    }
+
+    /// A heading, or a figure that should catch the eye.
+    pub fn strong(self, text: &str) -> String {
+        self.paint(Style::new().bold(), text)
+    }
+
+    /// Detail the eye may skip: a listing row's rules and notes.
+    pub fn quiet(self, text: &str) -> String {
+        self.paint(Style::new().dim(), text)
     }
 
     /// What a hint does, shown above its command.
@@ -160,7 +207,7 @@ mod tests {
             (false, ColorChoice::Never, false),
         ];
         for (terminal, choice, colored) in decisions {
-            let line = Palette::for_stderr(terminal, choice).line(&Line::new(Mark::Done, "x"));
+            let line = Palette::for_stream(terminal, choice).line(&Line::new(Mark::Done, "x"));
 
             assert_eq!(line.contains('\u{1b}'), colored, "{terminal} {choice:?}");
         }

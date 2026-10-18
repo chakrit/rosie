@@ -5,7 +5,7 @@ Status: accepted. Target behavior; not implemented.
 Cleanup runs in two phases that can also be invoked independently: scan produces a
 plan, run executes it, like `terraform plan -out` followed by `terraform apply`.
 `rosie scan` (alias `rosie plan`) prints the plan to stdout, as the [plan
-table](#plan-table) on a terminal and as the TOML plan file otherwise; `rosie clean` scans,
+listing](#plan-listing) on a terminal and as the TOML plan file otherwise; `rosie clean` scans,
 confirms, and runs; `rosie run <plan>` or `rosie run -` executes a saved or piped plan
 ([cli.md](cli.md#scan-and-clean)).
 
@@ -134,32 +134,51 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 - A conflict entry's `rules` lists only the outer path's own rules; rules from nested
   paths appear only in its comment. *(agent-inferred)*
 
-## Plan table
+## Plan listing
 
-The plan table shows a plan for reading. It uses the `rosie check` columns
-([cli.md](cli.md#check)) plus a right-aligned size column:
+The plan listing shows a plan for reading:
 
 ```text
 $ rosie scan tree ~
-outside-roots    4.1 KB  /Library/LaunchDaemons/com.x.plist     app/com.x; needs sudo; unloads system job
-                                                                to allow just it:
-                                                                  rosie roots add /Library/LaunchDaemons/com.x.plist
-                                                                or to allow its folder:
-                                                                  rosie roots add /Library/LaunchDaemons
-clean          210.0 MB  ~/Library/Developer/Xcode/DerivedData  rosie/xcode-derived-data; needs sudo
-conflict         3.0 GB  ~/src/api/target                       rosie/cargo-target (normal) vs alice/rust (aggressive); choose clean or keep in the plan
-clean            1.2 GB  ~/src/app/node_modules                 rosie/node-modules
-keep            84.0 MB  ~/src/old/.venv                        rosie/python-venv (aggressive); to clean it: --aggressive
-clean                 ?  $ docker system prune --force          rosie/docker
-clean                 ?  $ brew cleanup                         user/homebrew
-clean                 ?  forget package com.x.pkg
-report                   login item X                           Open System Settings > General > Login Items; Remove X
+/Library/LaunchDaemons
+  ✗ com.x.plist  4.1 KB  app/com.x; outside the roots; needs sudo; unloads system job
+      to allow just it:
+        rosie roots add /Library/LaunchDaemons/com.x.plist
+      or to allow its folder:
+        rosie roots add /Library/LaunchDaemons
+~/Library/Developer/Xcode
+  ● DerivedData  210.0 MB  rosie/xcode-derived-data; needs sudo
+~/src/api
+  ! target  3.0 GB  rosie/cargo-target (normal) vs alice/rust (aggressive)
+      choose clean or keep in the plan
+~/src/app
+  ● node_modules  1.2 GB  rosie/node-modules
+  ● target        5.0 MB  rosie/cargo-target
+~/src/old
+  ○ .venv  84.0 MB  rosie/python-venv (aggressive)
+      to clean it: --aggressive
+commands
+  ● $ docker system prune --force  rosie/docker
+  ● $ brew cleanup                 user/homebrew
+  ● forget package com.x.pkg
+by hand
+  · login item X
+      Open System Settings > General > Login Items
+      Remove X
 ```
 
-- Rows follow the plan file's order.
-- A tool row shows `$ <cmd>`, size `?`, and its rule; not its `shell` or `env`.
-- Hints follow the `rosie check` form; hints of several lines start on the line below.
-- No color.
+- Deletes are grouped under their folder's full path; folders and names are in path
+  order. Paths are never shortened.
+- A delete row is its bullet, its name, its size, then its rules and notes. Name and size
+  are aligned within a folder.
+- Bullets: `●` clean, `○` keep, `!` conflict, `✗` outside-roots, `·` a step by hand.
+- Hints go below their row: one hint on one line, several in the stderr hint form.
+- `commands` lists each tool as `$ <cmd>` and its rule, not its `shell` or `env`, then
+  each `forget package <id>`. No size.
+- `by hand` lists each report's subject with its steps below it. *(agent-inferred)*
+- On a terminal ([cli.md](cli.md#output)): bullets green (clean), dim (keep, by hand),
+  yellow (conflict), red (outside-roots); folder and section headings bold; sizes of
+  1 GB and up bold; rules and notes dim; hint commands cyan.
 
 ## Stats
 
@@ -183,7 +202,7 @@ Users may delete entries from a plan before `rosie run`. Run never adds anything
 
 ## Interactive confirmation
 
-`rosie clean` shows the plan table, then the scan stats, then the prompt.
+`rosie clean` shows the plan listing, then the scan stats, then the prompt.
 
 The interactive prompt is `[y/N/e]`. `e` first asks, for each `conflict` entry, whether
 to clean or keep it; the user must choose one. It then opens a checklist with every

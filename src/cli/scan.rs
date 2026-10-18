@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use super::args::{CleanArgs, Format, Mode, PlanSource, ScanArgs, ScanFlags};
 use super::console::{Console, Finish, PromptError};
 use super::findings::{findings_lines, stats_lines};
-use super::plan_table::plan_table;
+use super::plan_list::plan_listing;
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps;
@@ -74,7 +74,7 @@ enum Confirmation {
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     pub fn scan(&mut self, args: ScanArgs) -> Result<ExitStatus, Error> {
         let by_terminal = match self.console.terminals().stdout {
-            true => Format::Table,
+            true => Format::List,
             false => Format::Toml,
         };
         let format = args.format.or(by_terminal)?;
@@ -82,7 +82,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let scan = self.find(&config, &args.mode, &args.flags, "rosie scan app <X.app>")?;
 
         match format {
-            Format::Table => self.show_plan(&scan.plan)?,
+            Format::List => self.show_plan(&scan.plan)?,
             Format::Toml => self.say(scan.plan.to_toml()?.trim_end())?,
             Format::Sh => self.say(scan.plan.to_sh()?.trim_end())?,
         }
@@ -299,9 +299,10 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         Ok(())
     }
 
-    /// The plan table on stdout (`docs/spec/plan.md#plan-table`).
+    /// The plan listing on stdout (`docs/spec/plan.md#plan-listing`).
     fn show_plan(&mut self, plan: &Plan) -> Result<(), Error> {
-        for line in plan_table(plan, &self.tilde()) {
+        let palette = self.console.stdout_palette();
+        for line in plan_listing(plan, &self.tilde(), palette) {
             self.say(&line)?;
         }
         Ok(())

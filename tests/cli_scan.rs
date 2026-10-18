@@ -13,6 +13,10 @@ use rosie::fs::{CommandOutput, Exit, Op, SystemTool};
 use rosie::packs::MONTH;
 use tarball::{TOP, Tarball};
 
+/// How the plan listing starts for one node project at `~/src/app`
+/// (`docs/spec/plan.md#plan-listing`).
+const LISTED_APP: &str = "~/src/app\n  ● node_modules  ";
+
 // walk skips name the path and why
 
 #[test]
@@ -400,7 +404,7 @@ fn plan_is_an_alias_of_scan() {
 }
 
 #[test]
-fn scan_prints_the_plan_table_on_a_terminal_and_toml_otherwise() {
+fn scan_prints_the_plan_listing_on_a_terminal_and_toml_otherwise() {
     let sandbox = Sandbox::new();
     sandbox.node_project(&format!("{CWD}/app"));
 
@@ -408,10 +412,8 @@ fn scan_prints_the_plan_table_on_a_terminal_and_toml_otherwise() {
     let piped = sandbox.run_with(Script::piped(), &["scan", "tree", "."]);
 
     terminal.assert_status(ExitStatus::Success);
-    let first = terminal.stdout.lines().next().unwrap_or_default();
-    assert!(first.starts_with("clean "), "{}", terminal.stdout);
     assert!(
-        first.contains(" ~/src/app/node_modules "),
+        terminal.stdout.starts_with(LISTED_APP),
         "{}",
         terminal.stdout
     );
@@ -442,24 +444,22 @@ fn a_format_flag_overrides_the_terminal_default() {
     let toml = terminal("--toml");
     let format_toml = terminal("--format=toml");
     let format_sh = terminal("--format=sh");
-    let table = piped("--format=table");
+    let list = piped("--format=list");
 
     assert!(toml.starts_with("# rosie plan."), "{toml}");
     assert_eq!(format_toml, toml);
     assert!(format_sh.starts_with("#!/bin/bash"), "{format_sh}");
-    assert!(table.starts_with("clean "), "{table}");
+    assert!(list.starts_with(LISTED_APP), "{list}");
 }
 
 #[test]
-fn clean_shows_the_plan_table_before_asking() {
+fn clean_shows_the_plan_listing_before_asking() {
     let sandbox = Sandbox::new();
     sandbox.node_project(&format!("{CWD}/app"));
 
     let ran = sandbox.run_with(Script::terminal().answer("n"), &["clean", "tree", "."]);
 
-    let first = ran.stdout.lines().next().unwrap_or_default();
-    assert!(first.starts_with("clean "), "{}", ran.stdout);
-    assert!(first.contains(" ~/src/app/node_modules "), "{}", ran.stdout);
+    assert!(ran.stdout.starts_with(LISTED_APP), "{}", ran.stdout);
     assert!(!ran.stdout.contains("[[delete]]"), "{}", ran.stdout);
     assert!(sandbox.removals().is_empty());
 }

@@ -1,6 +1,6 @@
 //! The words a line about a plan entry uses, the same in `rosie check` and the plan
-//! table: a conflict's sides, `needs sudo`, and the hints that would change its status
-//! (`docs/spec/cli.md#check`, `docs/spec/plan.md#plan-table`).
+//! listing: a conflict's sides, `needs sudo`, and the hints that would change its status
+//! (`docs/spec/cli.md#check`, `docs/spec/plan.md#plan-listing`).
 
 use std::path::Path;
 

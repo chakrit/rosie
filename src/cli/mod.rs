@@ -14,7 +14,7 @@ mod error;
 mod failure;
 mod findings;
 mod manage;
-mod plan_table;
+mod plan_list;
 mod progress;
 mod root;
 mod scan;
@@ -131,7 +131,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     /// Prints the warnings of every system tool whose version rosie was not tested with;
     /// the command has run regardless.
     fn show_version_warnings(&mut self, status: ExitStatus) -> ExitStatus {
-        let palette = self.console.palette();
+        let palette = self.console.stderr_palette();
         let written: Result<(), std::io::Error> = self
             .backend
             .take_warnings()
@@ -182,7 +182,10 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     /// The environment could not be gathered (for example `$HOME` is not set); no
     /// command needing it ever ran.
     fn show_env_error(&mut self, reason: &str) -> ExitStatus {
-        let line = self.console.palette().line(&Line::new(Mark::Error, reason));
+        let line = self
+            .console
+            .stderr_palette()
+            .line(&Line::new(Mark::Error, reason));
         match writeln!(self.console.stderr(), "{line}") {
             Ok(()) | Err(_) => ExitStatus::Failed,
         }
@@ -207,7 +210,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             Error::Usage(_) => ExitStatus::Usage,
             _ => ExitStatus::Failed,
         };
-        let palette = self.console.palette();
+        let palette = self.console.stderr_palette();
         let written = match error {
             // A usage message reads like clap's own usage errors: no marker.
             Error::Usage(message) => writeln!(self.console.stderr(), "{message}"),

@@ -121,7 +121,9 @@ fn clean_refuses_y_while_a_rule_conflict_remains() {
     ran.assert_status(ExitStatus::Success);
     assert!(sandbox.removals().is_empty(), "{:?}", sandbox.removals());
     assert!(
-        ran.stdout.lines().any(|line| line.starts_with("conflict ")),
+        ran.stdout
+            .lines()
+            .any(|line| line.starts_with("  ! node_modules ")),
         "{}",
         ran.stdout
     );
@@ -196,8 +198,9 @@ fn clean_edit_removes_unchecked_entries_reshows_the_plan_and_asks_again() {
     assert!(!sandbox.exists(format!("{CWD}/b/node_modules").as_str()));
     assert_eq!(ran.asked.len(), 3, "{:?}", ran.asked);
     assert!(ran.asked[1].contains(&format!("delete {CWD}/a/node_modules")));
-    let a_shown = ran.stdout.matches("~/src/a/node_modules").count();
-    let b_shown = ran.stdout.matches("~/src/b/node_modules").count();
+    let shown = |folder: &str| ran.stdout.lines().filter(|line| *line == folder).count();
+    let a_shown = shown("~/src/a");
+    let b_shown = shown("~/src/b");
     assert_eq!(
         (a_shown, b_shown),
         (1, 2),

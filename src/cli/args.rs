@@ -96,8 +96,8 @@ pub struct ScanArgs {
 /// How `scan` prints the plan (`docs/spec/cli.md#flags`).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Format {
-    /// The plan table, for reading.
-    Table,
+    /// The plan listing, for reading.
+    List,
     /// The plan file.
     Toml,
     /// A shell script to inspect and run by hand.
@@ -105,11 +105,11 @@ pub enum Format {
 }
 
 impl Format {
-    pub const ALL: [Format; 3] = [Format::Table, Format::Toml, Format::Sh];
+    pub const ALL: [Format; 3] = [Format::List, Format::Toml, Format::Sh];
 
     pub fn label(self) -> &'static str {
         match self {
-            Format::Table => "table",
+            Format::List => "list",
             Format::Toml => "toml",
             Format::Sh => "sh",
         }
@@ -120,7 +120,7 @@ impl Format {
 /// the mode, so [`FormatFlags::or`] refuses more than one.
 #[derive(Debug, Args)]
 pub struct FormatFlags {
-    /// `table`, `toml`, or `sh` (default: a table on a terminal, TOML otherwise).
+    /// `list`, `toml`, or `sh` (default: a list on a terminal, TOML otherwise).
     #[arg(long, global = true, value_name = "FORMAT", value_parser = parse_format)]
     format: Option<Format>,
 

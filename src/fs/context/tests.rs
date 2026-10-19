@@ -10,8 +10,12 @@ const CONFIG: &str = "/Users/me/.config/rosie";
 const DATA: &str = "/Users/me/.local/share/rosie";
 
 fn bounds(roots: &[&str]) -> Bounds {
+    bounds_with(Roots::Listed(roots.iter().map(PathBuf::from).collect()))
+}
+
+fn bounds_with(roots: Roots) -> Bounds {
     Bounds {
-        roots: roots.iter().map(PathBuf::from).collect(),
+        roots,
         paths: Paths::new(Path::new(HOME)).expect("absolute home"),
         user_uid: USER_UID,
     }
@@ -80,6 +84,21 @@ fn refuses_a_path_outside_every_root() {
     );
     assert!(fake.exists("/Users/me/Documents/thesis.tex"));
     assert_eq!(removals(&fake), vec![]);
+}
+
+#[test]
+fn deletes_outside_every_root_when_outside_roots_are_allowed() {
+    let fake = FakeBackend::new();
+    fake.add_file("/Users/me/Documents/old/thesis.tex", "x");
+    let ctx = FsContext::new(&fake, bounds_with(Roots::AllowOutside)).expect("absolute bounds");
+
+    delete(&ctx, path("/Users/me/Documents/old")).expect("the roots check is off");
+
+    assert!(!fake.exists("/Users/me/Documents/old"));
+    assert!(
+        ctx.within_roots(path("/Users/me/Documents"))
+            .expect("absolute path")
+    );
 }
 
 #[test]

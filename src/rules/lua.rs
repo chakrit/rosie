@@ -455,7 +455,7 @@ mod tests {
     use super::*;
     use crate::fs::Op;
     use crate::fs::fake::{FakeBackend, USER_UID};
-    use crate::fs::{Bounds, Paths};
+    use crate::fs::{Bounds, Paths, Roots};
     use crate::rules::name::{Name, PackName};
     use std::io::ErrorKind;
 
@@ -463,7 +463,7 @@ mod tests {
 
     fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
-            roots: vec![PathBuf::from("/Users/me/code")],
+            roots: Roots::Listed(vec![PathBuf::from("/Users/me/code")]),
             paths: Paths::new(Path::new("/Users/me")).expect("absolute home"),
             user_uid: USER_UID,
         };

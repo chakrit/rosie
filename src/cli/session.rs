@@ -10,7 +10,7 @@ use super::root::refuse_root;
 use super::shown::Shown;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
-use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, UserInput};
+use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, Roots, UserInput};
 use crate::output::{Line, Mark};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
 use crate::rules::{Name, RuleLayers, RuleSet};
@@ -75,11 +75,17 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         env: &'a Env,
         typed: Vec<String>,
     ) -> Result<Self, Error> {
-        let probe = FsContext::new(backend, env.paths.bounds(Vec::new(), ROOT_UID))?;
+        let probe = FsContext::new(
+            backend,
+            env.paths.bounds(Roots::Listed(Vec::new()), ROOT_UID),
+        )?;
         refuse_root(&probe, env.pid, typed)?;
         let user_uid = UserInput::home_owner().perform(&probe)?;
 
-        let own = FsContext::new(backend, env.paths.bounds(Vec::new(), user_uid))?;
+        let own = FsContext::new(
+            backend,
+            env.paths.bounds(Roots::Listed(Vec::new()), user_uid),
+        )?;
         Ok(Session {
             backend,
             network,

@@ -33,12 +33,21 @@ pub use running::running_argv;
 /// environment.
 #[derive(Debug, Clone)]
 pub struct Bounds {
-    /// Folders that cleanup-target deletes must lie within.
-    pub roots: Vec<PathBuf>,
+    /// Where cleanup-target deletes may happen.
+    pub roots: Roots,
     /// The home folder and rosie's own folders under it.
     pub paths: Paths,
     /// The user rosie acts for; only their read-only folders are made writable to delete.
     pub user_uid: u32,
+}
+
+/// Where cleanup-target deletes may happen (`docs/spec/safety.md#roots`).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Roots {
+    /// Only within these folders.
+    Listed(Vec<PathBuf>),
+    /// Anywhere: `allow_outside_roots` turns the roots check off.
+    AllowOutside,
 }
 
 /// Whom the process holding a context runs as.
@@ -55,7 +64,7 @@ pub enum Acting {
 /// bare backend.
 pub struct FsContext<B: Backend> {
     backend: B,
-    roots: Vec<PathBuf>,
+    roots: Roots,
     paths: Paths,
     own_dirs: [PathBuf; 2],
     user_uid: u32,
@@ -77,11 +86,15 @@ impl<B: Backend> FsContext<B> {
     }
 
     fn acting_as(backend: B, bounds: Bounds, acting: Acting) -> Result<Self, Error> {
-        let roots = bounds
-            .roots
-            .iter()
-            .map(|root| resolve_dots(root))
-            .collect::<Result<Vec<_>, _>>()?;
+        let roots = match bounds.roots {
+            Roots::Listed(roots) => Roots::Listed(
+                roots
+                    .iter()
+                    .map(|root| resolve_dots(root))
+                    .collect::<Result<_, _>>()?,
+            ),
+            Roots::AllowOutside => Roots::AllowOutside,
+        };
         let own_dirs = [bounds.paths.config_dir(), bounds.paths.data_dir()];
 
         Ok(FsContext {
@@ -301,7 +314,10 @@ impl<B: Backend> FsContext<B> {
 
     /// Whether an already resolved path lies within a root.
     fn contains(&self, path: &Path) -> bool {
-        self.roots.iter().any(|root| path.starts_with(root))
+        match &self.roots {
+            Roots::Listed(roots) => roots.iter().any(|root| path.starts_with(root)),
+            Roots::AllowOutside => true,
+        }
     }
 
     fn confine_to_own(&self, path: &Path) -> Result<PathBuf, Error> {

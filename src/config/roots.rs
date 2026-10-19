@@ -71,7 +71,7 @@ fn spelled_as_typed(typed: &Path, checked: &Path, paths: &Paths) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use crate::fs::fake::FakeBackend;
-    use crate::fs::{Bounds, RealPath, Rosie};
+    use crate::fs::{Bounds, RealPath, Roots, Rosie};
 
     use super::super::load;
     use super::*;
@@ -82,7 +82,7 @@ mod tests {
 
     fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
-            roots: Vec::new(),
+            roots: Roots::Listed(Vec::new()),
             paths: paths(),
             user_uid: crate::fs::fake::USER_UID,
         };
@@ -102,7 +102,10 @@ mod tests {
     }
 
     fn located(ctx: &FsContext<&FakeBackend>, file: &ConfigFile) -> Vec<PathBuf> {
-        file.locate(ctx).expect("every root locates").roots
+        match file.locate(ctx).expect("every root locates").roots {
+            Roots::Listed(roots) => roots,
+            Roots::AllowOutside => panic!("the roots check is on"),
+        }
     }
 
     fn file_text(ctx: &FsContext<&FakeBackend>) -> String {

@@ -115,7 +115,7 @@ mod tests {
 
     use super::*;
     use crate::fs::fake::{FakeBackend, USER_UID};
-    use crate::fs::{Bounds, Op, Paths};
+    use crate::fs::{Bounds, Op, Paths, Roots};
     use crate::packs::archive::Archive;
     use crate::packs::source::Source;
 
@@ -127,7 +127,7 @@ mod tests {
 
     fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
-            roots: vec![],
+            roots: Roots::Listed(Vec::new()),
             paths: Paths::new(Path::new(HOME)).expect("absolute home"),
             user_uid: USER_UID,
         };

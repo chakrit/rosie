@@ -8,7 +8,7 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use rosie::config::Walk;
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, FsContext, Paths};
+use rosie::fs::{Bounds, FsContext, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::plan::{AggressiveItems, Status};
 use rosie::rules::{Name, RuleLayers, RuleSet};
@@ -74,7 +74,7 @@ impl Default for Options {
 /// The fixture's bounds: `roots`, with the fixture's config and data dirs.
 pub fn bounds_with_roots(roots: Vec<PathBuf>) -> Bounds {
     Bounds {
-        roots,
+        roots: Roots::Listed(roots),
         paths: Paths::new(Path::new(HOME)).expect("absolute home"),
         user_uid: USER_UID,
     }
@@ -92,7 +92,7 @@ pub fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
 
 pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     let paths = Paths::new(&options.home).expect("absolute home");
-    let bounds = paths.bounds(options.roots, USER_UID);
+    let bounds = paths.bounds(Roots::Listed(options.roots), USER_UID);
     let ctx = FsContext::new(fake, bounds.clone()).expect("absolute bounds");
     let packs = SettlePacks
         .run(&Store::new(&ctx, Path::new(DATA)))

@@ -1,6 +1,6 @@
 use super::*;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{CommandOutput, Exit, Paths};
+use crate::fs::{CommandOutput, Exit, Paths, Roots};
 use std::path::Path;
 
 const PS: &[u8] = b"\
@@ -116,7 +116,8 @@ fn stops_a_looping_parent_chain() {
 
 fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
     let paths = Paths::new(Path::new("/Users/me")).expect("absolute home");
-    FsContext::new(fake, paths.bounds(Vec::new(), USER_UID)).expect("absolute bounds")
+    FsContext::new(fake, paths.bounds(Roots::Listed(Vec::new()), USER_UID))
+        .expect("absolute bounds")
 }
 
 fn output(exit: i32, stdout: &[u8]) -> CommandOutput {

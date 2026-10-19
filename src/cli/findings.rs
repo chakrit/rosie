@@ -131,7 +131,12 @@ mod tests {
         };
 
         assert_eq!(
-            findings_lines(&scan, &Mode::Orphans { flags: ModeFlags::default() }),
+            findings_lines(
+                &scan,
+                &Mode::Orphans {
+                    flags: ModeFlags::default()
+                }
+            ),
             [Line::new(
                 Mark::Skipped,
                 "skipped /Users/x/Library/Caches/com.gone.Tool: cloud placeholder, not downloaded"

@@ -21,7 +21,7 @@ use std::os::unix::fs::FileTypeExt as _;
 use super::header::{Header, Nonce};
 use super::{Error, ItemResult, OutputWindow, Reporter, RunStats, Runner, outcomes};
 use crate::config;
-use crate::fs::{Argv, Backend, FsContext, FsOp, Paths, ROOT_UID, UserInput};
+use crate::fs::{Argv, Backend, FsContext, FsOp, Paths, ROOT_UID, Roots, UserInput};
 use crate::plan::Plan;
 use crate::process::{self, Process, ProcessTable};
 
@@ -141,7 +141,10 @@ fn admit<'a, B: Backend>(
         return Err(Error::NonceMismatch);
     }
 
-    let ctx = FsContext::new(backend, header.paths.bounds(Vec::new(), ROOT_UID))?;
+    let ctx = FsContext::new(
+        backend,
+        header.paths.bounds(Roots::Listed(Vec::new()), ROOT_UID),
+    )?;
     let uid = process::effective_uid(&ctx)?;
     if uid != ROOT_UID {
         return Err(Error::NotRoot { uid });
@@ -168,7 +171,7 @@ fn is_root_sudo(process: &Process) -> bool {
 /// their config. The user is the owner of the home folder. Acting as root, it changes
 /// no permissions.
 fn root_ctx<'b, B: Backend>(backend: &'b B, paths: &Paths) -> Result<FsContext<&'b B>, Error> {
-    let bootstrap = FsContext::new(backend, paths.bounds(Vec::new(), ROOT_UID))?;
+    let bootstrap = FsContext::new(backend, paths.bounds(Roots::Listed(Vec::new()), ROOT_UID))?;
     let user_uid = UserInput::home_owner().perform(&bootstrap)?;
     let config = config::load(&bootstrap, &paths.config_dir())?.locate(&bootstrap)?;
 

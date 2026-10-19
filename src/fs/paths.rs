@@ -6,7 +6,7 @@
 use std::path::{Path, PathBuf};
 
 use super::Error;
-use super::context::{Bounds, resolve_dots};
+use super::context::{Bounds, Roots, resolve_dots};
 
 /// The home folder rosie acts for: absolute, with `.` and `..` resolved by text. Every
 /// path the scans compare with home, or build under it, is spelled the same way, so a
@@ -39,7 +39,7 @@ impl Paths {
 
     /// What a context acting for this home's user is bounded by: rosie's own folders
     /// under the home, the cleanup `roots`, and the user's uid.
-    pub fn bounds(&self, roots: Vec<PathBuf>, user_uid: u32) -> Bounds {
+    pub fn bounds(&self, roots: Roots, user_uid: u32) -> Bounds {
         Bounds {
             roots,
             paths: self.clone(),

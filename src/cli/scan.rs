@@ -190,12 +190,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     // scanning
 
-    fn find(
-        &mut self,
-        config: &Config,
-        mode: &Mode,
-        app_usage: &str,
-    ) -> Result<Scan, Error> {
+    fn find(&mut self, config: &Config, mode: &Mode, app_usage: &str) -> Result<Scan, Error> {
         let settings = mode.flags().scan.settings(config.walk);
 
         match mode {

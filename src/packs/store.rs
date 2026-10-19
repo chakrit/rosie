@@ -313,14 +313,14 @@ mod tests {
 
     use super::*;
     use crate::fs::fake::{FakeBackend, USER_UID};
-    use crate::fs::{self, Bounds, Paths};
+    use crate::fs::{self, Bounds, Paths, Roots};
 
     const DATA: &str = "/Users/me/.local/share/rosie";
     const PACKS: &str = "/Users/me/.local/share/rosie/packs";
 
     fn listed(fake: &FakeBackend) -> Result<Vec<Source>, Error> {
         let bounds = Bounds {
-            roots: Vec::new(),
+            roots: Roots::Listed(Vec::new()),
             paths: Paths::new(Path::new("/Users/me")).expect("absolute home"),
             user_uid: USER_UID,
         };

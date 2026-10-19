@@ -11,7 +11,7 @@ use std::path::Path;
 use common::{Harness, RealHarness, contract, empty_bounds, error_kind, sorted};
 use rosie::fs::{
     Backend, Bounds, Cleanup, EnterLinks, Error, FileKind, FsContext, FsOp, Paths, RealBackend,
-    Rosie, UserInput,
+    Roots, Rosie, UserInput,
 };
 
 contract!(
@@ -274,7 +274,7 @@ fn gate_deletes_a_tree_with_links_and_read_only_folders(h: &impl Harness) {
         .set_mode(&target.join("pkg/lib"), 0o555)
         .expect("make read-only");
     let bounds = Bounds {
-        roots: vec![code],
+        roots: Roots::Listed(vec![code]),
         paths: Paths::new(h.root()).expect("absolute root"),
         user_uid: h.user_uid(),
     };

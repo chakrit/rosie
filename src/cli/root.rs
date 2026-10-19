@@ -74,7 +74,7 @@ mod tests {
 
     use super::*;
     use crate::fs::fake::FakeBackend;
-    use crate::fs::{Argv, Bounds, CommandOutput, Exit};
+    use crate::fs::{Argv, Bounds, CommandOutput, Exit, Roots};
 
     fn ctx_running_as<'a>(fake: &'a FakeBackend, uid: &str) -> FsContext<&'a FakeBackend> {
         fake.respond(
@@ -86,7 +86,7 @@ mod tests {
             },
         );
         let bounds = Bounds {
-            roots: vec![],
+            roots: Roots::Listed(Vec::new()),
             paths: crate::fs::Paths::new(Path::new("/var/root")).expect("absolute home"),
             user_uid: 0,
         };

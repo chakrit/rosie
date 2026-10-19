@@ -374,9 +374,7 @@ impl Mode {
     pub fn flags(&self) -> &ModeFlags {
         match self {
             Mode::Tree(tree) => &tree.flags,
-            Mode::Caches { flags, .. } | Mode::App { flags, .. } | Mode::Orphans { flags } => {
-                flags
-            }
+            Mode::Caches { flags, .. } | Mode::App { flags, .. } | Mode::Orphans { flags } => flags,
         }
     }
 

@@ -8,7 +8,7 @@ use super::bundle::{extract_argv, info_plist};
 use super::claims::{launch_jobs_argv, system_jobs_argv};
 use crate::config::Walk;
 use crate::fs::fake::{FakeBackend, USER_UID};
-use crate::fs::{CommandOutput, Exit, FsContext, Paths};
+use crate::fs::{CommandOutput, Exit, FsContext, Paths, Roots};
 use crate::plan::AggressiveItems;
 use crate::scan::Settings;
 
@@ -34,7 +34,7 @@ pub(super) fn ctx_at_home<'a>(
     home: &str,
 ) -> FsContext<&'a FakeBackend> {
     let paths = Paths::new(Path::new(home)).expect("absolute home");
-    let roots = roots.iter().map(PathBuf::from).collect();
+    let roots = Roots::Listed(roots.iter().map(PathBuf::from).collect());
     FsContext::new(fake, paths.bounds(roots, USER_UID)).expect("absolute bounds")
 }
 

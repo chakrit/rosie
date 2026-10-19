@@ -9,7 +9,7 @@ forced through it; there are no exceptions.
 
 - The security layer is absolute: every protection must pass on its own for an item to
   go through. The only exceptions are sanctioned escape hatches, such as rosie's own
-  metadata methods.
+  metadata methods and `allow_outside_roots`.
 - The layer is a `Backend` trait: read_dir, metadata via `lstat` (allocated size, dev and
   inode, file type, owner, `st_flags`), file reads for Lua, remove, commands, sudo, and
   the metadata methods below.
@@ -64,7 +64,7 @@ and only when that process runs it.
 ### Cleanup targets
 
 - Every filesystem mutation of a cleanup target is refused unless its path lies within
-  the `roots` in `config.toml`.
+  the `roots` in `config.toml`, or `allow_outside_roots` is `true`.
 - The context resolves `.` and `..` lexically before every check, then compares paths
   component by component (`Path::starts_with`), never by string prefix.
 - The context refuses to delete a mount point in every mode.
@@ -93,11 +93,15 @@ and only when that process runs it.
 The `roots` allowlist in `config.toml` is the sole mutation authority. A plan never
 carries or widens roots.
 
-- Rosie flatly refuses any folder not inside an allowlisted root.
-- Every mode (`tree`, `caches`, `app`, `orphans`) is gated by `roots`, with no
+- Rosie flatly refuses any folder not inside an allowlisted root, unless
+  `allow_outside_roots` is `true`.
+- Every mode (`tree`, `caches`, `app`, `orphans`) is gated by `roots`, with no other
   exceptions.
 - Rules and packs cannot add roots.
 - A `roots` entry absent on disk is valid.
+- `allow_outside_roots` in `config.toml` turns the roots check off. Default `false`.
+- With `allow_outside_roots` on, every other protection still applies, and `"all"` follows
+  links wherever they lead. *(agent-inferred)*
 - Out-of-roots plan items show as `skip` with a `rosie roots add <path>`
   hint.
 - A fresh `config.toml` is seeded with ordinary, editable `roots` entries: `/Applications`,

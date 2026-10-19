@@ -172,7 +172,7 @@ fn config_shows_every_key_and_value() {
     assert_eq!(
         ran.stdout,
         format!(
-            "roots =\n  {HOME}\nwalk.enter_bundles = false\nwalk.enter_mounts = false\nwalk.enter_placeholders = false\nwalk.enter_links = none\n"
+            "roots =\n  {HOME}\nallow_outside_roots = false\nwalk.enter_bundles = false\nwalk.enter_mounts = false\nwalk.enter_placeholders = false\nwalk.enter_links = none\n"
         )
     );
 }
@@ -195,7 +195,7 @@ fn config_set_get_and_unset_a_key() {
 #[test]
 fn config_set_without_arguments_offers_the_keys_then_their_values() {
     let sandbox = Sandbox::new();
-    let script = Script::terminal().pick(1).pick(0);
+    let script = Script::terminal().pick(2).pick(0);
 
     let ran = sandbox.run_with(script, &["config", "set"]);
 
@@ -203,7 +203,7 @@ fn config_set_without_arguments_offers_the_keys_then_their_values() {
     assert_eq!(
         ran.asked,
         [
-            "Choose a key: walk.enter_bundles | walk.enter_mounts | walk.enter_placeholders | walk.enter_links",
+            "Choose a key: allow_outside_roots | walk.enter_bundles | walk.enter_mounts | walk.enter_placeholders | walk.enter_links",
             "Choose a value: true | false",
         ]
     );
@@ -214,7 +214,7 @@ fn config_set_without_arguments_offers_the_keys_then_their_values() {
 #[test]
 fn config_set_offers_the_enter_links_levels() {
     let sandbox = Sandbox::new();
-    let script = Script::terminal().pick(3).pick(2);
+    let script = Script::terminal().pick(4).pick(2);
 
     let ran = sandbox.run_with(script, &["config", "set"]);
 
@@ -231,7 +231,9 @@ fn config_get_without_a_key_offers_every_key() {
     let ran = sandbox.run_with(Script::terminal().pick(0), &["config", "get"]);
 
     ran.assert_status(ExitStatus::Success);
-    assert!(ran.asked[0].starts_with("Choose a key: roots | walk.enter_bundles"));
+    assert!(
+        ran.asked[0].starts_with("Choose a key: roots | allow_outside_roots | walk.enter_bundles")
+    );
     assert_eq!(ran.stdout, format!("{HOME}\n"));
 }
 

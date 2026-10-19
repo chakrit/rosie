@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, Cleanup, FsContext, FsOp, Op, Paths};
+use rosie::fs::{Bounds, Cleanup, FsContext, FsOp, Op, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
     Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source,
@@ -20,7 +20,7 @@ const ROSIE_PACK: &str = "/Users/me/.local/share/rosie/packs/chakrit/rosie";
 
 fn bounds() -> Bounds {
     Bounds {
-        roots: vec![PathBuf::from("/Users/me/code")],
+        roots: Roots::Listed(vec![PathBuf::from("/Users/me/code")]),
         paths: Paths::new(Path::new(HOME)).expect("absolute home"),
         user_uid: USER_UID,
     }

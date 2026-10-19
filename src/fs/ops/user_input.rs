@@ -80,12 +80,13 @@ impl<B: Backend> FsOp<B> for HomeOwner {
 mod tests {
     use super::*;
     use crate::fs::RealPath;
+    use crate::fs::context::Roots;
     use crate::fs::fake::FakeBackend;
     use crate::fs::paths::Paths;
 
     fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let paths = Paths::new(Path::new("/Users/me")).expect("absolute home");
-        FsContext::new(fake, paths.bounds(Vec::new(), 501)).expect("absolute bounds")
+        FsContext::new(fake, paths.bounds(Roots::Listed(Vec::new()), 501)).expect("absolute bounds")
     }
 
     #[test]

@@ -196,11 +196,11 @@ mod tests {
 
     use super::*;
     use crate::fs::fake::{FakeBackend, USER_UID};
-    use crate::fs::{Bounds, Paths};
+    use crate::fs::{Bounds, Paths, Roots};
 
     fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
-            roots: vec![PathBuf::from("/Users/me")],
+            roots: Roots::Listed(vec![PathBuf::from("/Users/me")]),
             paths: Paths::new(Path::new("/Users/me")).expect("absolute home"),
             user_uid: USER_UID,
         };

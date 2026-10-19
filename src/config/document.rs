@@ -2,32 +2,36 @@
 //! array entry it names; comments, spelling, and layout elsewhere are kept.
 //!
 //! Every document edited here has already loaded as a [`super::Config`], so `roots` is
-//! an array and `walk` is a table when present.
+//! an array and every table a settable key names is a table when present.
 
-use toml_edit::{Array, DocumentMut, Item, Value, table, value};
+use toml_edit::{Array, DocumentMut, Item, TableLike, Value, table, value};
 
-use super::WalkKey;
+use super::keys::Placement;
 
-// walk keys
+// settable keys
 
-pub(super) fn with_walk_value(document: &DocumentMut, key: WalkKey, set: Value) -> DocumentMut {
+pub(super) fn with_value(document: &DocumentMut, at: Placement, set: Value) -> DocumentMut {
     let mut edited = document.clone();
-    let walk = edited
-        .entry("walk")
-        .or_insert_with(table)
-        .as_table_like_mut()
-        .expect("a loaded config's walk is a table");
-    walk.insert(key.field(), value(set));
+    let parent = match at.table {
+        Some(name) => edited
+            .entry(name)
+            .or_insert_with(table)
+            .as_table_like_mut()
+            .expect("a loaded config's tables are tables"),
+        None => edited.as_table_mut() as &mut dyn TableLike,
+    };
+    parent.insert(at.field, value(set));
     edited
 }
 
-/// The document without `key`, or `None` when the document does not set it.
-pub(super) fn without_walk_key(document: &DocumentMut, key: WalkKey) -> Option<DocumentMut> {
+/// The document without the key at `at`, or `None` when the document does not set it.
+pub(super) fn without_key(document: &DocumentMut, at: Placement) -> Option<DocumentMut> {
     let mut edited = document.clone();
-    edited
-        .get_mut("walk")
-        .and_then(Item::as_table_like_mut)
-        .and_then(|walk| walk.remove(key.field()))?;
+    let parent = match at.table {
+        Some(name) => edited.get_mut(name).and_then(Item::as_table_like_mut)?,
+        None => edited.as_table_mut() as &mut dyn TableLike,
+    };
+    parent.remove(at.field)?;
     Some(edited)
 }
 

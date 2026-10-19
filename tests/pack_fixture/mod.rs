@@ -11,7 +11,7 @@ use std::path::Path;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Backend, Bounds, FsContext, Paths};
+use rosie::fs::{Backend, Bounds, FsContext, Paths, Roots};
 use rosie::packs::{Installed, Network, Source};
 
 pub const HOME: &str = "/Users/me";
@@ -74,7 +74,7 @@ pub fn paths() -> Paths {
 
 pub fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
     let bounds = Bounds {
-        roots: vec![],
+        roots: Roots::Listed(Vec::new()),
         paths: paths(),
         user_uid: USER_UID,
     };

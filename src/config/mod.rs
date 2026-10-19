@@ -20,9 +20,9 @@ use serde::Deserialize;
 use thiserror::Error;
 use toml_edit::DocumentMut;
 
-use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, Rosie, UserInput};
+use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, Roots, Rosie, UserInput};
 
-pub use keys::{Key, WalkKey, WalkSetting};
+pub use keys::{Key, SettableKey, WalkKey, WalkSetting};
 
 const FILE_NAME: &str = "config.toml";
 
@@ -30,10 +30,11 @@ const FILE_NAME: &str = "config.toml";
 const DEFAULT_LABEL: &str = "<default config.toml>";
 
 /// The config the scans use: every root located on disk
-/// (`docs/spec/safety.md#symlinks`), and the walk settings.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
+/// (`docs/spec/safety.md#symlinks`), or no roots check under `allow_outside_roots`, and
+/// the walk settings.
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Config {
-    pub roots: Vec<PathBuf>,
+    pub roots: Roots,
     pub walk: Walk,
 }
 
@@ -43,6 +44,7 @@ pub struct Config {
 #[serde(default, deny_unknown_fields)]
 struct Written {
     roots: Vec<PathBuf>,
+    allow_outside_roots: bool,
     walk: Walk,
 }
 
@@ -83,6 +85,10 @@ impl ConfigFile {
         &self.written.roots
     }
 
+    pub fn allow_outside_roots(&self) -> bool {
+        self.written.allow_outside_roots
+    }
+
     pub fn walk(&self) -> Walk {
         self.written.walk
     }
@@ -106,8 +112,12 @@ impl ConfigFile {
             return Err(Error::UnusableRoots(unusable));
         }
 
+        let roots = match self.allow_outside_roots() {
+            true => Roots::AllowOutside,
+            false => Roots::Listed(located.into_iter().filter_map(Result::ok).collect()),
+        };
         Ok(Config {
-            roots: located.into_iter().filter_map(Result::ok).collect(),
+            roots,
             walk: self.walk(),
         })
     }
@@ -360,7 +370,7 @@ mod tests {
 
     fn ctx(fake: &FakeBackend) -> FsContext<&FakeBackend> {
         let bounds = Bounds {
-            roots: Vec::new(),
+            roots: Roots::Listed(Vec::new()),
             paths: paths(),
             user_uid: crate::fs::fake::USER_UID,
         };
@@ -376,7 +386,27 @@ mod tests {
     }
 
     fn located(ctx: &FsContext<&FakeBackend>, file: &ConfigFile) -> Vec<PathBuf> {
-        file.locate(ctx).expect("every root locates").roots
+        match file.locate(ctx).expect("every root locates").roots {
+            Roots::Listed(roots) => roots,
+            Roots::AllowOutside => panic!("the roots check is on"),
+        }
+    }
+
+    #[test]
+    fn allow_outside_roots_turns_the_roots_check_off_and_defaults_to_false() {
+        let fake = FakeBackend::new();
+        fake.add_dir("/Users/me/code");
+        let ctx = ctx(&fake);
+        let load_text = |text| parse(text, &config_path(config_dir())).expect("load config");
+
+        let unset = load_text("roots = [\"/Users/me/code\"]\n");
+        let allowed = load_text("roots = [\"/Users/me/code\"]\nallow_outside_roots = true\n");
+
+        assert_eq!(located(&ctx, &unset), vec![PathBuf::from("/Users/me/code")]);
+        assert_eq!(
+            allowed.locate(&ctx).expect("every root locates").roots,
+            Roots::AllowOutside
+        );
     }
 
     #[test]
@@ -541,7 +571,13 @@ mod tests {
 
         let seeded = seed(&ctx, config_dir(), default_text).expect("seed config");
 
-        assert_eq!(seeded.locate(&ctx).expect("locate"), Config::default());
+        assert_eq!(
+            seeded.locate(&ctx).expect("locate"),
+            Config {
+                roots: Roots::Listed(Vec::new()),
+                walk: Walk::default()
+            }
+        );
         assert_eq!(
             Rosie::read(&config_path(config_dir()))
                 .perform(&ctx)
@@ -578,10 +614,21 @@ mod tests {
         let seeded = seed(&ctx, config_dir(), default_text).expect("seed");
         let added =
             roots::add(&ctx, config_dir(), &seeded, Path::new("~/code")).expect("add a root");
-        let set = keys::set(&ctx, config_dir(), &added, WalkKey::EnterBundles, "true")
-            .expect("set a flag");
-        let unset =
-            keys::unset(&ctx, config_dir(), &set, WalkKey::EnterBundles).expect("unset the flag");
+        let set = keys::set(
+            &ctx,
+            config_dir(),
+            &added,
+            SettableKey::Walk(WalkKey::EnterBundles),
+            "true",
+        )
+        .expect("set a flag");
+        let unset = keys::unset(
+            &ctx,
+            config_dir(),
+            &set,
+            SettableKey::Walk(WalkKey::EnterBundles),
+        )
+        .expect("unset the flag");
         roots::remove(&ctx, config_dir(), &unset, Path::new("~/.cargo/registry"))
             .expect("remove the root under the tool-cache comment");
 
@@ -642,7 +689,13 @@ mod tests {
         let second = load_or_seed(&ctx, config_dir(), "roots = []\n")
             .expect("load the edited file, not the default again");
 
-        assert_eq!(first.locate(&ctx).expect("locate"), Config::default());
+        assert_eq!(
+            first.locate(&ctx).expect("locate"),
+            Config {
+                roots: Roots::Listed(Vec::new()),
+                walk: Walk::default()
+            }
+        );
         assert_eq!(second.roots(), [PathBuf::from("/Users/me")]);
     }
 

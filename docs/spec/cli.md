@@ -301,6 +301,7 @@ User configuration is TOML at `~/.config/rosie/config.toml`. Keys defined so far
 | Key                         | Default     | Spec                                      |
 |-----------------------------|-------------|-------------------------------------------|
 | `roots`                     | seeded list | [safety.md](safety.md#roots)              |
+| `allow_outside_roots`       | `false`     | [safety.md](safety.md#roots)              |
 | `[walk] enter_bundles`      | `false`     | [safety.md](safety.md#walk-skips)         |
 | `[walk] enter_mounts`       | `false`     | [safety.md](safety.md#walk-skips)         |
 | `[walk] enter_placeholders` | `false`     | [safety.md](safety.md#walk-skips)         |

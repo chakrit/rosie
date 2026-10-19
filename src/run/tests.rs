@@ -4,7 +4,7 @@ use std::path::{Path, PathBuf};
 use super::header::{Header, Nonce};
 use super::*;
 use crate::fs::fake::{Call, FakeBackend, USER_UID};
-use crate::fs::{Bounds, CommandOutput, Op, Paths, ROOT_UID};
+use crate::fs::{Bounds, CommandOutput, Op, Paths, ROOT_UID, Roots};
 use crate::plan::{Size, Tally};
 
 mod as_root;
@@ -16,7 +16,7 @@ const EXE: &str = "/Users/me/.cargo/bin/rosie";
 
 fn bounds(roots: &[&str]) -> Bounds {
     Bounds {
-        roots: roots.iter().map(PathBuf::from).collect(),
+        roots: Roots::Listed(roots.iter().map(PathBuf::from).collect()),
         paths: Paths::new(Path::new(HOME)).expect("absolute home"),
         user_uid: USER_UID,
     }
@@ -705,7 +705,10 @@ fn keeps_a_user_folder_when_the_elevated_child_never_launches() {
     let (fake, plan) = user_folder_with_system_plist();
     // A home holding a newline fails `Header::encode`, so `sudo` is never even called.
     let never_launches = Paths::new(Path::new("/Users/me\nnonce x")).expect("absolute home");
-    let bounds = never_launches.bounds(vec![PathBuf::from("/Users/me/Library")], USER_UID);
+    let bounds = never_launches.bounds(
+        Roots::Listed(vec![PathBuf::from("/Users/me/Library")]),
+        USER_UID,
+    );
     let ctx = FsContext::new(&fake, bounds).expect("absolute bounds");
 
     let mut recorder = Recorder::default();

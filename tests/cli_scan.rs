@@ -790,8 +790,16 @@ fn a_folder_in_place_of_a_mode_or_command_is_scanned_as_tree() {
         assert!(ran.stdout.starts_with(LISTED_APP), "{}", ran.stdout);
     }
     // `app` names the mode, never the folder.
-    assert!(!scanned.stdout.contains("node_modules"), "{}", scanned.stdout);
-    assert!(piped.stdout.starts_with("# rosie plan."), "{}", piped.stdout);
+    assert!(
+        !scanned.stdout.contains("node_modules"),
+        "{}",
+        scanned.stdout
+    );
+    assert!(
+        piped.stdout.starts_with("# rosie plan."),
+        "{}",
+        piped.stdout
+    );
     assert!(sandbox.removals().is_empty());
 }
 

@@ -6,7 +6,7 @@ use super::args::{ConfigAction, RootsAction, RulesAction};
 use super::console::Console;
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
-use crate::config::{ConfigFile, Key, WalkKey, keys, roots};
+use crate::config::{ConfigFile, Key, SettableKey, keys, roots};
 use crate::fs::Backend;
 use crate::packs::{self, Network, RemovePack, SettlePacks, Source};
 use crate::rules::{Rule, Source as RuleSource};
@@ -142,7 +142,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             let value = keys::get(key, file);
             let line = match key {
                 Key::Roots => format!("roots =\n{}", indented(&value)),
-                Key::Walk(_) => format!("{} = {value}", key.name()),
+                Key::Settable(_) => format!("{} = {value}", key.name()),
             };
             self.say(&line)?;
         }
@@ -173,12 +173,12 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         value: Option<String>,
     ) -> Result<ExitStatus, Error> {
         let usage = "rosie config set <key> <value>";
-        let walk_key = self.walk_key(key, usage)?;
+        let settable = self.settable_key(key, usage)?;
         let value = match value {
             Some(value) => value,
             None => {
                 let picker = self.picker(usage)?;
-                let options = walk_key
+                let options = settable
                     .allowed_values()
                     .into_iter()
                     .map(|value| (value.to_owned(), value.to_owned()))
@@ -188,29 +188,29 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         let dir = self.env.paths.config_dir();
 
-        keys::set(&self.own, &dir, file, walk_key, &value)?;
-        self.say(&format!("{} = {value}", walk_key.name()))?;
+        keys::set(&self.own, &dir, file, settable, &value)?;
+        self.say(&format!("{} = {value}", settable.name()))?;
         Ok(ExitStatus::Success)
     }
 
     fn unset_key(&mut self, file: &ConfigFile, key: Option<String>) -> Result<ExitStatus, Error> {
-        let walk_key = self.walk_key(key, "rosie config unset <key>")?;
+        let settable = self.settable_key(key, "rosie config unset <key>")?;
         let dir = self.env.paths.config_dir();
 
-        let unset = keys::unset(&self.own, &dir, file, walk_key)?;
-        let default = keys::get(Key::Walk(walk_key), &unset);
-        self.say(&format!("{} = {default} (default)", walk_key.name()))?;
+        let unset = keys::unset(&self.own, &dir, file, settable)?;
+        let default = keys::get(Key::Settable(settable), &unset);
+        self.say(&format!("{} = {default} (default)", settable.name()))?;
         Ok(ExitStatus::Success)
     }
 
-    fn walk_key(&mut self, key: Option<String>, usage: &str) -> Result<WalkKey, Error> {
+    fn settable_key(&mut self, key: Option<String>, usage: &str) -> Result<SettableKey, Error> {
         match key {
-            Some(name) => Ok(WalkKey::parse(&name)?),
+            Some(name) => Ok(SettableKey::parse(&name)?),
             None => {
                 let picker = self.picker(usage)?;
-                let options = WalkKey::ALL
+                let options = SettableKey::ALL
                     .into_iter()
-                    .map(|flag| (flag.name().to_owned(), flag))
+                    .map(|key| (key.name().to_owned(), key))
                     .collect();
                 self.pick(picker, PickKind::Key, options)
             }

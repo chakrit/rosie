@@ -196,8 +196,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         match mode {
             Mode::Tree(TreeArgs { dir, rules, .. }) => {
                 let scanner = self.rule_scanner(config, settings, rules)?;
-                let dir = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
-                Ok(self.with_progress(|progress| scanner.tree(&dir, progress))??)
+                let root = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
+                Ok(self.with_progress(|progress| scanner.tree(&root, progress))??)
             }
             Mode::Caches { rules, .. } => {
                 let scanner = self.rule_scanner(config, settings, rules)?;

@@ -158,10 +158,31 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// it leads, and the `enter_links` level that allows it; any other refusal is the
     /// filesystem's own words.
     fn refusal_reason(&self, error: &fs::Error) -> String {
-        let fs::Error::Symlink { link, .. } = error else {
-            return error.to_string();
-        };
+        match error {
+            fs::Error::Symlink { link, .. } => self.symlink_reason(error, link),
+            fs::Error::Io { .. }
+            | fs::Error::Command { .. }
+            | fs::Error::ToolFailed { .. }
+            | fs::Error::ToolNotUtf8 { .. }
+            | fs::Error::NotAnEntryName { .. }
+            | fs::Error::Relative { .. }
+            | fs::Error::OutsideRoots { .. }
+            | fs::Error::Misspelled { .. }
+            | fs::Error::CrossesVolume { .. }
+            | fs::Error::Placeholder { .. }
+            | fs::Error::LinkDangling { .. }
+            | fs::Error::LinkLoop { .. }
+            | fs::Error::Running { .. }
+            | fs::Error::RunningUnknown { .. }
+            | fs::Error::NotAFolder { .. }
+            | fs::Error::OutsideOwnData { .. }
+            | fs::Error::OwnFolderItself { .. } => error.to_string(),
+        }
+    }
 
+    /// `error` refusing `link`: where the link leads, and the `enter_links` level that
+    /// allows it.
+    fn symlink_reason(&self, error: &fs::Error, link: &Path) -> String {
         let shown = self.tilde();
         let allow = Hint::run("to allow it", [Command::ConfigSetLinks(EnterLinks::Roots)]);
         match UserInput::path(link, EnterLinks::Roots).perform(&self.own) {

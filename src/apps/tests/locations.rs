@@ -183,7 +183,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
         fake
     };
     let scan = |fake: &FakeBackend, enter_mounts: bool| {
-        let settings = Settings {
+        let mounts = Settings {
             walk: Walk {
                 enter_mounts,
                 ..Walk::default()
@@ -191,7 +191,7 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
             aggressive: AggressiveItems::Skip,
         };
         AppScanner::new(&ctx(fake, &ALL_ROOTS))
-            .scan(Path::new(BAR), &settings, &NoProgress)
+            .scan(Path::new(BAR), &mounts, &NoProgress)
             .expect("app scan")
     };
     let skips = |scanned: &Scan| -> Vec<(String, WalkSkip)> {

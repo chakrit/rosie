@@ -93,10 +93,10 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
             .filter(|other| other.path != bundle.path)
             .map(|other| other.id.clone())
             .collect();
-        let rule = match &bundle.id {
-            Some(id) => format!("app/{}", id.as_str()),
-            None => "app".to_owned(),
-        };
+        let rule = bundle
+            .id
+            .as_ref()
+            .map_or_else(|| "app".to_owned(), |id| format!("app/{}", id.as_str()));
 
         let mut search = Search::new(ctx, mounts, settings.aggressive);
         search.add(itself, Holds::Plain, &rule, Tier::Normal)?;

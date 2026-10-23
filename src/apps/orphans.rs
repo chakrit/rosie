@@ -8,7 +8,7 @@ use super::locations::leftover_locations;
 use super::matching::reads_as_bundle_id;
 use super::search::Search;
 use crate::fs::{Backend, FsContext};
-use crate::scan::{Scan, Settings};
+use crate::scan::{Progress, Scan, Settings};
 use crate::tier::Tier;
 
 const RULE: &str = "orphans";
@@ -20,9 +20,14 @@ const RULE: &str = "orphans";
 /// be listed as orphans. An installed app with no bundle-ID key cannot be matched to its
 /// leftovers by ID either, so any it has may appear among the orphans; it is reported
 /// only as a note, not a reason to fail the scan.
-pub fn scan_orphans<B>(ctx: &FsContext<B>, settings: &Settings) -> Result<Scan, Error>
+pub fn scan_orphans<B, P>(
+    ctx: &FsContext<B>,
+    settings: &Settings,
+    progress: &P,
+) -> Result<Scan, Error>
 where
     B: Backend + Sync,
+    P: Progress,
 {
     let installed = installed_apps(ctx)?;
     if let Some(unidentified) = installed.unidentified.into_iter().next() {
@@ -45,5 +50,5 @@ where
             search.add(candidate, location.holds, RULE, Tier::Aggressive)?;
         }
     }
-    search.finish()
+    search.finish(progress)
 }

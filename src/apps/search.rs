@@ -18,7 +18,7 @@ use super::locations::{Holds, Location};
 use crate::fs::{Backend, FsContext};
 use crate::plan::{AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Report};
 use crate::scan::{
-    Entry, InFolder, Log, Mounts, Needs, NoProgress, Scan, Screening, Sizer, WalkSkip,
+    Entry, InFolder, Log, Mounts, Needs, Progress, Scan, Screening, Sizer, WalkSkip,
 };
 use crate::tier::Tier;
 
@@ -172,7 +172,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
     /// process runs a program from and blocking one outside the roots, sizes the rest
     /// and the refused in parallel, and builds the plan. An item the checks refuse
     /// otherwise, or an error sizing an item other than a walk skip, fails the scan.
-    pub(super) fn finish(self) -> Result<Scan, Error> {
+    pub(super) fn finish<P: Progress>(self, progress: &P) -> Result<Scan, Error> {
         let Search {
             ctx,
             mounts: _,
@@ -183,11 +183,12 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
 
         let (sized, refused) = {
             let screening = Screening::new(ctx, &log);
-            let sizer = Sizer::walking(ctx, &NoProgress, &log);
+            let sizer = Sizer::walking(ctx, progress, &log);
             let sized = rayon::scope(|scope| {
                 let started = matched.into_iter().filter_map(|(entry, marks)| {
                     let names = || vec![marks.rule.clone()];
                     let admitted = screening.admit(scope, entry, names)?;
+                    progress.found();
                     let path = admitted.entry.path().to_path_buf();
                     let size = sizer.measure(scope, admitted.entry);
                     Some((path, marks, admitted.reach, admitted.run_as, size))

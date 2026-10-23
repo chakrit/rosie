@@ -200,10 +200,12 @@ fn a_system_job_listing_rosie_cannot_read_fails_the_scan() {
     let malformed = scan_orphans(
         &ctx(&malformed, &ALL_ROOTS),
         &settings(AggressiveItems::Clean),
+        &NoProgress,
     );
     let no_block = scan_orphans(
         &ctx(&no_block, &ALL_ROOTS),
         &settings(AggressiveItems::Clean),
+        &NoProgress,
     );
 
     assert!(
@@ -240,7 +242,11 @@ fn a_launch_job_listing_rosie_cannot_read_fails_the_scan() {
     installed_suite(&fake);
     loaded(&fake, "-\t0\n");
 
-    let result = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Clean));
+    let result = scan_orphans(
+        &ctx(&fake, &ALL_ROOTS),
+        &settings(AggressiveItems::Clean),
+        &NoProgress,
+    );
 
     assert!(
         matches!(result, Err(Error::LaunchJobs { .. })),

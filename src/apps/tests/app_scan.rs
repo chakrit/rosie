@@ -1,3 +1,5 @@
+use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
+
 use super::*;
 
 // app: matching
@@ -240,8 +242,11 @@ fn a_failing_receipt_listing_fails_the_scan() {
     bar_app(&fake);
     fake.respond(pkgs_argv(), failed("pkgutil: broken\n"));
 
-    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
-        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
+        Path::new(BAR),
+        &settings(AggressiveItems::Skip),
+        &NoProgress,
+    );
 
     assert!(
         matches!(result, Err(Error::Fs(fs::Error::ToolFailed { .. }))),
@@ -302,8 +307,11 @@ fn refuses_the_plan_while_the_app_is_running() {
         (812, "/Applications/Bar.app/Contents/MacOS/Bar"),
     ]);
 
-    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
-        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
+        Path::new(BAR),
+        &settings(AggressiveItems::Skip),
+        &NoProgress,
+    );
 
     assert!(
         matches!(&result, Err(Error::Refused { app, source: fs::Error::Running { pid: 812, .. } })
@@ -320,8 +328,11 @@ fn refuses_the_whole_plan_when_the_bundle_is_outside_the_roots() {
     bar_app(&fake);
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let result = AppScanner::new(&ctx(&fake, &["/Users/me/Library"]))
-        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
+    let result = AppScanner::new(&ctx(&fake, &["/Users/me/Library"])).scan(
+        Path::new(BAR),
+        &settings(AggressiveItems::Skip),
+        &NoProgress,
+    );
 
     assert!(
         matches!(&result, Err(Error::Refused { app, source: fs::Error::OutsideRoots { .. } })
@@ -336,8 +347,11 @@ fn a_process_from_a_sibling_app_does_not_block_the_plan() {
     bar_app(&fake);
     fake.respond_running(&[(812, "/Applications/Bar.app.old/Contents/MacOS/Bar")]);
 
-    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
-        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
+        Path::new(BAR),
+        &settings(AggressiveItems::Skip),
+        &NoProgress,
+    );
 
     assert!(result.is_ok(), "{result:?}");
 }
@@ -382,6 +396,7 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
     let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
         Path::new("/Users/me/code"),
         &settings(AggressiveItems::Skip),
+        &NoProgress,
     );
 
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
@@ -447,7 +462,11 @@ fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_as_keep() {
     receipts(&fake, "com.foo.Bar.pkg\n");
 
     let scanned = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
-        .scan(Path::new(beta), &settings(AggressiveItems::Skip))
+        .scan(
+            Path::new(beta),
+            &settings(AggressiveItems::Skip),
+            &NoProgress,
+        )
         .expect("app scan");
 
     assert_eq!(
@@ -497,8 +516,11 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
         fake.add_dir(format!("{denied}/Helper.app"));
         fake.fail_on(&denied, Op::ReadDir, ErrorKind::PermissionDenied);
 
-        let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
-            .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
+        let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
+            Path::new(BAR),
+            &settings(AggressiveItems::Skip),
+            &NoProgress,
+        );
 
         assert!(matches!(result, Err(Error::Fs(_))), "{folder}: {result:?}");
     }
@@ -617,8 +639,60 @@ fn a_package_id_a_plan_cannot_hold_fails_the_scan() {
     bar_app(&fake);
     receipts(&fake, "com.foo.Bar.\0pkg\n");
 
-    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
-        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
+        Path::new(BAR),
+        &settings(AggressiveItems::Skip),
+        &NoProgress,
+    );
 
     assert!(matches!(result, Err(Error::Plan(_))), "{result:?}");
+}
+
+// progress
+
+/// Counts what a scan reports, as the live spinner would show it.
+#[derive(Default)]
+struct Counting {
+    found: AtomicUsize,
+    bytes: AtomicU64,
+}
+
+impl Progress for Counting {
+    fn found(&self) {
+        self.found.fetch_add(1, Ordering::Relaxed);
+    }
+
+    fn sized(&self, bytes: u64) {
+        self.bytes.fetch_add(bytes, Ordering::Relaxed);
+    }
+}
+
+#[test]
+fn app_and_orphan_scans_report_progress() {
+    // overview.md: rosie shows interactive progress where possible.
+    let fake = FakeBackend::new();
+    bar_app(&fake);
+    fake.add_dir(lib("Caches/com.foo.Bar"));
+    fake.add_dir(lib("Caches/com.gone.Old"));
+    let app = Counting::default();
+    let orphans = Counting::default();
+
+    AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip), &app)
+        .expect("app scan");
+    scan_orphans(
+        &ctx(&fake, &ALL_ROOTS),
+        &settings(AggressiveItems::Skip),
+        &orphans,
+    )
+    .expect("orphan scan");
+
+    let counted = |counting: &Counting| {
+        (
+            counting.found.load(Ordering::Relaxed),
+            counting.bytes.load(Ordering::Relaxed) > 0,
+        )
+    };
+    assert_eq!(counted(&app), (2, true));
+    assert_eq!(counted(&orphans).0, 1);
 }

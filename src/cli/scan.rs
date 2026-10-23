@@ -215,11 +215,17 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     Some(app) => self.absolute(app),
                     None => self.pick_app(&ctx, app_usage)?,
                 };
-                Ok(AppScanner::new(&ctx).scan(&app, &settings)?)
+                let progress = self.console.progress();
+                let scan = AppScanner::new(&ctx).scan(&app, &settings, &progress);
+                progress.finish()?;
+                Ok(scan?)
             }
             Mode::Orphans { .. } => {
                 let ctx = self.roots_ctx(config)?;
-                Ok(apps::scan_orphans(&ctx, &settings)?)
+                let progress = self.console.progress();
+                let scan = apps::scan_orphans(&ctx, &settings, &progress);
+                progress.finish()?;
+                Ok(scan?)
             }
         }
     }

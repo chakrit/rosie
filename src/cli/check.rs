@@ -28,7 +28,8 @@ use crate::output::Palette;
 use crate::packs::Network;
 use crate::plan::{Counted, Delete, PlanStats, SkipReason, StatusKind};
 use crate::scan::{
-    self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Settings, Skipped, WalkSkip,
+    self, Needs, NoProgress, PathScan, PathVerdict, Place, Planned, Refused, Settings, Skipped,
+    WalkSkip,
 };
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
@@ -111,7 +112,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     ) -> Result<Line, Error> {
         let shown = self.tilde();
 
-        let scanned = app_scanner.scan(path, &app_mode);
+        let scanned = app_scanner.scan(path, &app_mode, &NoProgress);
         let allow = match &scanned {
             Err(apps::Error::Refused {
                 source: fs::Error::OutsideRoots { path: refused },

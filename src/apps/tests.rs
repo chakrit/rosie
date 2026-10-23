@@ -14,7 +14,7 @@ use crate::fs::ROOT_UID;
 use crate::fs::fake::{FakeBackend, USER_UID};
 use crate::fs::{self, Op};
 use crate::plan::{AggressiveItems, Delete, LaunchDomain, RunAs, Size, SkipReason, Status};
-use crate::scan::{Needs, Scan, Settings, WalkSkip};
+use crate::scan::{Needs, NoProgress, Progress, Scan, Settings, WalkSkip};
 
 mod app_bundle;
 mod app_scan;
@@ -29,12 +29,12 @@ const NPLAYER: &str = "/Applications/nPlayer.app";
 
 fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scan {
     AppScanner::new(&ctx(fake, roots))
-        .scan(Path::new(BAR), &settings(aggressive))
+        .scan(Path::new(BAR), &settings(aggressive), &NoProgress)
         .expect("app scan")
 }
 
 fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {
-    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(aggressive)).expect("orphan scan")
+    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(aggressive), &NoProgress).expect("orphan scan")
 }
 
 /// `(path, status)` of every delete entry, in plan order.

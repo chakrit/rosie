@@ -17,7 +17,7 @@ use crate::fs::{
     self, Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool, UserInput,
 };
 use crate::plan::Report;
-use crate::scan::{Entry, Mounts, NotAnEntry, Scan, Settings};
+use crate::scan::{Entry, Mounts, NotAnEntry, Progress, Scan, Settings};
 use crate::tier::Tier;
 
 /// Scans apps through one context. What the machine has installed, its apps and its
@@ -55,7 +55,12 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
     /// one rosie must first identify among others, so this is not refused. Its own bundle is
     /// still `clean` and its `CFBundleName` still matches leftovers by name (aggressively,
     /// like any name-only match); it simply has no bundle ID to match leftovers by.
-    pub fn scan(&self, app: &Path, settings: &Settings) -> Result<Scan, Error> {
+    pub fn scan<P: Progress>(
+        &self,
+        app: &Path,
+        settings: &Settings,
+        progress: &P,
+    ) -> Result<Scan, Error> {
         let ctx = self.ctx;
         let mounts = Mounts::from(settings.walk);
         let path = UserInput::path(app, settings.walk.enter_links).perform(ctx)?;
@@ -127,7 +132,7 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
         for unidentified in &installed.unidentified {
             search.add_report(unidentified_report(unidentified, &bundle)?);
         }
-        search.finish()
+        search.finish(progress)
     }
 
     /// The installed apps, read on first use.

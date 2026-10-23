@@ -14,14 +14,6 @@ fn bar_app_answering(fake: &FakeBackend, id: CommandOutput, name: CommandOutput)
     quiet(fake);
 }
 
-fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
-    AppScanner::new(&ctx(fake, &ALL_ROOTS)).scan(
-        Path::new(app),
-        &settings(AggressiveItems::Skip),
-        &NoProgress,
-    )
-}
-
 /// `plutil` failing on the scanned app's own `Info.plist` makes the bundle unreadable.
 fn is_unreadable_by_plutil(result: &Result<Scan, Error>) -> bool {
     matches!(result, Err(Error::UnreadableBundle { source, .. })

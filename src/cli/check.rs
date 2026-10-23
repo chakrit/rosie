@@ -28,8 +28,7 @@ use crate::output::Palette;
 use crate::packs::Network;
 use crate::plan::{Counted, Delete, PlanStats, SkipReason, StatusKind};
 use crate::scan::{
-    self, Needs, NoProgress, PathScan, PathVerdict, Place, Planned, Refused, Settings, Skipped,
-    WalkSkip,
+    self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Settings, Skipped, WalkSkip,
 };
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
@@ -101,8 +100,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it:
     /// `in use` when that scan refuses the bundle for a process running from it, and
     /// `skipped` with the error's text when it refuses or cannot read the bundle for any
-    /// other reason, plus the hints that let it in when it is outside the roots. The walk's `verdict` decides when the path is not an app after all;
-    /// any other error of that scan is not about the bundle and propagates.
+    /// other reason, plus the hints that let it in when it is outside the roots. The walk's
+    /// `verdict` decides when the path is not an app after all; any other error of that
+    /// scan is not about the bundle and propagates.
     fn app_line(
         &self,
         app_scanner: &AppScanner<&'a B>,
@@ -112,7 +112,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     ) -> Result<Line, Error> {
         let shown = self.tilde();
 
-        let scanned = app_scanner.scan(path, &app_mode, &NoProgress);
+        let scanned = self.with_progress(|progress| app_scanner.scan(path, &app_mode, progress))?;
         let allow = match &scanned {
             Err(apps::Error::Refused {
                 source: fs::Error::OutsideRoots { path: refused },
@@ -326,7 +326,7 @@ fn skip_reason(skipped: &Skipped) -> String {
         | WalkSkip::LinkDangling => None,
     };
     match hint {
-        Some(hint) => format!("{reason}; {hint}"),
+        Some(enter) => format!("{reason}; {enter}"),
         None => reason,
     }
 }

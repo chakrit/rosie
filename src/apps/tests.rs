@@ -37,6 +37,24 @@ fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {
     scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(aggressive), &NoProgress).expect("orphan scan")
 }
 
+/// `app` scanned with every root and aggressive items skipped.
+fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
+    AppScanner::new(&ctx(fake, &ALL_ROOTS)).scan(
+        Path::new(app),
+        &settings(AggressiveItems::Skip),
+        &NoProgress,
+    )
+}
+
+/// The orphans, scanned with every root and aggressive items skipped.
+fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {
+    scan_orphans(
+        &ctx(fake, &ALL_ROOTS),
+        &settings(AggressiveItems::Skip),
+        &NoProgress,
+    )
+}
+
 /// `(path, status)` of every delete entry, in plan order.
 fn deletes(scanned: &Scan) -> Vec<(String, Status)> {
     scanned

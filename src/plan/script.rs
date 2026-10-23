@@ -16,7 +16,7 @@
 
 use std::path::Path;
 
-use super::{Error, Plan, Selection, SkipReason, Status, comment, skip_note};
+use super::{Error, Plan, SKIP_AGGRESSIVE, Selection, SkipReason, Status, comment, skip_note};
 use crate::fs::{Argv, SystemTool};
 use crate::shell;
 
@@ -137,7 +137,7 @@ impl Line {
             },
             Selection::Skip => Line {
                 status: Status::Skip(SkipReason::Aggressive),
-                note: format!("{note}; skip: aggressive"),
+                note: format!("{note}; {SKIP_AGGRESSIVE}"),
             },
         }
     }

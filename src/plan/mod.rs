@@ -129,7 +129,7 @@ impl Plan {
 /// with the hints that would let it in on the lines below.
 fn skip_note(reason: SkipReason, path: &Path) -> String {
     match reason {
-        SkipReason::Aggressive => "skip: aggressive".to_owned(),
+        SkipReason::Aggressive => SKIP_AGGRESSIVE.to_owned(),
         SkipReason::OutsideRoots => {
             let hints = hint::hints_text(&Hint::allow_in_roots(path));
             format!("skip: outside the roots\n{hints}")
@@ -137,6 +137,9 @@ fn skip_note(reason: SkipReason, path: &Path) -> String {
         SkipReason::Chosen => "skip".to_owned(),
     }
 }
+
+/// What the comment of an entry skipped as aggressive says.
+const SKIP_AGGRESSIVE: &str = "skip: aggressive";
 
 /// `text` as comment lines, so no line of it can run or parse as TOML.
 fn comment(text: &str) -> String {

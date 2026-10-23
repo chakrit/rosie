@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     Bootout, Delete, Deletes, EntryProblem, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
-    Report, RunAs, Selection, Sides, Size, SkipReason, Status, StatusKind, Tool, check_path,
-    comment, skip_note,
+    Report, RunAs, SKIP_AGGRESSIVE, Selection, Sides, Size, SkipReason, Status, StatusKind, Tool,
+    check_path, comment, skip_note,
 };
 use crate::fs::ShellCommand;
 
@@ -55,11 +55,11 @@ impl Plan {
             push_entry(&mut text, Some(note), PlanFile::delete(delete))?;
         }
         for tool in &self.tools {
-            let note = Some("size unknown".to_owned());
+            let note = Some(command_note(tool.selection));
             push_entry(&mut text, note, PlanFile::tool(tool))?;
         }
         for receipt in &self.receipts {
-            let note = Some("size unknown".to_owned());
+            let note = Some(command_note(receipt.selection));
             push_entry(&mut text, note, PlanFile::receipt(receipt))?;
         }
         for report in &self.reports {
@@ -83,6 +83,14 @@ impl Plan {
         // Read from the text, not from a parsed table, so errors keep their line and column.
         let file: PlanFile = toml::from_str(text)?;
         file.into_plan(text)
+    }
+}
+
+/// A command entry's comment: its size is unknown, and a `skip` says why.
+fn command_note(selection: Selection) -> String {
+    match selection {
+        Selection::Clean => "size unknown".to_owned(),
+        Selection::Skip => format!("size unknown; {SKIP_AGGRESSIVE}"),
     }
 }
 
@@ -721,6 +729,21 @@ mod tests {
     }
 
     #[test]
+    fn an_aggressive_receipt_comment_says_why_it_is_skipped() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
+        builder
+            .add_receipt("com.x.pkg", Tier::Aggressive)
+            .expect("valid");
+
+        let text = builder.build().plan.to_toml().expect("serializable");
+
+        assert!(
+            text.contains("# size unknown; skip: aggressive\n[[forget]]\n"),
+            "{text}"
+        );
+    }
+
+    #[test]
     fn comments_show_sizes_unknown_tool_sizes_and_the_roots_hint() {
         let text = every_kind().to_toml().expect("serializable");
 
@@ -730,6 +753,13 @@ mod tests {
         );
         assert!(text.contains("# size unknown\n[[tool]]"), "{text}");
         assert!(text.contains("# size unknown\n[[forget]]"), "{text}");
+        assert!(
+            text.contains(
+                "# size unknown; skip: aggressive\n[[tool]]\nrule = \"rosie/docker\"\n\
+                 shell = \"/bin/bash\"\ncmd = \"docker system prune --all --force\"\n"
+            ),
+            "{text}"
+        );
         assert!(
             text.contains(
                 "# 1.2 MB; skip: outside the roots\n\

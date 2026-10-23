@@ -161,6 +161,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let fs::Error::Symlink { link, .. } = error else {
             return error.to_string();
         };
+
         let shown = self.tilde();
         let allow = Hint::run("to allow it", [Command::ConfigSetLinks(EnterLinks::Roots)]);
         match UserInput::path(link, EnterLinks::Roots).perform(&self.own) {

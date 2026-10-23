@@ -220,18 +220,6 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         }
     }
 
-    /// Runs `work` under the live progress spinner and clears it whatever `work` returns;
-    /// failing to clear it is the only error added.
-    pub(super) fn with_progress<T>(
-        &self,
-        work: impl FnOnce(&C::Progress) -> T,
-    ) -> Result<T, Error> {
-        let progress = self.console.progress();
-        let done = work(&progress);
-        progress.finish()?;
-        Ok(done)
-    }
-
     fn pick_app(&mut self, ctx: &FsContext<&'a B>, usage: &str) -> Result<PathBuf, Error> {
         let picker = self.picker(usage)?;
         let apps = apps::picker_apps(ctx)?;

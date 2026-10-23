@@ -27,32 +27,29 @@ mod symlinks;
 const BAR: &str = "/Applications/Bar.app";
 const NPLAYER: &str = "/Applications/nPlayer.app";
 
+/// `BAR` scanned; the scan must succeed.
 fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scan {
-    AppScanner::new(&ctx(fake, roots))
-        .scan(Path::new(BAR), &settings(aggressive), &NoProgress)
-        .expect("app scan")
+    try_app(fake, BAR, roots, aggressive).expect("app scan")
 }
 
+/// The orphans scanned with every root; the scan must succeed.
 fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {
-    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(aggressive), &NoProgress).expect("orphan scan")
+    try_orphans(fake, aggressive).expect("orphan scan")
 }
 
-/// `app` scanned with every root and aggressive items skipped.
-fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
-    AppScanner::new(&ctx(fake, &ALL_ROOTS)).scan(
-        Path::new(app),
-        &settings(AggressiveItems::Skip),
-        &NoProgress,
-    )
+/// `app` scanned, as the scan returns it.
+fn try_app(
+    fake: &FakeBackend,
+    app: &str,
+    roots: &[&str],
+    aggressive: AggressiveItems,
+) -> Result<Scan, Error> {
+    AppScanner::new(&ctx(fake, roots)).scan(Path::new(app), &settings(aggressive), &NoProgress)
 }
 
-/// The orphans, scanned with every root and aggressive items skipped.
-fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {
-    scan_orphans(
-        &ctx(fake, &ALL_ROOTS),
-        &settings(AggressiveItems::Skip),
-        &NoProgress,
-    )
+/// The orphans scanned with every root, as the scan returns it.
+fn try_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Result<Scan, Error> {
+    scan_orphans(&ctx(fake, &ALL_ROOTS), &settings(aggressive), &NoProgress)
 }
 
 /// `(path, status)` of every delete entry, in plan order.

@@ -197,16 +197,8 @@ fn a_system_job_listing_rosie_cannot_read_fails_the_scan() {
         succeeded("system = {\n\ttype = system\n}\n"),
     );
 
-    let malformed = scan_orphans(
-        &ctx(&malformed, &ALL_ROOTS),
-        &settings(AggressiveItems::Clean),
-        &NoProgress,
-    );
-    let no_block = scan_orphans(
-        &ctx(&no_block, &ALL_ROOTS),
-        &settings(AggressiveItems::Clean),
-        &NoProgress,
-    );
+    let malformed = try_orphans(&malformed, AggressiveItems::Clean);
+    let no_block = try_orphans(&no_block, AggressiveItems::Clean);
 
     assert!(
         matches!(&malformed, Err(Error::SystemJobs { line }) if line.contains("com.half.line")),
@@ -242,11 +234,7 @@ fn a_launch_job_listing_rosie_cannot_read_fails_the_scan() {
     installed_suite(&fake);
     loaded(&fake, "-\t0\n");
 
-    let result = scan_orphans(
-        &ctx(&fake, &ALL_ROOTS),
-        &settings(AggressiveItems::Clean),
-        &NoProgress,
-    );
+    let result = try_orphans(&fake, AggressiveItems::Clean);
 
     assert!(
         matches!(result, Err(Error::LaunchJobs { .. })),

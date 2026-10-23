@@ -22,10 +22,7 @@ fn main() -> ExitCode {
 
 /// `NO_COLOR` set, even empty, turns color off (`docs/spec/cli.md#output`).
 fn color_choice(no_color: Option<OsString>) -> ColorChoice {
-    match no_color {
-        Some(_) => ColorChoice::Never,
-        None => ColorChoice::Auto,
-    }
+    no_color.map_or(ColorChoice::Auto, |_| ColorChoice::Never)
 }
 
 /// The one place rosie reads `$HOME` and the process environment, besides `NO_COLOR`,

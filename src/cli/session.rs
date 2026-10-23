@@ -5,7 +5,7 @@ use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
 use super::args::{Place, RuleFlags, UserCommand, Verb};
-use super::console::Console;
+use super::console::{Console, Finish};
 use super::root::refuse_root;
 use super::shown::Shown;
 use super::{Env, Error, ExitStatus};
@@ -186,6 +186,15 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             ..settings
         };
         Ok(Scanner::new(ctx, rules, settings))
+    }
+
+    /// Runs `work` under the live progress spinner and clears it whatever `work` returns;
+    /// failing to clear it is the only error added.
+    pub fn with_progress<T>(&self, work: impl FnOnce(&C::Progress) -> T) -> Result<T, Error> {
+        let progress = self.console.progress();
+        let done = work(&progress);
+        progress.finish()?;
+        Ok(done)
     }
 
     pub fn store(&self) -> Store<'_, &'a B> {

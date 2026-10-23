@@ -29,7 +29,7 @@ fn a_scanned_app_whose_bundle_id_cannot_be_read_is_refused() {
         succeeded("Bar\n"),
     );
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(is_unreadable_by_plutil(&result), "{result:?}");
 }
@@ -43,7 +43,7 @@ fn a_scanned_app_whose_bundle_name_cannot_be_read_is_refused() {
         failed("Bar.app/Contents/Info.plist: Unexpected character\n"),
     );
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(is_unreadable_by_plutil(&result), "{result:?}");
 }
@@ -55,7 +55,7 @@ fn a_plist_value_printed_without_a_newline_is_read_whole() {
     let fake = FakeBackend::new();
     bar_app_answering(&fake, succeeded("com.foo.Bar"), succeeded("Bar"));
 
-    let scanned = app_scan(&fake, BAR).expect("app scan");
+    let scanned = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip).expect("app scan");
 
     assert_eq!(entry(&scanned, BAR).rules, ["app/com.foo.Bar"]);
 }
@@ -73,8 +73,8 @@ fn reports_name_the_app_by_its_bundle_name_else_its_file_name() {
     );
     unnamed.add_dir(format!("{BAR}/Contents/Library/LoginItems/BarHelper.app"));
 
-    let named = app_scan(&named, BAR).expect("app scan");
-    let unnamed = app_scan(&unnamed, BAR).expect("app scan");
+    let named = try_app(&named, BAR, &ALL_ROOTS, AggressiveItems::Skip).expect("app scan");
+    let unnamed = try_app(&unnamed, BAR, &ALL_ROOTS, AggressiveItems::Skip).expect("app scan");
 
     assert_eq!(
         named.plan.reports()[0].subject(),
@@ -92,7 +92,12 @@ fn refuses_a_file_named_like_an_app() {
     fake.add_file("/Users/me/Bar.app", "x");
     quiet(&fake);
 
-    let result = app_scan(&fake, "/Users/me/Bar.app");
+    let result = try_app(
+        &fake,
+        "/Users/me/Bar.app",
+        &ALL_ROOTS,
+        AggressiveItems::Skip,
+    );
 
     assert!(matches!(result, Err(Error::NotAnApp { .. })), "{result:?}");
 }
@@ -106,7 +111,7 @@ fn refuses_a_bundle_that_is_a_mounted_volume_before_reading_or_sizing_it() {
     quiet(&fake);
     fake.mount(BAR, 7);
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(&result, Err(Error::Mount { path }) if path == Path::new(BAR)),
@@ -130,7 +135,7 @@ fn a_system_command_that_cannot_be_run_fails_the_scan() {
     install_app(&fake, BAR, "com.foo.Bar", Some("Bar"));
     fake.respond_running(&[(1, "/sbin/launchd")]);
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(result, Err(Error::Fs(fs::Error::Command { .. }))),
@@ -153,7 +158,7 @@ fn system_command_output_that_is_not_utf8_fails_the_scan() {
         },
     );
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(result, Err(Error::Fs(fs::Error::ToolNotUtf8 { .. }))),
@@ -168,7 +173,7 @@ fn unreadable_running_programs_refuse_the_app() {
     receipts(&fake, "com.apple.pkg.Core\n");
     fake.respond(fs::running_argv(), failed("lsof: broken\n"));
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(&result, Err(Error::Refused { source: fs::Error::RunningUnknown { reason }, .. })

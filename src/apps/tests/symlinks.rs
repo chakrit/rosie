@@ -18,7 +18,12 @@ fn refuses_an_app_argument_through_a_symlink() {
     bar_app(&fake);
     fake.add_symlink("/Users/me/Bar.app", BAR);
 
-    let result = app_scan(&fake, "/Users/me/Bar.app");
+    let result = try_app(
+        &fake,
+        "/Users/me/Bar.app",
+        &ALL_ROOTS,
+        AggressiveItems::Skip,
+    );
 
     assert!(
         matches!(result, Err(Error::Fs(fs::Error::Symlink { .. }))),
@@ -45,8 +50,8 @@ fn a_symlinked_info_plist_makes_the_app_unreadable_to_app_and_orphan_scans() {
     let fake = FakeBackend::new();
     bar_app_with_a_linked_plist(&fake);
 
-    let app = app_scan(&fake, BAR);
-    let orphans = orphan_scan(&fake);
+    let app = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
+    let orphans = try_orphans(&fake, AggressiveItems::Skip);
 
     assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
     assert!(
@@ -77,8 +82,8 @@ fn a_symlinked_leftover_location_fails_app_and_orphan_scans() {
     fake.add_dir("/Users/me/RealCaches/com.gone.App");
     fake.add_symlink(lib("Caches"), "/Users/me/RealCaches");
 
-    let app = app_scan(&fake, BAR);
-    let orphans = orphan_scan(&fake);
+    let app = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
+    let orphans = try_orphans(&fake, AggressiveItems::Skip);
 
     assert!(is_symlink_refusal(&app), "{app:?}");
     assert!(is_symlink_refusal(&orphans), "{orphans:?}");
@@ -93,8 +98,8 @@ fn a_leftover_location_under_a_symlinked_library_fails_app_and_orphan_scans() {
     fake.add_file("/Users/me/RealLibrary/Preferences/com.gone.App.plist", "x");
     fake.add_symlink(format!("{HOME}/Library"), "/Users/me/RealLibrary");
 
-    let app = app_scan(&fake, BAR);
-    let orphans = orphan_scan(&fake);
+    let app = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
+    let orphans = try_orphans(&fake, AggressiveItems::Skip);
 
     assert!(is_symlink_refusal(&app), "{app:?}");
     assert!(is_symlink_refusal(&orphans), "{orphans:?}");
@@ -113,8 +118,8 @@ fn a_symlinked_app_folder_fails_every_installed_app_listing() {
     fake.add_symlink(format!("{HOME}/Applications"), "/Users/me/RealApps");
     fake.add_dir(lib("Caches/com.qux.Qux"));
 
-    let app = app_scan(&fake, BAR);
-    let orphans = orphan_scan(&fake);
+    let app = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
+    let orphans = try_orphans(&fake, AggressiveItems::Skip);
     let picker = picker_apps(&ctx(&fake, &ALL_ROOTS));
 
     assert!(is_symlink_refusal(&app), "{app:?}");
@@ -146,8 +151,8 @@ fn a_symlinked_wrapped_info_plist_is_refused_by_app_and_orphan_scans() {
     let fake = FakeBackend::new();
     wrapped_app_with_a_linked_plist(&fake);
 
-    let app = app_scan(&fake, NPLAYER);
-    let orphans = orphan_scan(&fake);
+    let app = try_app(&fake, NPLAYER, &ALL_ROOTS, AggressiveItems::Skip);
+    let orphans = try_orphans(&fake, AggressiveItems::Skip);
 
     assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
     assert!(
@@ -164,7 +169,7 @@ fn a_symlinked_wrapper_folder_makes_the_app_unreadable() {
     fake.add_symlink(format!("{NPLAYER}/Wrapper"), "/Users/me/Real.app/Wrapper");
     quiet(&fake);
 
-    let app = app_scan(&fake, NPLAYER);
+    let app = try_app(&fake, NPLAYER, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
 }
@@ -179,7 +184,7 @@ fn a_symlinked_bundle_folder_for_reports_is_refused() {
         "/Users/me/Items",
     );
 
-    let app = app_scan(&fake, BAR);
+    let app = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(is_symlink_refusal(&app), "{app:?}");
 }

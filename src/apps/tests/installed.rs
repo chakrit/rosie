@@ -75,7 +75,7 @@ fn an_installed_app_whose_id_cannot_be_read_fails_the_orphan_scan_naming_it() {
         let path = unreadable.set_up(&fake);
         fake.add_file(lib("Preferences/com.gone.App.plist"), "x");
 
-        let result = orphan_scan(&fake);
+        let result = try_orphans(&fake, AggressiveItems::Skip);
 
         let named = match &result {
             Err(Error::UnreadableApp { bundle, .. }) => bundle == Path::new(path),
@@ -98,7 +98,7 @@ fn an_installed_app_with_no_bundle_id_is_a_note_not_a_failure() {
     let path = Unreadable::MissingKey.set_up(&fake);
     fake.add_file(lib("Caches/com.gone.App"), "x");
 
-    let scanned = orphan_scan(&fake).expect("scan");
+    let scanned = try_orphans(&fake, AggressiveItems::Skip).expect("scan");
 
     let subjects: Vec<&str> = scanned.plan.reports().iter().map(|r| r.subject()).collect();
     assert_eq!(
@@ -193,7 +193,7 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
     fake.add_dir(lib("Group Containers/group.com.newin.nplayer"));
     fake.add_dir(lib("Containers/com.newin.nplayer"));
 
-    let scanned = app_scan(&fake, NPLAYER).expect("app scan");
+    let scanned = try_app(&fake, NPLAYER, &ALL_ROOTS, AggressiveItems::Skip).expect("app scan");
 
     assert_eq!(entry(&scanned, NPLAYER).rules, ["app/com.newin.nplayer"]);
     assert_eq!(
@@ -212,7 +212,7 @@ fn a_wrapper_holding_several_apps_has_no_info_plist() {
     );
     quiet(&fake);
 
-    let result = app_scan(&fake, NPLAYER);
+    let result = try_app(&fake, NPLAYER, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(result, Err(Error::NoInfoPlist { .. })),
@@ -248,7 +248,7 @@ fn an_install_folder_rosie_may_not_list_fails_the_orphan_scan_and_the_picker() {
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
     fake.fail_on("/Applications", Op::ReadDir, ErrorKind::PermissionDenied);
 
-    let orphans = orphan_scan(&fake);
+    let orphans = try_orphans(&fake, AggressiveItems::Skip);
     let picker = picker_apps(&ctx(&fake, &ALL_ROOTS));
 
     assert!(
@@ -282,7 +282,7 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
     );
     fake.add_dir(lib("Caches/com.gone.App"));
 
-    let orphans = orphan_scan(&fake);
+    let orphans = try_orphans(&fake, AggressiveItems::Skip);
     let picker = picker_apps(&ctx(&fake, &ALL_ROOTS)).expect("listing");
 
     let orphans = orphans.expect("orphan scan");
@@ -315,7 +315,7 @@ fn entries_other_than_apps_in_a_wrapper_do_not_count_as_wrapped_apps() {
     fake.add_dir(format!("{NPLAYER}/Wrapper/Extras"));
     quiet(&fake);
 
-    let scanned = app_scan(&fake, NPLAYER).expect("app scan");
+    let scanned = try_app(&fake, NPLAYER, &ALL_ROOTS, AggressiveItems::Skip).expect("app scan");
 
     assert_eq!(entry(&scanned, NPLAYER).rules, ["app/com.newin.nplayer"]);
 }
@@ -326,7 +326,7 @@ fn a_wrapped_app_without_an_info_plist_fails_the_scan() {
     fake.add_sized_file(format!("{NPLAYER}/Wrapper/nPlayer.app/nPlayer"), 1 << 20);
     quiet(&fake);
 
-    let result = app_scan(&fake, NPLAYER);
+    let result = try_app(&fake, NPLAYER, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(result, Err(Error::NoInfoPlist { .. })),
@@ -345,7 +345,7 @@ fn a_wrapper_rosie_may_not_list_fails_the_scan_with_the_denial() {
     );
     quiet(&fake);
 
-    let result = app_scan(&fake, NPLAYER);
+    let result = try_app(&fake, NPLAYER, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(
@@ -394,7 +394,7 @@ fn an_app_folder_entry_rosie_cannot_lstat_fails_the_orphan_scan() {
         fake.add_dir(hidden);
         fake.fail_on(hidden, Op::Lstat, ErrorKind::PermissionDenied);
 
-        let result = orphan_scan(&fake);
+        let result = try_orphans(&fake, AggressiveItems::Skip);
 
         assert!(
             matches!(result, Err(Error::Fs(fs::Error::Io { op: Op::Lstat, .. }))),

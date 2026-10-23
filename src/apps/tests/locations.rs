@@ -47,7 +47,7 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
     fake.add_dir(lib("Caches/com.foo.Bar"));
     fake.fail_on(lib("Caches"), Op::ReadDir, ErrorKind::Other);
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(
@@ -72,7 +72,7 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
         ErrorKind::PermissionDenied,
     );
 
-    let result = app_scan(&fake, BAR);
+    let result = try_app(&fake, BAR, &ALL_ROOTS, AggressiveItems::Skip);
 
     assert!(
         matches!(result, Err(Error::Fs(fs::Error::Io { op: Op::Lstat, .. }))),
@@ -104,15 +104,23 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
             }))
         )
     };
-    let app_scan = |fake: &FakeBackend| app_scan(fake, BAR);
 
     let bundle = with_unsizable_folder(&format!("{BAR}/Contents/Resources"));
     let leftover = with_unsizable_folder(&lib("Caches/com.foo.Bar/data"));
     let orphan = with_unsizable_folder(&lib("Caches/com.gone.App/data"));
 
-    assert!(fails(app_scan(&bundle)), "the app's own bundle");
-    assert!(fails(app_scan(&leftover)), "a leftover of the app");
-    assert!(fails(orphan_scan(&orphan)), "an orphan");
+    assert!(
+        fails(try_app(&bundle, BAR, &ALL_ROOTS, AggressiveItems::Skip)),
+        "the app's own bundle"
+    );
+    assert!(
+        fails(try_app(&leftover, BAR, &ALL_ROOTS, AggressiveItems::Skip)),
+        "a leftover of the app"
+    );
+    assert!(
+        fails(try_orphans(&orphan, AggressiveItems::Skip)),
+        "an orphan"
+    );
 }
 
 // volumes and placeholders

@@ -349,17 +349,18 @@ impl Columns {
 
 impl Section {
     fn lines(&self, columns: &Columns, palette: Palette, width: Width) -> Vec<String> {
-        let (heading, name_room) = match &self.heading {
+        let heading = match &self.heading {
             Heading::Folder(path) => {
                 let room = match width {
                     Width::Unbounded => None,
                     Width::Columns(columns) => Some(columns.max(MIN_NAME)),
                 };
-                (palette.folder(&fit(path, room)), columns.name_room(width))
+                palette.folder(&fit(path, room))
             }
-            Heading::Commands => ("commands".to_owned(), None),
-            Heading::ByHand => ("by hand".to_owned(), None),
+            Heading::Commands => "commands".to_owned(),
+            Heading::ByHand => "by hand".to_owned(),
         };
+        let name_room = columns.name_room(width);
 
         let items = self
             .items
@@ -415,22 +416,18 @@ impl Item {
 /// The status words, the details, and one hint on one line; several hints on the lines
 /// below in the stderr hint form.
 fn note_lines(note: &Note, palette: Palette) -> Vec<String> {
-    let one_hint = match note.hints.as_slice() {
-        [hint] => Some(hint.compact()),
-        _ => None,
+    let (one_hint, several) = match note.hints.as_slice() {
+        [] => (None, Vec::new()),
+        [hint] => (Some(hint.compact(palette)), Vec::new()),
+        several => (None, hint_lines(palette, several)),
     };
-    let quiet: Vec<String> = note.details.iter().cloned().chain(one_hint).collect();
     let status = note
         .status
         .as_ref()
         .map(|(tone, words)| palette.tone(*tone, words));
-    let quiet = (!quiet.is_empty()).then(|| palette.quiet(&quiet.join("; ")));
-    let first: Vec<String> = status.into_iter().chain(quiet).collect();
+    let details = (!note.details.is_empty()).then(|| palette.quiet(&note.details.join("; ")));
+    let first: Vec<String> = status.into_iter().chain(details).chain(one_hint).collect();
 
-    let several = match note.hints.as_slice() {
-        [] | [_] => Vec::new(),
-        several => hint_lines(palette, several),
-    };
     std::iter::once(first.join(&palette.quiet("; ")))
         .filter(|line| !line.is_empty())
         .chain(several)
@@ -599,6 +596,59 @@ status = "clean"
                 "  1.2 GB  x/y  …ong-artifact-folder-name",
             ]
             .join("\n")
+        );
+    }
+
+    #[test]
+    fn a_command_or_subject_too_long_for_the_screen_keeps_its_end() {
+        let plan = parsed(
+            r#"
+[[tool]]
+rule = "x/y"
+shell = "/bin/bash"
+cmd = "docker system prune --all --force --filter until=24h --volumes"
+status = "clean"
+
+[[report]]
+subject = "a login item with a name far longer than the screen is wide"
+steps = ["Remove it"]
+"#,
+        );
+
+        let listed = listing(&plan, Palette::plain(), Width::Columns(40));
+
+        assert_eq!(
+            listed,
+            [
+                "commands",
+                "  ?  x/y  … --filter until=24h --volumes",
+                "",
+                "by hand",
+                "          …onger than the screen is wide",
+                "     Remove it",
+            ]
+            .join("\n")
+        );
+    }
+
+    #[test]
+    fn one_hint_on_a_note_shows_its_command_in_the_command_color() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
+        let venv = found(
+            "/Users/me/src/old/.venv",
+            84_000_000,
+            "rosie/python-venv",
+            Tier::Aggressive,
+        );
+        builder.add_path(venv).expect("valid");
+        let plan = builder.build().plan;
+        let palette = Palette::for_stream(true, ColorChoice::Auto);
+
+        let colored = listing(&plan, palette, Width::Unbounded);
+
+        assert!(
+            colored.contains(&palette.hint_command("--aggressive")),
+            "{colored:?}"
         );
     }
 

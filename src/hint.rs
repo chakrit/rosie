@@ -64,12 +64,17 @@ impl Hint {
 impl Hint {
     /// The hint on one line, for a line that already says what failed: `to allow it:
     /// rosie roots add ~/x`, or flags run together: `to enter it: --enter-mounts
-    /// --enter-bundles`.
-    pub fn compact(&self) -> String {
+    /// --enter-bundles`. The label takes the hint-label color, the steps the command
+    /// color.
+    pub fn compact(&self, palette: Palette) -> String {
         let steps: Vec<String> = self.steps.iter().map(Step::to_string).collect();
         match steps.is_empty() {
-            true => self.label.clone(),
-            false => format!("{}: {}", self.label, steps.join(" ")),
+            true => palette.hint_label(&self.label),
+            false => format!(
+                "{} {}",
+                palette.hint_label(&format!("{}:", self.label)),
+                palette.hint_command(&steps.join(" "))
+            ),
         }
     }
 }
@@ -242,7 +247,7 @@ fn shell_word(text: &str) -> String {
 /// several as their [`hint_lines`], the first on the same line, uncolored.
 pub fn hints_text(hints: &[Hint]) -> String {
     match hints {
-        [hint] => hint.compact(),
+        [hint] => hint.compact(Palette::plain()),
         several => hint_lines(Palette::plain(), several).join("\n"),
     }
 }

@@ -24,6 +24,7 @@ use super::{Error, ExitStatus};
 use crate::apps::{self, AppScanner};
 use crate::fs::{self, Backend, EnterLinks, FsOp, UserInput};
 use crate::hint::{Command, Hint, hints_text};
+use crate::output::Palette;
 use crate::packs::Network;
 use crate::plan::{Counted, Delete, PlanStats, SkipReason, StatusKind};
 use crate::scan::{
@@ -166,7 +167,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 "through symlink {} → {}; {}",
                 shown.path(link),
                 shown.path(&target),
-                allow.compact()
+                allow.compact(Palette::plain())
             ),
             Err(unfollowed) => format!("{error}; {unfollowed}"),
         }
@@ -314,7 +315,7 @@ fn running(program: &Path, pid: u32) -> String {
 fn skip_reason(skipped: &Skipped) -> String {
     let reason = skipped.reason.reason();
     let hint = match skipped.reason {
-        WalkSkip::Closed(needs) => Some(enter_hint(needs).compact()),
+        WalkSkip::Closed(needs) => Some(enter_hint(needs).compact(Palette::plain())),
         WalkSkip::LinkOutsideRoots
         | WalkSkip::SealedMount
         | WalkSkip::SealedPlaceholder

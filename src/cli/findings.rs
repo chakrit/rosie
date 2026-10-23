@@ -54,7 +54,10 @@ fn walk_skip_line(skipped: &Skipped, mode: &Mode) -> String {
     let hints = walk_skip_hints(skipped, &skipped.path, mode);
     match hints.as_slice() {
         [] => format!("skipped {path}: {reason}"),
-        [hint] => format!("skipped {path}: {reason} ({})", hint.compact()),
+        [hint] => format!(
+            "skipped {path}: {reason} ({})",
+            hint.compact(Palette::plain())
+        ),
         several => {
             let lines = hint_lines(Palette::plain(), several).join("\n");
             format!("skipped {path}: {reason}\n{lines}")

@@ -18,11 +18,11 @@ fn main() -> ExitCode {
     ExitCode::from(status.code())
 }
 
-/// `NO_COLOR` set and not empty turns color off (<https://no-color.org>).
+/// `NO_COLOR` set, even empty, turns color off (`docs/spec/cli.md#output`).
 fn color_choice(no_color: Option<OsString>) -> ColorChoice {
     match no_color {
-        Some(value) if !value.is_empty() => ColorChoice::Never,
-        Some(_) | None => ColorChoice::Auto,
+        Some(_) => ColorChoice::Never,
+        None => ColorChoice::Auto,
     }
 }
 
@@ -43,4 +43,16 @@ fn gather_env() -> Result<Env, String> {
         pid: process::id(),
         now: SystemTime::now(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn any_no_color_turns_color_off_even_empty() {
+        assert_eq!(color_choice(None), ColorChoice::Auto);
+        assert_eq!(color_choice(Some("1".into())), ColorChoice::Never);
+        assert_eq!(color_choice(Some("".into())), ColorChoice::Never);
+    }
 }

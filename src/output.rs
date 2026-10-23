@@ -80,7 +80,7 @@ impl Line {
     }
 }
 
-/// The user's `NO_COLOR` (<https://no-color.org>): set and not empty turns color off.
+/// The user's `NO_COLOR`: set, even empty, turns color off.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColorChoice {
     Auto,

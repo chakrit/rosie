@@ -243,6 +243,7 @@ Flags for `scan`, `plan`, `clean`, bare `rosie`, and `check`:
 - `--only`, `--enter-bundles`, and `--enter-placeholders` exist only on `tree`, `caches`,
   and `check`.
 - Rule names for `--only` are listed by `rosie rules`.
+- `--only` accepts wildcards. *(target)*
 - A mode's flags follow its name or folder: `rosie scan caches --aggressive`, not
   `rosie scan --aggressive caches`. *(agent-inferred)*
 - Skip lines name the path and a short reason, with a flag hint only when that flag could

@@ -161,9 +161,7 @@ impl<B: Backend + Sync> Scanner<B> {
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }
-        self.ctx.snapshot_running()?;
-
-        Ok(self.walk_toward(&root, root_meta, &root, progress))
+        self.beside_snapshot(|| self.walk_toward(&root, root_meta, &root, progress))
     }
 
     /// Scans what a plan would hold at, above, and below `path`, a path the user typed,
@@ -184,18 +182,22 @@ impl<B: Backend + Sync> Scanner<B> {
             Err(error) if error.has_vanished() => return Err(Error::Missing { path: real }),
             Err(error) => return Err(Error::PathRefused(error)),
         }
-        self.ctx.snapshot_running()?;
         let anchor = entry::anchor(&real, self.ctx.paths()).to_path_buf();
         let anchor_meta = Cleanup::lstat(&anchor).perform(&self.ctx)?;
 
-        let scan = self.walk_toward(&anchor, anchor_meta, &real, progress);
+        let scan =
+            self.beside_snapshot(|| self.walk_toward(&anchor, anchor_meta, &real, progress))?;
         Ok(PathScan { path: real, scan })
     }
 
     /// Scans the fixed rule paths, with `~` taken as the injected home, and lists the
     /// tool rules' commands. An absent path is not planned.
     pub fn caches<P: Progress>(&self, progress: &P) -> Result<Scan, Error> {
-        self.ctx.snapshot_running()?;
+        self.beside_snapshot(|| self.claim_fixed(progress))
+    }
+
+    /// Claims the outermost fixed rule paths, and lists the tool rules' commands.
+    fn claim_fixed<P: Progress>(&self, progress: &P) -> Scan {
         let log = Log::default();
         let links = self.settings.walk.enter_links;
         let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
@@ -218,7 +220,15 @@ impl<B: Backend + Sync> Scanner<B> {
         let found = targets.finish();
         let mut builder = PlanBuilder::new(self.settings.aggressive);
         self.add_tools(&mut builder);
-        Ok(self.assemble(builder, found, log))
+        self.assemble(builder, found, log)
+    }
+
+    /// Runs `scan` beside the running-program snapshot, which the scan's delete checks
+    /// wait for; a scan that cannot read the snapshot fails.
+    fn beside_snapshot<T: Send>(&self, scan: impl FnOnce() -> T + Send) -> Result<T, Error> {
+        let (snapshot, scanned) = rayon::join(|| self.ctx.snapshot_running(), scan);
+        snapshot?;
+        Ok(scanned)
     }
 
     /// Walks from `start`, whose own `lstat` gave `start_meta`, down toward `target`, at

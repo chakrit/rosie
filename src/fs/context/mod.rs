@@ -131,7 +131,7 @@ impl<B: Backend> FsContext<B> {
     }
 
     /// Takes the running-program snapshot now, if no check has taken it yet, so a scan
-    /// that cannot read it fails before it starts rather than refusing each item.
+    /// that cannot read it fails rather than refusing each item.
     pub fn snapshot_running(&self) -> Result<(), Error> {
         self.running().map(|_| ())
     }

@@ -73,13 +73,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         network: &'a N,
         console: &'a mut C,
         env: &'a Env,
+        pid: u32,
         typed: Vec<String>,
     ) -> Result<Self, Error> {
         let probe = FsContext::new(
             backend,
             env.paths.bounds(Roots::Listed(Vec::new()), ROOT_UID),
         )?;
-        refuse_root(&probe, env.pid, typed)?;
+        refuse_root(&probe, pid, typed)?;
         let user_uid = UserInput::home_owner().perform(&probe)?;
 
         let own = FsContext::new(

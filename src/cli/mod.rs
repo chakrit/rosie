@@ -48,7 +48,6 @@ pub struct Env {
     pub cwd: PathBuf,
     /// This rosie executable, which elevation launches through sudo.
     pub exe: PathBuf,
-    pub pid: u32,
     pub now: SystemTime,
 }
 
@@ -85,20 +84,24 @@ pub struct App<B: Backend, N: Network, C: Console> {
     backend: VersionCheck<B>,
     network: N,
     console: C,
+    /// This process's id, which needs no environment: the elevated entry starts its
+    /// `ps` parent chain here before any `$HOME` is read.
+    pid: u32,
 }
 
 impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
-    pub fn new(backend: B, network: N, console: C) -> Self {
+    pub fn new(backend: B, network: N, console: C, pid: u32) -> Self {
         App {
             backend: VersionCheck::new(backend),
             network,
             console,
+            pid,
         }
     }
 
     /// Runs one command line; `argv` starts with the program name. `env` is called only
-    /// once argument parsing finds a command that needs it, so `--help` and `--version`
-    /// never require an environment to be gathered at all.
+    /// once argument parsing finds a command that needs it, so `--help`, `--version`, and
+    /// the elevated entry never require an environment to be gathered at all.
     pub fn run(
         &mut self,
         argv: impl IntoIterator<Item = OsString>,
@@ -110,17 +113,12 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             Err(error) => return self.show_parse_error(&error),
         };
 
-        let env = match env() {
-            Ok(env) => env,
-            Err(reason) => return self.show_env_error(&reason),
-        };
-
         let outcome = match cli.command {
-            Some(Command::Elevated { nonce }) => self.elevated(&env, nonce),
+            Some(Command::Elevated { nonce }) => self.elevated(nonce),
             Some(Command::User(command)) => {
-                self.command(&env, typed_args(&argv), |session| session.dispatch(command))
+                self.command(env, typed_args(&argv), |session| session.dispatch(command))
             }
-            None => self.command(&env, typed_args(&argv), |session| {
+            None => self.command(env, typed_args(&argv), |session| {
                 session.clean(Target::tree(cli.tree), Place::Command)
             }),
         };
@@ -150,22 +148,33 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     /// Opens a session for the command line `typed` and runs `command` in it.
     fn command(
         &mut self,
-        env: &Env,
+        env: impl FnOnce() -> Result<Env, String>,
         typed: Vec<String>,
         command: impl FnOnce(&mut Session<'_, VersionCheck<B>, N, C>) -> Result<ExitStatus, Error>,
     ) -> Result<ExitStatus, Error> {
-        let mut session =
-            Session::open(&self.backend, &self.network, &mut self.console, env, typed)?;
+        let env = match env() {
+            Ok(env) => env,
+            Err(reason) => return Ok(self.show_env_error(&reason)),
+        };
+
+        let mut session = Session::open(
+            &self.backend,
+            &self.network,
+            &mut self.console,
+            &env,
+            self.pid,
+            typed,
+        )?;
         command(&mut session)
     }
 
     /// The hidden entry the run launches through sudo; it passes its own four gates
     /// and never reaches the `sudo rosie` refusal.
-    fn elevated(&mut self, env: &Env, nonce: String) -> Result<ExitStatus, Error> {
+    fn elevated(&mut self, nonce: String) -> Result<ExitStatus, Error> {
         let invocation = Invocation {
             nonce,
             stdin: self.console.capture_stdin()?,
-            pid: env.pid,
+            pid: self.pid,
         };
 
         let mut reporter = self.console.reporter();

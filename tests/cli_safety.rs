@@ -61,6 +61,18 @@ fn the_elevated_entry_is_not_the_sudo_refusal_and_refuses_on_its_own_gates() {
     assert!(!ran.stderr.contains("without sudo"), "{}", ran.stderr);
 }
 
+#[test]
+fn the_elevated_entry_never_needs_home() {
+    // safety.md#elevation: the child gets the user's home from the stdin header.
+    let sandbox = Sandbox::new();
+    sandbox.running_as("0");
+
+    let ran = sandbox.run_without_home(&["__elevated", "0123456789abcdef0123456789abcdef"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert!(ran.stderr.contains("stdin is not a pipe"), "{}", ran.stderr);
+}
+
 // clean deletes only the confirmed plan, inside the roots
 
 #[test]

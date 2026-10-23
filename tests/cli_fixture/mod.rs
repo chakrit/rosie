@@ -164,9 +164,25 @@ impl Sandbox {
             paths: Paths::new(Path::new(HOME)).expect("absolute home"),
             cwd: PathBuf::from(CWD),
             exe: PathBuf::from(EXE),
-            pid: PID,
             now: self.now,
         };
+        self.run_in(script, args, || Ok(env))
+    }
+
+    /// Runs `rosie <args>` where the environment cannot be gathered, as with `$HOME`
+    /// unset.
+    pub fn run_without_home(&self, args: &[&str]) -> Ran {
+        self.run_in(Script::terminal(), args, || {
+            Err("HOME is not set".to_owned())
+        })
+    }
+
+    fn run_in(
+        &self,
+        script: Script,
+        args: &[&str],
+        env: impl FnOnce() -> Result<Env, String>,
+    ) -> Ran {
         let console = ScriptedConsole::new(script);
         let out = console.out.clone();
         let err = console.err.clone();
@@ -175,7 +191,7 @@ impl Sandbox {
         let argv = std::iter::once("rosie")
             .chain(args.iter().copied())
             .map(OsString::from);
-        let status = App::new(&self.fake, &self.net, console).run(argv, || Ok(env));
+        let status = App::new(&self.fake, &self.net, console, PID).run(argv, env);
 
         Ran {
             status,

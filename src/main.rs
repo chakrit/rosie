@@ -13,7 +13,7 @@ use rosie::packs::Https;
 
 fn main() -> ExitCode {
     let console = SystemConsole::new(color_choice(env::var_os("NO_COLOR")));
-    let mut app = App::new(RealBackend, Https::new(), console);
+    let mut app = App::new(RealBackend, Https::new(), console, process::id());
     let status = app.run(env::args_os(), gather_env);
     ExitCode::from(status.code())
 }
@@ -40,7 +40,6 @@ fn gather_env() -> Result<Env, String> {
         paths,
         cwd,
         exe,
-        pid: process::id(),
         now: SystemTime::now(),
     })
 }

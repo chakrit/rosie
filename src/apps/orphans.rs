@@ -37,11 +37,12 @@ where
         search.add_report(no_id_report(path)?);
     }
     for location in leftover_locations(ctx.paths()) {
-        for candidate in search.candidates(&location)? {
-            let reads_as_id = reads_as_bundle_id(&candidate.name, location.holds);
-            if reads_as_id && !claims.claim(&candidate.name) {
-                search.add(candidate, location.holds, RULE, Tier::Aggressive)?;
-            }
+        let orphaned = |name: &str| {
+            let reads_as_id = reads_as_bundle_id(name, location.holds);
+            (reads_as_id && !claims.claim(name)).then_some(())
+        };
+        for (candidate, ()) in search.candidates(&location, orphaned)? {
+            search.add(candidate, location.holds, RULE, Tier::Aggressive)?;
         }
     }
     search.finish()

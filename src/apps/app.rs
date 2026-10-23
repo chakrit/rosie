@@ -64,13 +64,8 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
             Err(NotAnEntry::Fs(error)) => return Err(unreadable(&path, error)),
             Err(refused) => return Err(refused.into()),
         };
-        let name = path
-            .file_name()
-            .unwrap_or_default()
-            .to_string_lossy()
-            .into();
         let itself = match (entry.meta().kind, is_app_path(&path)) {
-            (FileKind::Dir, true) => Candidate::of(entry, name),
+            (FileKind::Dir, true) => Candidate::of(entry),
             _ => None,
         };
         let Some(itself) = itself else {
@@ -102,23 +97,24 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
         search.add(itself, Holds::Plain, &rule, Tier::Normal)?;
 
         for location in leftover_locations(ctx.paths()) {
-            for candidate in search.candidates(&location)? {
+            let tier_of = |name: &str| {
                 let id_tier = bundle
                     .id
                     .as_ref()
-                    .filter(|id| claims_by_id(id, &candidate.name, location.holds))
-                    .map(|id| id_match_tier(id, &others, &candidate.name, location.holds));
+                    .filter(|id| claims_by_id(id, name, location.holds))
+                    .map(|id| id_match_tier(id, &others, name, location.holds));
                 let by_name = bundle
                     .name
                     .as_ref()
-                    .is_some_and(|name| claims_by_name(name, &candidate.name));
+                    .is_some_and(|own| claims_by_name(own, name));
                 match (id_tier, by_name) {
-                    (Some(tier), _) => search.add(candidate, location.holds, &rule, tier)?,
-                    (None, true) => {
-                        search.add(candidate, location.holds, &rule, Tier::Aggressive)?
-                    }
-                    (None, false) => {}
+                    (Some(tier), _) => Some(tier),
+                    (None, true) => Some(Tier::Aggressive),
+                    (None, false) => None,
                 }
+            };
+            for (candidate, tier) in search.candidates(&location, tier_of)? {
+                search.add(candidate, location.holds, &rule, tier)?;
             }
         }
 

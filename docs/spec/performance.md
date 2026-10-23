@@ -25,6 +25,8 @@ Everything should be fast, as per Rust standard. Speed budgets live in
   reports. *(agent-inferred)*
 - One `check` run reads the installed apps and the package receipts once for all its
   `.app` paths. *(agent-inferred)*
+- `app` and `orphans` scans `lstat` only the leftover-location entries whose names match.
+  *(agent-inferred)*
 
 ## Run
 

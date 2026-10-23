@@ -22,16 +22,9 @@ use crate::scan::{
 };
 use crate::tier::Tier;
 
-/// A file or folder a scan may match by name. Symlinks never match, so none is ever a
-/// candidate.
-pub(super) struct Candidate {
-    /// The entry's name; names that are not UTF-8 match nothing and are left out.
-    pub name: String,
-    found: Found,
-}
-
-/// What a matched candidate becomes.
-enum Found {
+/// A file or folder a scan matched by name, and what it becomes. Symlinks never match, so
+/// none is ever a candidate; names that are not UTF-8 match nothing.
+pub(super) enum Candidate {
     Item {
         entry: Entry,
         kind: ItemKind,
@@ -45,15 +38,9 @@ enum Found {
 
 impl Candidate {
     /// The candidate for a file or folder; nothing for a special file.
-    pub(super) fn of(entry: Entry, name: String) -> Option<Candidate> {
+    pub(super) fn of(entry: Entry) -> Option<Candidate> {
         let kind = entry.item_kind()?;
-        let found = Found::Item { entry, kind };
-        Some(Candidate { name, found })
-    }
-
-    fn skipped(path: PathBuf, name: String, reason: WalkSkip) -> Candidate {
-        let found = Found::Skip { path, reason };
-        Candidate { name, found }
+        Some(Candidate::Item { entry, kind })
     }
 }
 
@@ -84,12 +71,17 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         }
     }
 
-    /// The candidates in a leftover location. Symlinks never match, so they are left
-    /// out; a location rosie may not list is a walk skip, and an entry that vanishes
+    /// The candidates in a leftover location whose names `decide` picks, each with what
+    /// `decide` said of it; only a picked name is `lstat`ed. Symlinks never match, so they
+    /// are left out; a location rosie may not list is a walk skip, and an entry that vanishes
     /// between listing and `lstat` is gone. A location reached from home, or from `/`,
     /// across another volume is a mount skip without `enter_mounts`, as a fixed rule
     /// path is in `caches`, and is not listed.
-    pub(super) fn candidates(&mut self, location: &Location) -> Result<Vec<Candidate>, Error> {
+    pub(super) fn candidates<T>(
+        &mut self,
+        location: &Location,
+        decide: impl Fn(&str) -> Option<T>,
+    ) -> Result<Vec<(Candidate, T)>, Error> {
         let FolderLookup::Found(folder) = find_folder(self.ctx, &location.path)? else {
             return Ok(Vec::new());
         };
@@ -109,7 +101,10 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
 
         let mut candidates = Vec::new();
         for os_name in names {
-            let Some(name) = os_name.to_str().map(str::to_owned) else {
+            let Some(name) = os_name.to_str() else {
+                continue;
+            };
+            let Some(decided) = decide(name) else {
                 continue;
             };
             let found = match folder.entry(self.ctx, &os_name) {
@@ -118,10 +113,16 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                 Err(error) => return Err(error.into()),
             };
             match found {
-                InFolder::Entry(entry) => candidates.extend(Candidate::of(entry, name)),
+                InFolder::Entry(entry) => {
+                    candidates.extend(Candidate::of(entry).map(|candidate| (candidate, decided)))
+                }
                 InFolder::Symlink => {}
                 InFolder::Sealed(path, sealed) => {
-                    candidates.push(Candidate::skipped(path, name, sealed.skip()));
+                    let skipped = Candidate::Skip {
+                        path,
+                        reason: sealed.skip(),
+                    };
+                    candidates.push((skipped, decided));
                 }
             }
         }
@@ -136,9 +137,9 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         rule: &str,
         tier: Tier,
     ) -> Result<(), Error> {
-        let (entry, kind) = match candidate.found {
-            Found::Item { entry, kind } => (entry, kind),
-            Found::Skip { path, reason } => {
+        let (entry, kind) = match candidate {
+            Candidate::Item { entry, kind } => (entry, kind),
+            Candidate::Skip { path, reason } => {
                 self.log.skip(path, reason);
                 return Ok(());
             }

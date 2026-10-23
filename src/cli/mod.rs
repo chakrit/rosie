@@ -153,7 +153,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
         command: impl FnOnce(&mut Session<'_, VersionCheck<B>, N, C>) -> Result<ExitStatus, Error>,
     ) -> Result<ExitStatus, Error> {
         let env = match env() {
-            Ok(env) => env,
+            Ok(gathered) => gathered,
             Err(reason) => return Ok(self.show_env_error(&reason)),
         };
 

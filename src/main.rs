@@ -1,5 +1,7 @@
 //! The rosie binary: gathers the environment once and hands it to [`App`].
 
+#![deny(warnings)]
+
 use std::env;
 use std::ffi::OsString;
 use std::path::Path;

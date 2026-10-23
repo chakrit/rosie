@@ -46,8 +46,8 @@ Target behavior; not implemented. Fixture trees are written by hand until it is.
   behind a `Mutex`.
 - Tests assert on the fake's recorded calls, including which tool `cmd` a rule ran.
 - One contract suite runs against both the fake and `RealBackend` on a temp folder. It
-  covers file operations only; `lsof`, `ps`, and sudo are covered by the fake plus smoke tests of
-  the refusal paths.
+  covers file operations only; `lsof`, `ps`, and sudo are covered by the fake plus smoke
+  tests of the refusal paths.
 - The sandbox tier runs the CLI in-process through `App<B, N, C>` with the fake. A few
   smoke tests run the real binary on temp folders with `env_clear()` and a sandboxed
   `HOME` and `PATH`. Smoke tests pre-seed the pack folder, so they never pull from the

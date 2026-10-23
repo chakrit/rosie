@@ -63,9 +63,8 @@ impl Hint {
 
 impl Hint {
     /// The hint on one line, for a line that already says what failed: `to allow it:
-    /// rosie roots add ~/x`, or flags run together: `to enter it: --enter-mounts
-    /// --enter-bundles`. The label takes the hint-label color, the steps the command
-    /// color.
+    /// rosie roots add ~/x`, or flags run together: `to enter it: --enter-bundles
+    /// --enter-mounts`.
     pub fn compact(&self, palette: Palette) -> String {
         let steps: Vec<String> = self.steps.iter().map(Step::to_string).collect();
         match steps.is_empty() {

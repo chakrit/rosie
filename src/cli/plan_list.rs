@@ -353,7 +353,7 @@ impl Section {
             Heading::Folder(path) => {
                 let room = match width {
                     Width::Unbounded => None,
-                    Width::Columns(columns) => Some(columns.max(MIN_NAME)),
+                    Width::Columns(screen) => Some(screen.max(MIN_NAME)),
                 };
                 palette.folder(&fit(path, room))
             }

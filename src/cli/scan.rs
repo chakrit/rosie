@@ -197,37 +197,42 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Mode::Tree(TreeArgs { dir, rules, .. }) => {
                 let scanner = self.rule_scanner(config, settings, rules)?;
                 let dir = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
-                let progress = self.console.progress();
-                let scan = scanner.tree(&dir, &progress);
-                progress.finish()?;
-                Ok(scan?)
+                self.with_progress(|progress| scanner.tree(&dir, progress))
             }
             Mode::Caches { rules, .. } => {
                 let scanner = self.rule_scanner(config, settings, rules)?;
-                let progress = self.console.progress();
-                let scan = scanner.caches(&progress);
-                progress.finish()?;
-                Ok(scan?)
+                self.with_progress(|progress| scanner.caches(progress))
             }
             Mode::App { app, .. } => {
                 let ctx = self.roots_ctx(config)?;
-                let app = match app {
-                    Some(app) => self.absolute(app),
+                let bundle = match app {
+                    Some(given) => self.absolute(given),
                     None => self.pick_app(&ctx, app_usage)?,
                 };
-                let progress = self.console.progress();
-                let scan = AppScanner::new(&ctx).scan(&app, &settings, &progress);
-                progress.finish()?;
-                Ok(scan?)
+                self.with_progress(|progress| {
+                    AppScanner::new(&ctx).scan(&bundle, &settings, progress)
+                })
             }
             Mode::Orphans { .. } => {
                 let ctx = self.roots_ctx(config)?;
-                let progress = self.console.progress();
-                let scan = apps::scan_orphans(&ctx, &settings, &progress);
-                progress.finish()?;
-                Ok(scan?)
+                self.with_progress(|progress| apps::scan_orphans(&ctx, &settings, progress))
             }
         }
+    }
+
+    /// Runs `scan` under the live progress spinner, which is cleared whether or not the
+    /// scan succeeds.
+    fn with_progress<E>(
+        &self,
+        scan: impl FnOnce(&C::Progress) -> Result<Scan, E>,
+    ) -> Result<Scan, Error>
+    where
+        Error: From<E>,
+    {
+        let progress = self.console.progress();
+        let scanned = scan(&progress);
+        progress.finish()?;
+        Ok(scanned?)
     }
 
     fn pick_app(&mut self, ctx: &FsContext<&'a B>, usage: &str) -> Result<PathBuf, Error> {

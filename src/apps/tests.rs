@@ -28,7 +28,9 @@ const BAR: &str = "/Applications/Bar.app";
 const NPLAYER: &str = "/Applications/nPlayer.app";
 
 fn scanned_app(fake: &FakeBackend, roots: &[&str], aggressive: AggressiveItems) -> Scan {
-    scan_app(&ctx(fake, roots), Path::new(BAR), &settings(aggressive)).expect("app scan")
+    AppScanner::new(&ctx(fake, roots))
+        .scan(Path::new(BAR), &settings(aggressive))
+        .expect("app scan")
 }
 
 fn scanned_orphans(fake: &FakeBackend, aggressive: AggressiveItems) -> Scan {

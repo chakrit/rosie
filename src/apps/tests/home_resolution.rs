@@ -12,18 +12,12 @@ fn a_dotted_home_plans_the_same_app_scan_as_the_plain_home() {
     fake.add_file(lib("Caches/com.foo.Bar/data"), "x");
     quiet(&fake);
 
-    let plain = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    )
-    .expect("plain paths");
-    let dotted = scan_app(
-        &ctx_at_home(&fake, &ALL_ROOTS, DOTTED_HOME),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    )
-    .expect("dotted paths");
+    let plain = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip))
+        .expect("plain paths");
+    let dotted = AppScanner::new(&ctx_at_home(&fake, &ALL_ROOTS, DOTTED_HOME))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip))
+        .expect("dotted paths");
 
     assert_eq!(deletes(&dotted), deletes(&plain));
 }

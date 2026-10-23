@@ -1,12 +1,13 @@
 //! `rosie clean app <X.app>`: the bundle and the files it leaves behind
 //! (`docs/spec/app.md#rosie-clean-app-xapp`).
 
+use std::cell::OnceCell;
 use std::ffi::OsString;
 use std::path::Path;
 
 use super::Error;
 use super::bundle::{
-    Bundle, BundleId, Unidentified, Unlistable, installed_apps, is_app_path, read_bundle,
+    Bundle, BundleId, Installed, Unidentified, Unlistable, installed_apps, is_app_path, read_bundle,
 };
 use super::listing::{Listing, list_folder};
 use super::locations::{Holds, leftover_locations};
@@ -19,100 +20,155 @@ use crate::plan::Report;
 use crate::scan::{Entry, Mounts, NotAnEntry, Scan, Settings};
 use crate::tier::Tier;
 
-/// Scans for `app` and its leftovers in the user's home and the system folders.
-///
-/// The app argument is a user-typed path: a symlink or misspelling in it is refused, and
-/// so is a bundle that is a dataless placeholder, which rosie does not open, or the root
-/// of a mounted volume, since rosie never plans a mount point, which would plan the
-/// whole volume. A filesystem or `plutil` failure reading the bundle itself is
-/// [`Error::UnreadableBundle`]. Before any leftover is listed, the bundle passes its own
-/// delete checks: any refusal, such as a process running from it, a bundle outside the
-/// roots, or a mount point, refuses the whole operation, naming the reason, so nothing
-/// of an app that cannot be deleted is cleaned (`docs/spec/app.md`). A leftover a
-/// process runs from is refused alone. An installed app rosie cannot identify is
-/// reported, since leftovers the two apps share may be `clean`.
-///
-/// The app itself may have no bundle-ID key: it is the app the user asked to remove, not
-/// one rosie must first identify among others, so this is not refused. Its own bundle is
-/// still `clean` and its `CFBundleName` still matches leftovers by name (aggressively,
-/// like any name-only match); it simply has no bundle ID to match leftovers by.
-pub fn scan_app<B>(ctx: &FsContext<B>, app: &Path, settings: &Settings) -> Result<Scan, Error>
-where
-    B: Backend + Sync,
-{
-    let mounts = Mounts::from(settings.walk);
-    let path = UserInput::path(app, settings.walk.enter_links).perform(ctx)?;
-    let entry = match Entry::lstat(ctx, &path) {
-        Ok(entry) => entry,
-        Err(NotAnEntry::Fs(error)) => return Err(unreadable(&path, error)),
-        Err(refused) => return Err(refused.into()),
-    };
-    let name = path
-        .file_name()
-        .unwrap_or_default()
-        .to_string_lossy()
-        .into();
-    let itself = match (entry.meta().kind, is_app_path(&path)) {
-        (FileKind::Dir, true) => Candidate::of(entry, name),
-        _ => None,
-    };
-    let Some(itself) = itself else {
-        return Err(Error::NotAnApp { path });
-    };
-    let bundle = read_bundle(ctx, &path).map_err(|error| match error {
-        Error::Fs(source) => unreadable(&path, source),
-        described => described,
-    })?;
-    Cleanup::delete(&bundle.path)
-        .verify(ctx)
-        .map_err(|source| Error::Refused {
-            app: bundle.path.clone(),
-            source,
-        })?;
-    let installed = installed_apps(ctx)?;
-    let others: Vec<BundleId> = installed
-        .apps
-        .into_iter()
-        .filter(|other| other.path != bundle.path)
-        .map(|other| other.id)
-        .collect();
-    let rule = match &bundle.id {
-        Some(id) => format!("app/{}", id.as_str()),
-        None => "app".to_owned(),
-    };
+/// Scans apps through one context. What the machine has installed, its apps and its
+/// package receipts, is read on the first scan that needs it and reused by every later
+/// scan, so `rosie check` with several apps reads it once.
+pub struct AppScanner<'c, B: Backend> {
+    ctx: &'c FsContext<B>,
+    installed: OnceCell<Installed>,
+    packages: OnceCell<String>,
+}
 
-    let mut search = Search::new(ctx, mounts, settings.aggressive);
-    search.add(itself, Holds::Plain, &rule, Tier::Normal)?;
-
-    for location in leftover_locations(ctx.paths()) {
-        for candidate in search.candidates(&location)? {
-            let id_tier = bundle
-                .id
-                .as_ref()
-                .filter(|id| claims_by_id(id, &candidate.name, location.holds))
-                .map(|id| id_match_tier(id, &others, &candidate.name, location.holds));
-            let by_name = bundle
-                .name
-                .as_ref()
-                .is_some_and(|name| claims_by_name(name, &candidate.name));
-            match (id_tier, by_name) {
-                (Some(tier), _) => search.add(candidate, location.holds, &rule, tier)?,
-                (None, true) => search.add(candidate, location.holds, &rule, Tier::Aggressive)?,
-                (None, false) => {}
-            }
+impl<'c, B: Backend + Sync> AppScanner<'c, B> {
+    pub fn new(ctx: &'c FsContext<B>) -> Self {
+        AppScanner {
+            ctx,
+            installed: OnceCell::new(),
+            packages: OnceCell::new(),
         }
     }
 
-    for (package, tier) in receipts(ctx, &bundle, &others)? {
-        search.add_receipt(&package, tier)?;
+    /// Scans for `app` and its leftovers in the user's home and the system folders.
+    ///
+    /// The app argument is a user-typed path: a symlink or misspelling in it is refused, and
+    /// so is a bundle that is a dataless placeholder, which rosie does not open, or the root
+    /// of a mounted volume, since rosie never plans a mount point, which would plan the
+    /// whole volume. A filesystem or `plutil` failure reading the bundle itself is
+    /// [`Error::UnreadableBundle`]. Before any leftover is listed, the bundle passes its own
+    /// delete checks: any refusal, such as a process running from it, a bundle outside the
+    /// roots, or a mount point, refuses the whole operation, naming the reason, so nothing
+    /// of an app that cannot be deleted is cleaned (`docs/spec/app.md`). A leftover a
+    /// process runs from is refused alone. An installed app rosie cannot identify is
+    /// reported, since leftovers the two apps share may be `clean`.
+    ///
+    /// The app itself may have no bundle-ID key: it is the app the user asked to remove, not
+    /// one rosie must first identify among others, so this is not refused. Its own bundle is
+    /// still `clean` and its `CFBundleName` still matches leftovers by name (aggressively,
+    /// like any name-only match); it simply has no bundle ID to match leftovers by.
+    pub fn scan(&self, app: &Path, settings: &Settings) -> Result<Scan, Error> {
+        let ctx = self.ctx;
+        let mounts = Mounts::from(settings.walk);
+        let path = UserInput::path(app, settings.walk.enter_links).perform(ctx)?;
+        let entry = match Entry::lstat(ctx, &path) {
+            Ok(entry) => entry,
+            Err(NotAnEntry::Fs(error)) => return Err(unreadable(&path, error)),
+            Err(refused) => return Err(refused.into()),
+        };
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .into();
+        let itself = match (entry.meta().kind, is_app_path(&path)) {
+            (FileKind::Dir, true) => Candidate::of(entry, name),
+            _ => None,
+        };
+        let Some(itself) = itself else {
+            return Err(Error::NotAnApp { path });
+        };
+        let bundle = read_bundle(ctx, &path).map_err(|error| match error {
+            Error::Fs(source) => unreadable(&path, source),
+            described => described,
+        })?;
+        Cleanup::delete(&bundle.path)
+            .verify(ctx)
+            .map_err(|source| Error::Refused {
+                app: bundle.path.clone(),
+                source,
+            })?;
+        let installed = self.installed()?;
+        let others: Vec<BundleId> = installed
+            .apps
+            .iter()
+            .filter(|other| other.path != bundle.path)
+            .map(|other| other.id.clone())
+            .collect();
+        let rule = match &bundle.id {
+            Some(id) => format!("app/{}", id.as_str()),
+            None => "app".to_owned(),
+        };
+
+        let mut search = Search::new(ctx, mounts, settings.aggressive);
+        search.add(itself, Holds::Plain, &rule, Tier::Normal)?;
+
+        for location in leftover_locations(ctx.paths()) {
+            for candidate in search.candidates(&location)? {
+                let id_tier = bundle
+                    .id
+                    .as_ref()
+                    .filter(|id| claims_by_id(id, &candidate.name, location.holds))
+                    .map(|id| id_match_tier(id, &others, &candidate.name, location.holds));
+                let by_name = bundle
+                    .name
+                    .as_ref()
+                    .is_some_and(|name| claims_by_name(name, &candidate.name));
+                match (id_tier, by_name) {
+                    (Some(tier), _) => search.add(candidate, location.holds, &rule, tier)?,
+                    (None, true) => {
+                        search.add(candidate, location.holds, &rule, Tier::Aggressive)?
+                    }
+                    (None, false) => {}
+                }
+            }
+        }
+
+        for (package, tier) in self.receipts(&bundle, &others)? {
+            search.add_receipt(&package, tier)?;
+        }
+        for report in reports(ctx, &bundle)? {
+            search.add_report(report);
+        }
+        for unidentified in &installed.unidentified {
+            search.add_report(unidentified_report(unidentified, &bundle)?);
+        }
+        search.finish()
     }
-    for report in reports(ctx, &bundle)? {
-        search.add_report(report);
+
+    /// The installed apps, read on first use.
+    fn installed(&self) -> Result<&Installed, Error> {
+        if let Some(installed) = self.installed.get() {
+            return Ok(installed);
+        }
+        let read = installed_apps(self.ctx)?;
+        Ok(self.installed.get_or_init(|| read))
     }
-    for unidentified in &installed.unidentified {
-        search.add_report(unidentified_report(unidentified, &bundle)?);
+
+    /// The installed package receipts whose IDs are bundle-ID matches of the app, each
+    /// with the tier [`id_match_tier`] gives it. An app with no bundle ID matches none,
+    /// and needs no receipt listing.
+    fn receipts(&self, bundle: &Bundle, others: &[BundleId]) -> Result<Vec<(String, Tier)>, Error> {
+        let Some(id) = &bundle.id else {
+            return Ok(Vec::new());
+        };
+        let listed = self.packages()?;
+        let matching = listed
+            .lines()
+            .filter(|package| claims_by_id(id, package, Holds::Plain))
+            .map(|package| {
+                let tier = id_match_tier(id, others, package, Holds::Plain);
+                (package.to_owned(), tier)
+            });
+        Ok(matching.collect())
     }
-    search.finish()
+
+    /// The installed package receipt IDs, one per line, listed on first use.
+    fn packages(&self) -> Result<&str, Error> {
+        if let Some(packages) = self.packages.get() {
+            return Ok(packages);
+        }
+        let listed = self.ctx.run_tool_text(&pkgs_argv())?;
+        Ok(self.packages.get_or_init(|| listed))
+    }
 }
 
 /// A filesystem or `plutil` failure reading the typed bundle at `bundle`, named as such
@@ -142,27 +198,6 @@ fn id_match_tier(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -
 
 pub(super) fn pkgs_argv() -> SystemArgv {
     SystemTool::PKGUTIL.argv().arg("--pkgs")
-}
-
-/// The installed package receipts whose IDs are bundle-ID matches of the app, each with
-/// the tier [`id_match_tier`] gives it. An app with no bundle ID matches none.
-fn receipts<B: Backend>(
-    ctx: &FsContext<B>,
-    bundle: &Bundle,
-    others: &[BundleId],
-) -> Result<Vec<(String, Tier)>, Error> {
-    let Some(id) = &bundle.id else {
-        return Ok(Vec::new());
-    };
-    let listed = ctx.run_tool_text(&pkgs_argv())?;
-    let matching = listed
-        .lines()
-        .filter(|package| claims_by_id(id, package, Holds::Plain))
-        .map(|package| {
-            let tier = id_match_tier(id, others, package, Holds::Plain);
-            (package.to_owned(), tier)
-        });
-    Ok(matching.collect())
 }
 
 // reports

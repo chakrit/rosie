@@ -21,25 +21,26 @@ use super::findings::problem_line;
 use super::session::Session;
 use super::shown::Shown;
 use super::{Error, ExitStatus};
-use crate::apps;
-use crate::fs::{self, Backend, EnterLinks, FsContext, FsOp, UserInput};
+use crate::apps::{self, AppScanner};
+use crate::fs::{self, Backend, EnterLinks, FsOp, UserInput};
 use crate::hint::{Command, Hint, hints_text};
 use crate::packs::Network;
 use crate::plan::{Counted, Delete, PlanStats, SkipReason, StatusKind};
 use crate::scan::{
-    self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Scanner, Settings, Skipped,
-    WalkSkip,
+    self, Needs, PathScan, PathVerdict, Place, Planned, Refused, Settings, Skipped, WalkSkip,
 };
 
 impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// Prints one line per path, in columns, after scanning them all with one context,
-    /// so one running-process snapshot serves every path. Exits 0 when any path would be
+    /// so one running-process snapshot, and one read of the installed apps, serves every
+    /// path. Exits 0 when any path would be
     /// cleaned, else 1.
     pub fn check(&mut self, args: CheckArgs) -> Result<ExitStatus, Error> {
         let config = self.config()?;
         // The settings `rosie scan app` runs with under the same flags.
         let app_mode = args.flags.settings(config.walk);
         let scanner = self.rule_scanner(&config, app_mode, &args.rules)?;
+        let app_scanner = AppScanner::new(scanner.ctx());
 
         let mut lines = Vec::new();
         for typed in &args.paths {
@@ -48,7 +49,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             let scanned = scanner.path(&typed, &progress);
             progress.finish()?;
             let line = match scanned {
-                Ok(scanned) => self.judged(&scanned, &scanner, app_mode)?,
+                Ok(scanned) => self.judged(&scanned, &app_scanner, app_mode)?,
                 Err(scan::Error::Missing { path }) => Line {
                     word: Word::NoRule,
                     path: self.tilde().path(&path),
@@ -78,7 +79,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     fn judged(
         &mut self,
         scanned: &PathScan,
-        scanner: &Scanner<&'a B>,
+        app_scanner: &AppScanner<&'a B>,
         app_mode: Settings,
     ) -> Result<Line, Error> {
         for problem in &scanned.scan.problems {
@@ -92,7 +93,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             return Ok(line(&verdict, path, &shown));
         }
 
-        self.app_line(scanner.ctx(), path, app_mode, &verdict)
+        self.app_line(app_scanner, path, app_mode, &verdict)
     }
 
     /// The line for the `.app` at `path` from the plan `rosie scan app` makes for it:
@@ -102,14 +103,14 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// any other error of that scan is not about the bundle and propagates.
     fn app_line(
         &self,
-        ctx: &FsContext<&'a B>,
+        app_scanner: &AppScanner<&'a B>,
         path: &Path,
         app_mode: Settings,
         verdict: &PathVerdict,
     ) -> Result<Line, Error> {
         let shown = self.tilde();
 
-        let scanned = apps::scan_app(ctx, path, &app_mode);
+        let scanned = app_scanner.scan(path, &app_mode);
         let allow = match &scanned {
             Err(apps::Error::Refused {
                 source: fs::Error::OutsideRoots { path: refused },

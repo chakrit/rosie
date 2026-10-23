@@ -1,4 +1,5 @@
 use super::*;
+use crate::fs::fake::Call;
 
 /// One way an installed app's bundle ID cannot be read, set up in the fake; the path
 /// the scan must name.
@@ -193,12 +194,9 @@ fn an_app_scan_reads_the_id_of_a_wrapped_ios_app() {
     fake.add_dir(lib("Group Containers/group.com.newin.nplayer"));
     fake.add_dir(lib("Containers/com.newin.nplayer"));
 
-    let scanned = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(NPLAYER),
-        &settings(AggressiveItems::Skip),
-    )
-    .expect("app scan");
+    let scanned = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(NPLAYER), &settings(AggressiveItems::Skip))
+        .expect("app scan");
 
     assert_eq!(entry(&scanned, NPLAYER).rules, ["app/com.newin.nplayer"]);
     assert_eq!(
@@ -217,11 +215,8 @@ fn a_wrapper_holding_several_apps_has_no_info_plist() {
     );
     quiet(&fake);
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(NPLAYER),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(NPLAYER), &settings(AggressiveItems::Skip));
 
     assert!(
         matches!(result, Err(Error::NoInfoPlist { .. })),
@@ -314,11 +309,8 @@ fn only_app_folders_directly_in_a_plain_subfolder_are_installed_apps() {
 }
 
 fn wrapped_app_scan(fake: &FakeBackend) -> Result<Scan, Error> {
-    scan_app(
-        &ctx(fake, &ALL_ROOTS),
-        Path::new(NPLAYER),
-        &settings(AggressiveItems::Skip),
-    )
+    AppScanner::new(&ctx(fake, &ALL_ROOTS))
+        .scan(Path::new(NPLAYER), &settings(AggressiveItems::Skip))
 }
 
 #[test]
@@ -418,4 +410,33 @@ fn an_app_folder_entry_rosie_cannot_lstat_fails_the_orphan_scan() {
             "{hidden}: {result:?}"
         );
     }
+}
+
+// one scanner for many apps
+
+/// `rosie check` scans each `.app` it is given with one scanner, which reads the
+/// installed apps and the package receipts once for all of them.
+#[test]
+fn one_app_scanner_reads_the_installed_apps_and_receipts_once() {
+    let fake = FakeBackend::new();
+    installed_suite(&fake);
+    let ctx = ctx(&fake, &ALL_ROOTS);
+    let scanner = AppScanner::new(&ctx);
+
+    for app in [BAR, "/Applications/Suite/Baz.app"] {
+        scanner
+            .scan(Path::new(app), &settings(AggressiveItems::Skip))
+            .expect("app scan");
+    }
+
+    let calls = fake.calls();
+    let app_folder_listings = calls
+        .iter()
+        .filter(|call| matches!(call, Call::ReadDir(path) if path == Path::new("/Applications")))
+        .count();
+    let receipt_listings = calls
+        .iter()
+        .filter(|call| matches!(call, Call::Run(argv) if argv == pkgs_argv().as_argv()))
+        .count();
+    assert_eq!((app_folder_listings, receipt_listings), (1, 1));
 }

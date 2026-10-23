@@ -240,11 +240,8 @@ fn a_failing_receipt_listing_fails_the_scan() {
     bar_app(&fake);
     fake.respond(pkgs_argv(), failed("pkgutil: broken\n"));
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
     assert!(
         matches!(result, Err(Error::Fs(fs::Error::ToolFailed { .. }))),
@@ -305,11 +302,8 @@ fn refuses_the_plan_while_the_app_is_running() {
         (812, "/Applications/Bar.app/Contents/MacOS/Bar"),
     ]);
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
     assert!(
         matches!(&result, Err(Error::Refused { app, source: fs::Error::Running { pid: 812, .. } })
@@ -326,11 +320,8 @@ fn refuses_the_whole_plan_when_the_bundle_is_outside_the_roots() {
     bar_app(&fake);
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
 
-    let result = scan_app(
-        &ctx(&fake, &["/Users/me/Library"]),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &["/Users/me/Library"]))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
     assert!(
         matches!(&result, Err(Error::Refused { app, source: fs::Error::OutsideRoots { .. } })
@@ -345,11 +336,8 @@ fn a_process_from_a_sibling_app_does_not_block_the_plan() {
     bar_app(&fake);
     fake.respond_running(&[(812, "/Applications/Bar.app.old/Contents/MacOS/Bar")]);
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
     assert!(result.is_ok(), "{result:?}");
 }
@@ -391,8 +379,7 @@ fn refuses_an_argument_that_is_not_an_app_bundle() {
     fake.add_dir("/Users/me/code");
     quiet(&fake);
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
         Path::new("/Users/me/code"),
         &settings(AggressiveItems::Skip),
     );
@@ -459,12 +446,9 @@ fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_as_keep() {
     fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
     receipts(&fake, "com.foo.Bar.pkg\n");
 
-    let scanned = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(beta),
-        &settings(AggressiveItems::Skip),
-    )
-    .expect("app scan");
+    let scanned = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(beta), &settings(AggressiveItems::Skip))
+        .expect("app scan");
 
     assert_eq!(
         deletes(&scanned),
@@ -513,11 +497,8 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
         fake.add_dir(format!("{denied}/Helper.app"));
         fake.fail_on(&denied, Op::ReadDir, ErrorKind::PermissionDenied);
 
-        let result = scan_app(
-            &ctx(&fake, &ALL_ROOTS),
-            Path::new(BAR),
-            &settings(AggressiveItems::Skip),
-        );
+        let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+            .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
         assert!(matches!(result, Err(Error::Fs(_))), "{folder}: {result:?}");
     }
@@ -636,11 +617,8 @@ fn a_package_id_a_plan_cannot_hold_fails_the_scan() {
     bar_app(&fake);
     receipts(&fake, "com.foo.Bar.\0pkg\n");
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
     assert!(matches!(result, Err(Error::Plan(_))), "{result:?}");
 }

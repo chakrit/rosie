@@ -15,11 +15,7 @@ fn bar_app_answering(fake: &FakeBackend, id: CommandOutput, name: CommandOutput)
 }
 
 fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
-    scan_app(
-        &ctx(fake, &ALL_ROOTS),
-        Path::new(app),
-        &settings(AggressiveItems::Skip),
-    )
+    AppScanner::new(&ctx(fake, &ALL_ROOTS)).scan(Path::new(app), &settings(AggressiveItems::Skip))
 }
 
 /// `plutil` failing on the scanned app's own `Info.plist` makes the bundle unreadable.

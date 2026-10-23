@@ -9,7 +9,7 @@ use super::findings::{findings_lines, problem_line, stats_lines};
 use super::plan_list::{LeftOut, plan_listing};
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
-use crate::apps;
+use crate::apps::{self, AppScanner};
 use crate::config::Config;
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::output::Mark;
@@ -215,7 +215,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     Some(app) => self.absolute(app),
                     None => self.pick_app(&ctx, app_usage)?,
                 };
-                Ok(apps::scan_app(&ctx, &app, &settings)?)
+                Ok(AppScanner::new(&ctx).scan(&app, &settings)?)
             }
             Mode::Orphans { .. } => {
                 let ctx = self.roots_ctx(config)?;

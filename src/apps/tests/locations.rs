@@ -47,11 +47,8 @@ fn a_leftover_location_listing_that_fails_other_than_denied_fails_the_scan() {
     fake.add_dir(lib("Caches/com.foo.Bar"));
     fake.fail_on(lib("Caches"), Op::ReadDir, ErrorKind::Other);
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
     assert!(
         matches!(
@@ -76,11 +73,8 @@ fn an_entry_rosie_cannot_lstat_fails_the_scan() {
         ErrorKind::PermissionDenied,
     );
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
 
     assert!(
         matches!(result, Err(Error::Fs(fs::Error::Io { op: Op::Lstat, .. }))),
@@ -113,11 +107,8 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
         )
     };
     let app_scan = |fake: &FakeBackend| {
-        scan_app(
-            &ctx(fake, &ALL_ROOTS),
-            Path::new(BAR),
-            &settings(AggressiveItems::Skip),
-        )
+        AppScanner::new(&ctx(fake, &ALL_ROOTS))
+            .scan(Path::new(BAR), &settings(AggressiveItems::Skip))
     };
 
     let bundle = with_unsizable_folder(&format!("{BAR}/Contents/Resources"));
@@ -202,7 +193,9 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
             },
             aggressive: AggressiveItems::Skip,
         };
-        scan_app(&ctx(fake, &ALL_ROOTS), Path::new(BAR), &settings).expect("app scan")
+        AppScanner::new(&ctx(fake, &ALL_ROOTS))
+            .scan(Path::new(BAR), &settings)
+            .expect("app scan")
     };
     let skips = |scanned: &Scan| -> Vec<(String, WalkSkip)> {
         let skipped = scanned.skipped.iter();

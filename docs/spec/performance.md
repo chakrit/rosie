@@ -23,6 +23,8 @@ Everything should be fast, as per Rust standard. Speed budgets live in
 - The walk `lstat`s only folders, links it follows, and the entries of a folder holding a
   fixed rule path. It passes over any other entry on the kind its folder listing
   reports. *(agent-inferred)*
+- One `check` run reads the installed apps and the package receipts once for all its
+  `.app` paths. *(agent-inferred)*
 
 ## Run
 

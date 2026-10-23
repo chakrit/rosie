@@ -18,8 +18,7 @@ fn refuses_an_app_argument_through_a_symlink() {
     bar_app(&fake);
     fake.add_symlink("/Users/me/Bar.app", BAR);
 
-    let result = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
+    let result = AppScanner::new(&ctx(&fake, &ALL_ROOTS)).scan(
         Path::new("/Users/me/Bar.app"),
         &settings(AggressiveItems::Skip),
     );
@@ -49,11 +48,8 @@ fn a_symlinked_info_plist_makes_the_app_unreadable_to_app_and_orphan_scans() {
     let fake = FakeBackend::new();
     bar_app_with_a_linked_plist(&fake);
 
-    let app = scan_app(
-        &ctx(&fake, &ALL_ROOTS),
-        Path::new(BAR),
-        &settings(AggressiveItems::Skip),
-    );
+    let app = AppScanner::new(&ctx(&fake, &ALL_ROOTS))
+        .scan(Path::new(BAR), &settings(AggressiveItems::Skip));
     let orphans = scan_orphans(&ctx(&fake, &ALL_ROOTS), &settings(AggressiveItems::Skip));
 
     assert!(is_unreadable_through_a_symlink(&app), "{app:?}");
@@ -77,11 +73,7 @@ fn is_symlink_refusal(result: &Result<Scan, Error>) -> bool {
 }
 
 fn app_scan(fake: &FakeBackend, app: &str) -> Result<Scan, Error> {
-    scan_app(
-        &ctx(fake, &ALL_ROOTS),
-        Path::new(app),
-        &settings(AggressiveItems::Skip),
-    )
+    AppScanner::new(&ctx(fake, &ALL_ROOTS)).scan(Path::new(app), &settings(AggressiveItems::Skip))
 }
 
 fn orphan_scan(fake: &FakeBackend) -> Result<Scan, Error> {

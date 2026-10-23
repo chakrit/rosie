@@ -3,14 +3,15 @@
 //! reads the tool's version, and a version rosie was not tested with draws a warning. The
 //! run goes on either way.
 
-use std::ffi::{OsStr, OsString};
+use std::ffi::OsStr;
 use std::fmt;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use super::backend::{
-    Argv, Backend, CommandOutput, Exit, Metadata, SystemTool, VersionFormat, VersionSource,
+    Argv, Backend, CommandOutput, DirEntry, Exit, Metadata, SystemTool, VersionFormat,
+    VersionSource,
 };
 
 /// The macOS version rosie was tested on; it stands for the tools that report no version
@@ -224,7 +225,7 @@ fn after_in_first_line<'t>(text: &'t str, prefix: &str, end: char) -> Option<&'t
 }
 
 impl<B: Backend> Backend for VersionCheck<B> {
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<OsString>> {
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         self.inner.read_dir(path)
     }
 

@@ -10,9 +10,10 @@ forced through it; there are no exceptions.
 - The security layer is absolute: every protection must pass on its own for an item to
   go through. The only exceptions are sanctioned escape hatches, such as rosie's own
   metadata methods and `allow_outside_roots`.
-- The layer is a `Backend` trait: read_dir, metadata via `lstat` (allocated size, dev and
-  inode, file type, owner, `st_flags`), file reads for Lua, remove, commands, sudo, and
-  the metadata methods below.
+- The layer is a `Backend` trait: read_dir (each entry's name and the kind the listing
+  reports), metadata via `lstat` (allocated size, dev and inode, file type, owner,
+  `st_flags`), file reads for Lua, remove, commands, sudo, and the metadata methods
+  below.
 - `RealBackend` implements it for the machine; tests inject an in-memory fake
   ([testing.md](testing.md)).
 - The layer's one concrete wrapper is `FsContext<B: Backend>`, mostly for security

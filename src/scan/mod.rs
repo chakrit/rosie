@@ -41,7 +41,7 @@ pub use sizing::{Measure, Sizer};
 pub use skip::{Needs, WalkSkip, WalkSkips};
 pub(crate) use verdict::{PathVerdict, Place, Planned};
 
-use fixed::{FixedClaim, FixedTargets};
+use fixed::{FixedClaim, FixedPaths, FixedTargets};
 use targets::Targets;
 use walk::{TreeWalk, Walked};
 
@@ -238,7 +238,7 @@ impl<B: Backend + Sync> Scanner<B> {
         let links = self.settings.walk.enter_links;
         let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
         let fixed = fixed.under(start).along(target);
-        let fixed = fixed::by_path(fixed.report_refused(&log));
+        let fixed = FixedPaths::of(fixed.report_refused(&log));
 
         let targets = Targets::new(&self.ctx, &log, progress);
         let walk = TreeWalk {

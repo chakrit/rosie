@@ -2,11 +2,10 @@
 //! `~/.local/share/rosie`, not checked against `roots`, and refused through a symlink in
 //! any component (`docs/spec/safety.md#rosies-own-data`).
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use super::{FsOp, sealed};
-use crate::fs::backend::{Backend, FileKind, Metadata};
+use crate::fs::backend::{Backend, DirEntry, FileKind, Metadata};
 use crate::fs::context::FsContext;
 use crate::fs::error::Error;
 
@@ -129,9 +128,9 @@ impl sealed::Sealed for Rename<'_> {}
 impl sealed::Sealed for Delete<'_> {}
 
 impl<B: Backend> FsOp<B> for ReadDir<'_> {
-    type Output = Vec<OsString>;
+    type Output = Vec<DirEntry>;
 
-    fn perform(self, ctx: &FsContext<B>) -> Result<Vec<OsString>, Error> {
+    fn perform(self, ctx: &FsContext<B>) -> Result<Vec<DirEntry>, Error> {
         ctx.read_own_dir(self.path)
     }
 }
@@ -152,12 +151,12 @@ impl<B: Backend> FsOp<B> for Entries<'_> {
             Err(error) => return Err(error),
         }
 
-        let mut names = Rosie::read_dir(self.path).perform(ctx)?;
-        names.sort();
-        names
+        let mut listed = Rosie::read_dir(self.path).perform(ctx)?;
+        listed.sort_by(|a, b| a.name.cmp(&b.name));
+        listed
             .into_iter()
-            .map(|name| {
-                let path = self.path.join(name);
+            .map(|entry| {
+                let path = self.path.join(entry.name);
                 let meta = Rosie::lstat(&path).perform(ctx)?;
                 Ok((path, meta.kind))
             })

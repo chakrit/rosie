@@ -9,7 +9,7 @@ use super::layers::{self, RuleLayers};
 use super::lua::LuaSandbox;
 use super::name::{Name, RuleId};
 use super::rule::{Detection, Rule, Shape};
-use crate::fs::{Backend, Cleanup, FsContext, FsOp};
+use crate::fs::{Backend, Cleanup, DirEntry, FsContext, FsOp};
 use crate::tier::Tier;
 
 /// Every rule from every layer, in identity order, with the folder rules indexed once
@@ -95,8 +95,8 @@ impl RuleSet {
 pub struct Candidate<'a> {
     /// The folder, already `lstat`ed by the walk as a folder, not a symlink.
     pub path: &'a Path,
-    /// The names in the folder's parent, the folder's own included.
-    pub siblings: &'a [OsString],
+    /// The entries in the folder's parent, the folder's own included.
+    pub siblings: &'a [DirEntry],
 }
 
 /// A folder rule under one of its target names, with the tier that target came from.
@@ -133,7 +133,7 @@ impl TargetRule {
                 let siblings = candidate
                     .siblings
                     .iter()
-                    .map(OsString::as_os_str)
+                    .map(|entry| entry.name.as_os_str())
                     .filter(|&name| Some(name) != own_name);
                 let sibling_ok = markers
                     .sibling()
@@ -152,7 +152,7 @@ impl TargetRule {
                         path: candidate.path.to_path_buf(),
                         source: Box::new(source),
                     })?;
-                Ok(inside.match_any(listing.iter().map(OsString::as_os_str)))
+                Ok(inside.match_any(listing.iter().map(|entry| entry.name.as_os_str())))
             }
         }
     }

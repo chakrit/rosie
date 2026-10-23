@@ -131,7 +131,9 @@ fn installed_formulae<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<String>, Err
         };
         // A formula named in bytes that are not UTF-8 could only claim a leftover named
         // the same way, and the scan never considers such a name.
-        let readable = names.into_iter().filter_map(|name| name.into_string().ok());
+        let readable = names
+            .into_iter()
+            .filter_map(|entry| entry.name.into_string().ok());
         formulae.extend(readable);
     }
     Ok(formulae)

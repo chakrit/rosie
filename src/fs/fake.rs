@@ -18,14 +18,14 @@ mod rename;
 mod walk;
 
 use std::collections::{BTreeMap, HashMap, HashSet};
-use std::ffi::OsString;
 use std::io::{self, ErrorKind};
 use std::ops::Bound;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 
 use super::backend::{
-    Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS, SystemTool,
+    Argv, Backend, CommandOutput, DirEntry, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS,
+    SystemTool,
 };
 use super::context::running_argv;
 use super::error::Op;
@@ -240,7 +240,7 @@ impl FakeBackend {
 }
 
 impl Backend for FakeBackend {
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<OsString>> {
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         let state = self.begin(Call::ReadDir(path.into()), path, Op::ReadDir)?;
         let key = state.follow(path)?;
         let node = state.node_at(&key);
@@ -251,11 +251,15 @@ impl Backend for FakeBackend {
             return Err(ErrorKind::PermissionDenied.into());
         }
 
-        let names = state
+        let listed = state
             .children(&key)
-            .filter_map(|(child, _)| child.file_name().map(OsString::from))
+            .filter_map(|(child, _)| {
+                let name = child.file_name()?.to_os_string();
+                let kind = state.node_at(&child).body.kind();
+                Some(DirEntry { name, kind })
+            })
             .collect();
-        Ok(names)
+        Ok(listed)
     }
 
     fn lstat(&self, path: &Path) -> io::Result<Metadata> {
@@ -598,6 +602,8 @@ fn parent_of(path: &Path) -> io::Result<&Path> {
 
 #[cfg(test)]
 mod tests {
+    use std::ffi::OsString;
+
     use super::*;
 
     #[test]
@@ -613,7 +619,8 @@ mod tests {
             .expect("list folded folder");
 
         assert_eq!(meta.kind, FileKind::File);
-        assert_eq!(listing, vec![OsString::from("Code")]);
+        let names: Vec<_> = listing.into_iter().map(|entry| entry.name).collect();
+        assert_eq!(names, vec![OsString::from("Code")]);
     }
 
     #[test]

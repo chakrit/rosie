@@ -1,6 +1,5 @@
 //! `Backend` for the machine, on std only: no `libc`, no FFI.
 
-use std::ffi::OsString;
 use std::fs;
 use std::io::{self, BufRead as _, BufReader, Read, Write};
 use std::os::macos::fs::MetadataExt as _;
@@ -11,7 +10,9 @@ use std::process::{Command, ExitStatus, Stdio};
 use std::sync::mpsc::{self, Sender};
 use std::thread::{self, ScopedJoinHandle};
 
-use super::backend::{Argv, Backend, CommandOutput, Exit, FileKind, Metadata, SystemTool};
+use super::backend::{
+    Argv, Backend, CommandOutput, DirEntry, Exit, FileKind, Metadata, SystemTool,
+};
 
 /// `st_blocks` counts 512-byte units regardless of the volume's block size.
 const BLOCK_UNIT: u64 = 512;
@@ -20,9 +21,15 @@ const BLOCK_UNIT: u64 = 512;
 pub struct RealBackend;
 
 impl Backend for RealBackend {
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<OsString>> {
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         fs::read_dir(path)?
-            .map(|entry| entry.map(|entry| entry.file_name()))
+            .map(|entry| {
+                let entry = entry?;
+                Ok(DirEntry {
+                    kind: kind_of(entry.file_type()?),
+                    name: entry.file_name(),
+                })
+            })
             .collect()
     }
 

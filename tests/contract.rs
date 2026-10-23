@@ -8,17 +8,17 @@ use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::Path;
 
-use common::{Harness, RealHarness, contract, empty_bounds, error_kind, sorted};
+use common::{Harness, RealHarness, contract, empty_bounds, error_kind, sorted_names};
 use rosie::fs::{
-    Backend, Bounds, Cleanup, EnterLinks, Error, FileKind, FsContext, FsOp, Paths, RealBackend,
-    Roots, Rosie, UserInput,
+    Backend, Bounds, Cleanup, DirEntry, EnterLinks, Error, FileKind, FsContext, FsOp, Paths,
+    RealBackend, Roots, Rosie, UserInput,
 };
 
 contract!(
     writes_reads_and_overwrites_files,
     creating_a_file_refuses_a_name_taken_under_another_case,
     creating_a_file_refuses_a_symlink_without_following_it,
-    lists_folder_entries_by_name,
+    lists_folder_entries_with_their_kinds,
     lstat_reports_the_entry_itself,
     hardlinks_share_an_inode_and_count_their_names,
     folders_count_two_names_plus_their_entries,
@@ -62,7 +62,7 @@ fn creating_a_file_refuses_a_name_taken_under_another_case(h: &impl Harness) {
     assert_eq!(error_kind(clash), ErrorKind::AlreadyExists);
     assert_eq!(h.backend().read_file(&first).expect("read"), b"first");
     assert_eq!(
-        sorted(h.backend().read_dir(h.root()).expect("list")),
+        sorted_names(h.backend().read_dir(h.root()).expect("list")),
         vec![OsString::from("ok.toml")]
     );
 }
@@ -78,7 +78,9 @@ fn creating_a_file_refuses_a_symlink_without_following_it(h: &impl Harness) {
     assert_eq!(error_kind(h.backend().lstat(&target)), ErrorKind::NotFound);
 }
 
-fn lists_folder_entries_by_name(h: &impl Harness) {
+// The walk passes over a file or an unfollowed link on its listed kind alone.
+
+fn lists_folder_entries_with_their_kinds(h: &impl Harness) {
     let backend = h.backend();
     backend
         .create_dir_all(&h.root().join("a/nested/deep"))
@@ -88,10 +90,19 @@ fn lists_folder_entries_by_name(h: &impl Harness) {
         .expect("write");
     h.symlink(&h.root().join("a/link"), Path::new("nested"));
 
-    let names = sorted(backend.read_dir(&h.root().join("a")).expect("list"));
+    let mut listed = backend.read_dir(&h.root().join("a")).expect("list");
+    listed.sort_by(|a, b| a.name.cmp(&b.name));
 
-    let expected: Vec<OsString> = ["file.txt", "link", "nested"].map(OsString::from).into();
-    assert_eq!(names, expected);
+    let expected = [
+        ("file.txt", FileKind::File),
+        ("link", FileKind::Symlink),
+        ("nested", FileKind::Dir),
+    ]
+    .map(|(name, kind)| DirEntry {
+        name: OsString::from(name),
+        kind,
+    });
+    assert_eq!(listed, expected);
 }
 
 fn lstat_reports_the_entry_itself(h: &impl Harness) {
@@ -310,7 +321,7 @@ fn paths_through_a_linked_folder_reach_its_target(h: &impl Harness) {
     let contents = backend
         .read_file(&link.join("file.txt"))
         .expect("read through link");
-    let listing = backend.read_dir(&link).expect("list a linked folder");
+    let listing = sorted_names(backend.read_dir(&link).expect("list a linked folder"));
 
     assert_eq!(meta.kind, FileKind::File);
     assert_eq!(contents, b"through");
@@ -331,7 +342,7 @@ fn writes_land_inside_a_linked_folder(h: &impl Harness) {
         .create_dir_all(&link.join("made/deep"))
         .expect("create through link");
 
-    let names = sorted(backend.read_dir(&source).expect("list target"));
+    let names = sorted_names(backend.read_dir(&source).expect("list target"));
     let expected: Vec<OsString> = ["made", "written.txt"].map(OsString::from).into();
     assert_eq!(names, expected);
     assert_eq!(
@@ -422,7 +433,7 @@ fn gate_refuses_own_data_through_a_symlink(h: &impl Harness) {
     assert!(matches!(deleted, Err(Error::Symlink { .. })), "{deleted:?}");
     assert!(matches!(written, Err(Error::Symlink { .. })), "{written:?}");
     assert_eq!(
-        sorted(backend.read_dir(&victim).expect("list victim")),
+        sorted_names(backend.read_dir(&victim).expect("list victim")),
         vec![OsString::from("precious.txt")]
     );
 }
@@ -468,7 +479,7 @@ fn a_trailing_slash_or_dot_follows_the_final_link_and_demands_a_folder(h: &impl 
     assert_eq!(error_kind(new_file), ErrorKind::NotFound);
     assert_eq!(error_kind(unlinked_folder), ErrorKind::PermissionDenied);
     assert_eq!(
-        sorted(backend.read_dir(h.root()).expect("list")),
+        sorted_names(backend.read_dir(h.root()).expect("list")),
         vec![OsString::from("file"), OsString::from("link")]
     );
 }

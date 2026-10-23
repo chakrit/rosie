@@ -20,8 +20,8 @@ pub const ELOOP: i32 = 62;
 ///
 /// No `Send` or `Sync` bound: only parallel functions add `where B: Sync`.
 pub trait Backend {
-    /// Names of the entries in a folder, excluding `.` and `..`, in no particular order.
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<OsString>>;
+    /// The entries of a folder, excluding `.` and `..`, in no particular order.
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>>;
 
     /// Metadata of the path itself, never of a symlink's target.
     fn lstat(&self, path: &Path) -> io::Result<Metadata>;
@@ -71,7 +71,7 @@ pub trait Backend {
 }
 
 impl<B: Backend + ?Sized> Backend for &B {
-    fn read_dir(&self, path: &Path) -> io::Result<Vec<OsString>> {
+    fn read_dir(&self, path: &Path) -> io::Result<Vec<DirEntry>> {
         (**self).read_dir(path)
     }
 
@@ -153,6 +153,14 @@ impl Metadata {
     pub fn is_dataless(&self) -> bool {
         self.flags & SF_DATALESS != 0
     }
+}
+
+/// One entry of a folder listing. Its kind is what the listing reports (`d_type`), with
+/// no `lstat` of the entry: enough to pass over an entry, never to act on one.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DirEntry {
+    pub name: OsString,
+    pub kind: FileKind,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

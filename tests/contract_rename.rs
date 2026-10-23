@@ -8,7 +8,7 @@ use std::ffi::OsString;
 use std::io::ErrorKind;
 use std::path::Path;
 
-use common::{Harness, contract, empty_bounds, error_kind, sorted};
+use common::{Harness, contract, empty_bounds, error_kind, sorted_names};
 use rosie::fs::{Backend, Error, FileKind, FsContext, FsOp, Rosie};
 
 contract!(
@@ -31,7 +31,7 @@ contract!(
 );
 
 fn names(backend: &impl Backend, dir: &Path) -> Vec<OsString> {
-    sorted(backend.read_dir(dir).expect("list folder"))
+    sorted_names(backend.read_dir(dir).expect("list folder"))
 }
 
 fn os(list: &[&str]) -> Vec<OsString> {
@@ -83,13 +83,7 @@ fn case_only_rename_of_a_file_respells_it(h: &impl Harness) {
         .rename(&original, &respelled)
         .expect("case-only rename");
 
-    let names = sorted(
-        backend
-            .read_dir(h.root())
-            .expect("read root")
-            .into_iter()
-            .collect(),
-    );
+    let names = sorted_names(backend.read_dir(h.root()).expect("read root"));
     assert_eq!(names, vec![OsString::from("X.txt")]);
     assert_eq!(backend.read_file(&respelled).expect("read"), b"data");
 }
@@ -109,13 +103,7 @@ fn case_only_rename_of_a_non_empty_folder_respells_it(h: &impl Harness) {
         .rename(&original, &respelled)
         .expect("case-only rename");
 
-    let names = sorted(
-        backend
-            .read_dir(h.root())
-            .expect("read root")
-            .into_iter()
-            .collect(),
-    );
+    let names = sorted_names(backend.read_dir(h.root()).expect("read root"));
     assert_eq!(names, vec![OsString::from("Dir")]);
     assert_eq!(
         backend

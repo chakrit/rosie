@@ -95,14 +95,14 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
         folder_meta: Metadata,
         total: Measure,
     ) {
-        let names = match Cleanup::read_dir(&folder).perform(self.ctx) {
-            Ok(names) => names,
+        let listed = match Cleanup::read_dir(&folder).perform(self.ctx) {
+            Ok(listed) => listed,
             Err(error) => return self.log.entry_failed(folder, error),
         };
 
         let mut sum = 0u64;
-        for name in names {
-            let path = folder.join(name);
+        for entry in listed {
+            let path = folder.join(entry.name);
             let meta = match Cleanup::lstat(&path).perform(self.ctx) {
                 Ok(meta) => meta,
                 Err(error) => {

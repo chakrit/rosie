@@ -7,7 +7,7 @@
 //! real location (`docs/spec/safety.md#enter_links`). An absent path is simply not
 //! planned.
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::path::{Path, PathBuf};
 
 use rayon::Scope;
@@ -128,11 +128,35 @@ fn add(
     }
 }
 
-/// The located paths, for the walk to look each entry up in.
-pub(super) fn by_path(
-    located: BTreeMap<PathBuf, Vec<RuleMatch>>,
-) -> HashMap<PathBuf, Vec<RuleMatch>> {
-    located.into_iter().collect()
+/// The fixed rule paths a walk may meet, by path, and the folders holding them.
+pub(super) struct FixedPaths {
+    by_path: HashMap<PathBuf, Vec<RuleMatch>>,
+    folders: HashSet<PathBuf>,
+}
+
+impl FixedPaths {
+    /// The located paths, for the walk to look an entry up in.
+    pub fn of(located: BTreeMap<PathBuf, Vec<RuleMatch>>) -> FixedPaths {
+        let folders = located
+            .keys()
+            .filter_map(|path| path.parent())
+            .map(Path::to_path_buf)
+            .collect();
+        FixedPaths {
+            by_path: located.into_iter().collect(),
+            folders,
+        }
+    }
+
+    /// The rules listing `path` as a fixed path.
+    pub fn get(&self, path: &Path) -> Option<&Vec<RuleMatch>> {
+        self.by_path.get(path)
+    }
+
+    /// Whether a fixed path is an entry of `folder`.
+    pub fn in_folder(&self, folder: &Path) -> bool {
+        self.folders.contains(folder)
+    }
 }
 
 /// Claims fixed paths for `caches`, checking each path itself as the walk would, and the

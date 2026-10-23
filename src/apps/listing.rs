@@ -66,7 +66,9 @@ pub(super) fn list_found<B: Backend>(
     folder: &Folder,
 ) -> Result<Listed, fs::Error> {
     match Cleanup::read_dir(folder.path()).perform(ctx) {
-        Ok(names) => Ok(Listed::Names(names)),
+        Ok(entries) => Ok(Listed::Names(
+            entries.into_iter().map(|entry| entry.name).collect(),
+        )),
         Err(error) if error.is_permission_denied() => Ok(Listed::Denied(error)),
         Err(error) => Err(error),
     }

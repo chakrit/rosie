@@ -1,9 +1,11 @@
 //! The parallel `tree` walk (`docs/spec/performance.md#scan`,
 //! `docs/spec/safety.md#walk-skips`).
 //!
-//! Every folder is listed on its own rayon task, so idle workers steal folders. Each
-//! entry is `lstat`ed through the context before anything else happens to it, and a
-//! folder is only ever listed after its own `lstat` said it is a folder, not a
+//! Every folder is listed on its own rayon task, so idle workers steal folders. An entry
+//! the listing reports as a file, a special file, or a link the walk does not follow is
+//! passed over on the listing alone, unless a fixed rule path is in its folder. Every
+//! other entry is `lstat`ed through the context before anything else happens to it, and
+//! a folder is only ever listed after its own `lstat` said it is a folder, not a
 //! symlink: every path the walk builds is free of links by construction.
 //!
 //! With `enter_links = "all"`, a symlink to a folder inside the roots is followed
@@ -13,8 +15,8 @@
 //! entered or claimed, and goes no further on a second arrival.
 
 use std::cell::RefCell;
-use std::collections::{HashMap, HashSet};
-use std::ffi::{OsStr, OsString};
+use std::collections::HashSet;
+use std::ffi::OsStr;
 
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -23,13 +25,16 @@ use rayon::Scope;
 
 use super::RuleMatch;
 use super::entry::{Entry, InFolder, Readable, Sealed, Volume};
+use super::fixed::FixedPaths;
 use super::log::{Log, Problem};
 use super::progress::Progress;
 use super::skip::{Needs, WalkSkip};
 use super::targets::Targets;
 use crate::config::Walk;
 use crate::config::WalkSetting;
-use crate::fs::{self, Backend, Cleanup, EnterLinks, FileKind, FsContext, FsOp, Metadata};
+use crate::fs::{
+    self, Backend, Cleanup, DirEntry, EnterLinks, FileKind, FsContext, FsOp, Metadata,
+};
 use crate::rules::{self, Candidate, LuaSandbox, RuleSet};
 
 /// Folder extensions of macOS bundles, which the walk does not enter by default.
@@ -54,7 +59,7 @@ pub(super) struct TreeWalk<'a, B: Backend, P: Progress> {
     pub ctx: &'a FsContext<B>,
     pub rules: &'a RuleSet,
     /// The fixed rule paths at or below the start folder, by path.
-    pub fixed: &'a HashMap<PathBuf, Vec<RuleMatch>>,
+    pub fixed: &'a FixedPaths,
     pub flags: Walk,
     pub targets: &'a Targets<'a, B, P>,
     pub log: &'a Log,
@@ -130,8 +135,8 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         let Some(name) = next_name(&folder, target) else {
             return;
         };
-        let names = match Cleanup::read_dir(&folder).perform(self.ctx) {
-            Ok(names) => names,
+        let listed = match Cleanup::read_dir(&folder).perform(self.ctx) {
+            Ok(listed) => listed,
             Err(error) => return self.log.entry_failed(folder, error),
         };
         let path = folder.join(name);
@@ -140,7 +145,7 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
             Err(error) => return self.log.entry_failed(path, error),
         };
 
-        let step = self.step(&path, name, meta, &names, folder_meta);
+        let step = self.step(&path, name, meta, &listed, folder_meta);
         match (path == target, step) {
             (false, Step::Descend(readable)) => {
                 let inside = readable.path().to_path_buf();
@@ -156,13 +161,17 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
     /// it. Each entry's volume is compared with this folder's, so an entry inside a
     /// mount the walk entered is not taken for the root of one.
     pub fn visit<'s>(&'s self, scope: &Scope<'s>, folder: PathBuf, folder_meta: Metadata) {
-        let names = match Cleanup::read_dir(&folder).perform(self.ctx) {
-            Ok(names) => names,
+        let listed = match Cleanup::read_dir(&folder).perform(self.ctx) {
+            Ok(listed) => listed,
             Err(error) => return self.log.entry_failed(folder, error),
         };
+        let holds_fixed = self.fixed.in_folder(&folder);
 
-        for name in &names {
-            let path = folder.join(name);
+        let looked_at = listed
+            .iter()
+            .filter(|entry| holds_fixed || !self.passes_over(entry.kind));
+        for entry in looked_at {
+            let path = folder.join(&entry.name);
             let meta = match Cleanup::lstat(&path).perform(self.ctx) {
                 Ok(meta) => meta,
                 Err(error) => {
@@ -171,8 +180,20 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
                 }
             };
 
-            let step = self.step(&path, name, meta, &names, folder_meta);
+            let step = self.step(&path, &entry.name, meta, &listed, folder_meta);
             self.take(scope, &path, meta, step, None);
+        }
+    }
+
+    /// Whether an entry the listing reports as `kind` is passed over without an
+    /// `lstat`: a file or special file, which no folder rule matches, or a link the walk
+    /// does not follow. Only a fixed path could match one, so a folder holding a fixed
+    /// path has every entry looked at.
+    fn passes_over(&self, kind: FileKind) -> bool {
+        match kind {
+            FileKind::File | FileKind::Other => true,
+            FileKind::Symlink => !self.flags.enter_links.follows_in_walk(),
+            FileKind::Dir => false,
         }
     }
 
@@ -289,7 +310,7 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         path: &'p Path,
         name: &OsStr,
         meta: Metadata,
-        siblings: &[OsString],
+        siblings: &[DirEntry],
         folder_meta: Metadata,
     ) -> Step<'p> {
         let claim = match InFolder::of(path, meta, folder_meta) {
@@ -353,7 +374,7 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         entry: &Readable,
         name: &OsStr,
         is_folder: bool,
-        siblings: &[OsString],
+        siblings: &[DirEntry],
     ) -> Vec<RuleMatch> {
         let fixed = self.fixed.get(entry.path()).into_iter().flatten().cloned();
         let folder = match is_folder {
@@ -369,7 +390,7 @@ impl<B: Backend + Sync, P: Progress> TreeWalk<'_, B, P> {
         &self,
         entry: &Readable,
         name: &OsStr,
-        siblings: &[OsString],
+        siblings: &[DirEntry],
     ) -> Vec<RuleMatch> {
         let named = self.rules.targeting(name);
         if named.is_empty() {

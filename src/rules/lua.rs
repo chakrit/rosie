@@ -347,8 +347,8 @@ fn children_matching<B: Backend>(
                 .map_err(mlua::Error::runtime)?;
             listing
                 .into_iter()
-                .filter(|entry| entry.to_str().is_some_and(|entry| glob.matches(entry)))
-                .map(|entry| folder.join(entry))
+                .filter(|entry| entry.name.to_str().is_some_and(|name| glob.matches(name)))
+                .map(|entry| folder.join(entry.name))
                 .collect()
         }
     };

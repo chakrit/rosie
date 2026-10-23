@@ -20,6 +20,9 @@ Everything should be fast, as per Rust standard. Speed budgets live in
 - Progress shows live "found N · X GB".
 - Filesystem access uses std `readdir` and `lstat` only, with `lstat` before any
   `readdir`. `getattrlistbulk` is not used.
+- The walk `lstat`s only folders, links it follows, and the entries of a folder holding a
+  fixed rule path. It passes over any other entry on the kind its folder listing
+  reports. *(agent-inferred)*
 
 ## Run
 

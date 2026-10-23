@@ -99,7 +99,8 @@ pub fn contents(fake: &FakeBackend, path: impl AsRef<Path>) -> String {
 }
 
 pub fn listing(fake: &FakeBackend, path: &str) -> Vec<OsString> {
-    let mut names = fake.read_dir(Path::new(path)).expect("folder exists");
+    let listed = fake.read_dir(Path::new(path)).expect("folder exists");
+    let mut names: Vec<OsString> = listed.into_iter().map(|entry| entry.name).collect();
     names.sort();
     names
 }

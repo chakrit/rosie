@@ -93,11 +93,11 @@ impl<B: Backend> FsContext<B> {
             Entering::AsFound => {}
         }
 
-        let names = self.io(Op::ReadDir, path, self.backend.read_dir(path))?;
-        names
+        let listed = self.io(Op::ReadDir, path, self.backend.read_dir(path))?;
+        listed
             .into_iter()
-            .map(|name| {
-                let child = path.join(name);
+            .map(|entry| {
+                let child = path.join(entry.name);
                 let child_meta = self.io(Op::Lstat, &child, self.backend.lstat(&child))?;
                 match child_meta.dev == meta.dev {
                     true => Ok((child, child_meta)),

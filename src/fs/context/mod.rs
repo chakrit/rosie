@@ -16,12 +16,11 @@ mod lexical;
 mod removal;
 mod running;
 
-use std::ffi::OsString;
 use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 
-use super::backend::{Argv, Backend, CommandOutput, Exit, Metadata, SystemArgv};
+use super::backend::{Argv, Backend, CommandOutput, DirEntry, Exit, Metadata, SystemArgv};
 use super::error::{Error, Op};
 use super::paths::Paths;
 use running::Running;
@@ -197,7 +196,7 @@ impl<B: Backend> FsContext<B> {
 
     // reads, for the ops
 
-    pub(in crate::fs) fn read_dir(&self, path: &Path) -> Result<Vec<OsString>, Error> {
+    pub(in crate::fs) fn read_dir(&self, path: &Path) -> Result<Vec<DirEntry>, Error> {
         let path = resolve_dots(path)?;
         self.io(Op::ReadDir, &path, self.backend.read_dir(&path))
     }
@@ -231,7 +230,7 @@ impl<B: Backend> FsContext<B> {
     // Every own-data path is refused through a symlink in any component, the own
     // folders and their ancestors included (`docs/spec/safety.md#symlinks`).
 
-    pub(in crate::fs) fn read_own_dir(&self, path: &Path) -> Result<Vec<OsString>, Error> {
+    pub(in crate::fs) fn read_own_dir(&self, path: &Path) -> Result<Vec<DirEntry>, Error> {
         let path = self.confine_to_own(path)?;
         self.check_real(&path)?;
         self.io(Op::ReadDir, &path, self.backend.read_dir(&path))

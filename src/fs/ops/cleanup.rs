@@ -1,11 +1,10 @@
 //! Ops on the trees rosie scans and the cleanup targets it deletes
 //! (`docs/spec/safety.md#cleanup-targets`).
 
-use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 
 use super::{FsOp, sealed};
-use crate::fs::backend::{Backend, Metadata};
+use crate::fs::backend::{Backend, DirEntry, Metadata};
 use crate::fs::context::FsContext;
 use crate::fs::error::Error;
 use crate::fs::links::EnterLinks;
@@ -112,9 +111,9 @@ impl sealed::Sealed for Follow<'_> {}
 impl sealed::Sealed for Delete<'_> {}
 
 impl<B: Backend> FsOp<B> for ReadDir<'_> {
-    type Output = Vec<OsString>;
+    type Output = Vec<DirEntry>;
 
-    fn perform(self, ctx: &FsContext<B>) -> Result<Vec<OsString>, Error> {
+    fn perform(self, ctx: &FsContext<B>) -> Result<Vec<DirEntry>, Error> {
         ctx.read_dir(self.path)
     }
 }

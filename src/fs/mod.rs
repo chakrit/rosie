@@ -13,8 +13,8 @@ mod shell_command;
 mod versions;
 
 pub use backend::{
-    Argv, Backend, CommandOutput, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS, SystemArgv,
-    SystemTool,
+    Argv, Backend, CommandOutput, DirEntry, Exit, FileKind, Metadata, ROOT_UID, SF_DATALESS,
+    SystemArgv, SystemTool,
 };
 pub use context::{Acting, Bounds, FsContext, Roots, resolve_dots, running_argv};
 pub use error::{Error, Op, RealPath};

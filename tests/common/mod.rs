@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Backend, Bounds, Paths, RealBackend, Roots};
+use rosie::fs::{Backend, Bounds, DirEntry, Paths, RealBackend, Roots};
 use tempfile::TempDir;
 
 /// Declares each case as a test against both backends.
@@ -141,7 +141,9 @@ fn make_folders_writable(dir: &Path) {
     }
 }
 
-pub fn sorted(mut names: Vec<OsString>) -> Vec<OsString> {
+/// The names in a folder listing, sorted.
+pub fn sorted_names(listing: Vec<DirEntry>) -> Vec<OsString> {
+    let mut names: Vec<OsString> = listing.into_iter().map(|entry| entry.name).collect();
     names.sort();
     names
 }

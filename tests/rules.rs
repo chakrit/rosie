@@ -6,7 +6,7 @@ use std::io::ErrorKind;
 use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, Cleanup, FsContext, FsOp, Op, Paths, Roots};
+use rosie::fs::{Bounds, Cleanup, DirEntry, FileKind, FsContext, FsOp, Op, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
     Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source,
@@ -59,7 +59,7 @@ fn matching(fake: &FakeBackend, rules: &RuleSet, path: &str) -> Vec<(String, Tie
     let ctx = ctx(fake);
     let lua = LuaSandbox::new().expect("lua starts");
     let path = Path::new(path);
-    let siblings: Vec<OsString> = Cleanup::read_dir(path.parent().expect("has a parent"))
+    let siblings: Vec<DirEntry> = Cleanup::read_dir(path.parent().expect("has a parent"))
         .perform(&ctx)
         .expect("parent lists");
     let candidate = Candidate {
@@ -576,7 +576,10 @@ fn reports_a_lua_error_against_the_rule_without_matching() {
     let rules = loaded(&fake);
     let ctx = ctx(&fake);
     let lua = LuaSandbox::new().expect("lua starts");
-    let siblings = [OsString::from("out")];
+    let siblings = [DirEntry {
+        name: OsString::from("out"),
+        kind: FileKind::Dir,
+    }];
     let candidate = Candidate {
         path: Path::new("/Users/me/code/app/out"),
         siblings: &siblings,
@@ -604,7 +607,10 @@ fn reports_a_failed_listing_against_the_rule_without_matching() {
     let rules = loaded(&fake);
     let ctx = ctx(&fake);
     let lua = LuaSandbox::new().expect("lua starts");
-    let siblings = [OsString::from("Pods")];
+    let siblings = [DirEntry {
+        name: OsString::from("Pods"),
+        kind: FileKind::Dir,
+    }];
     let candidate = Candidate {
         path: Path::new("/Users/me/code/ios/Pods"),
         siblings: &siblings,

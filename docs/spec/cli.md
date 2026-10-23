@@ -245,10 +245,9 @@ Flags for `scan`, `plan`, `clean`, bare `rosie`, and `check`:
 - Rule names for `--only` are listed by `rosie rules`.
 - `--only` accepts wildcards.
 - An `--only` pattern is `rule`, matched in any pack, or `pack/rule`.
-- `--only` wildcards are `*` and `?`, as in rule markers. *(agent-inferred)*
+- `--only` wildcards are `*` and `?`, as in rule markers.
 - The pack side of an `--only` pattern ignores ASCII case, as pack names do.
-  *(agent-inferred)*
-- An `--only` pattern that matches no rule is an error. *(agent-inferred)*
+- An `--only` pattern that matches no rule is an error.
 - A mode's flags follow its name or folder: `rosie scan caches --aggressive`, not
   `rosie scan --aggressive caches`. *(agent-inferred)*
 - Skip lines name the path and a short reason, with a flag hint only when that flag could

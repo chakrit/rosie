@@ -2,6 +2,9 @@
 //! sandboxed `HOME` and `PATH`, never the network or the real home
 //! (`docs/spec/testing.md#fakes-and-sandboxing`).
 
+// Each test crate that includes this module uses a different subset of it.
+#![allow(dead_code)]
+
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
@@ -20,22 +23,44 @@ const NODE_RULE: &str = "[rules.node-modules]\n\
                           marker = [\"package.json\"]\n";
 
 /// A sandboxed `$HOME` with the `rosie` pack already pulled and `config.toml` written,
-/// so a smoke test never reaches the network. Its temp folder is removed when it is
-/// dropped.
+/// so a smoke test never reaches the network.
 pub struct SmokeHome {
-    _home: TempDir,
+    /// The temp folder the home lives in, removed on drop; `None` for a kept home.
+    _temp: Option<TempDir>,
     home: PathBuf,
 }
 
 impl SmokeHome {
-    /// A home whose `roots` allowlist holds exactly these folders under it, real paths
-    /// with no symlink component, as every loaded `roots` entry must be
-    /// (`docs/spec/safety.md#symlinks`). Each folder is created.
+    /// A home in a temp folder, removed when it is dropped, whose `roots` allowlist
+    /// holds exactly these folders under it, real paths with no symlink component, as
+    /// every loaded `roots` entry must be (`docs/spec/safety.md#symlinks`). Each folder
+    /// is created.
     pub fn with_roots(roots: &[&str]) -> Self {
-        let home = tempfile::tempdir().expect("create a sandboxed home");
+        let temp = tempfile::tempdir().expect("create a sandboxed home");
         // macOS temp folders sit under the `/var` -> `/private/var` link.
-        let home_path = home.path().canonicalize().expect("canonicalize the home");
+        let home = temp.path().canonicalize().expect("canonicalize the home");
+        Self::seed(&home, roots);
+        SmokeHome {
+            _temp: Some(temp),
+            home,
+        }
+    }
 
+    /// A home at `home`, seeded as [`SmokeHome::with_roots`] seeds one but kept when
+    /// dropped, so a large tree built under it is reused by the next run. `home` must be
+    /// a real path with no symlink component.
+    pub fn kept_at(home: &Path, roots: &[&str]) -> Self {
+        std::fs::create_dir_all(home).expect("create the kept home");
+        Self::seed(home, roots);
+        SmokeHome {
+            _temp: None,
+            home: home.to_path_buf(),
+        }
+    }
+
+    /// Writes the pulled `rosie` pack, and a `config.toml` whose `roots` are these
+    /// folders under `home_path`, each created.
+    fn seed(home_path: &Path, roots: &[&str]) {
         let pack_dir = home_path.join(".local/share/rosie/packs/chakrit/rosie");
         std::fs::create_dir_all(&pack_dir).expect("create the pack folder");
         std::fs::write(pack_dir.join("node.toml"), NODE_RULE).expect("write the rule pack");
@@ -56,11 +81,6 @@ impl SmokeHome {
             format!("roots = [{}]\n", quoted.join(", ")),
         )
         .expect("write config.toml");
-
-        SmokeHome {
-            _home: home,
-            home: home_path,
-        }
     }
 
     pub fn home(&self) -> &Path {

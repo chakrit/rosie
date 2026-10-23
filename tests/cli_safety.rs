@@ -160,6 +160,23 @@ fn clean_edit_makes_the_user_choose_each_conflict() {
     }
 }
 
+#[test]
+fn a_cancelled_checklist_drops_the_conflict_answers_given_before_it() {
+    let sandbox = conflicted_project();
+    // The checklist has no scripted answer, so it is cancelled.
+    let script = Script::terminal().answer("e").pick(0).answer("y");
+
+    let ran = sandbox.run_with(script, &["clean", "tree", "."]);
+
+    assert!(sandbox.removals().is_empty(), "{:?}", sandbox.removals());
+    assert!(
+        ran.stderr
+            .contains("1 rule conflict(s) must be resolved first"),
+        "{}",
+        ran.stderr
+    );
+}
+
 /// The line of `plan` where the conflict's `status` sits, 1-based.
 fn conflict_line(plan: &str) -> usize {
     1 + plan

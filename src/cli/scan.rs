@@ -279,20 +279,20 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// entries, all checked: entries the user unchecks leave the plan. A cancelled
     /// prompt leaves the plan as it was.
     fn edit(&mut self, plan: Plan) -> Result<Plan, Error> {
-        let plan = match self.resolve(&plan)? {
+        let resolved = match self.resolve(&plan)? {
             Resolved::Plan(resolved) => resolved,
             Resolved::Cancelled => return Ok(plan),
         };
 
         let kept = match self
             .console
-            .checklist("Uncheck what to skip:", plan.clean_entries())
+            .checklist("Uncheck what to skip:", resolved.clean_entries())
         {
             Ok(kept) => kept,
             Err(PromptError::Cancelled) => return Ok(plan),
             Err(error) => return Err(error.into()),
         };
-        Ok(plan.keeping_clean_entries(&kept))
+        Ok(resolved.keeping_clean_entries(&kept))
     }
 
     /// The plan with every conflict made `clean` or `skip` as the user picks it, one at a

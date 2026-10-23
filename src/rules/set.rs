@@ -7,7 +7,7 @@ use std::path::Path;
 use super::error::Error;
 use super::layers::{self, RuleLayers};
 use super::lua::LuaSandbox;
-use super::name::{Name, RuleId};
+use super::name::{RuleId, RulePattern};
 use super::rule::{Detection, Rule, Shape};
 use crate::fs::{Backend, Cleanup, DirEntry, FsContext, FsOp};
 use crate::tier::Tier;
@@ -53,24 +53,26 @@ impl RuleSet {
         }
     }
 
-    /// Only the rules named in `names`, in whichever packs define them, with the
+    /// Only the rules some pattern matches, in whichever packs define them, with the
     /// folder-name index rebuilt over them: a scan with the narrowed set never sees the
     /// other rules, so none of them can match a folder and stop the walk above a
-    /// selected rule's match (`--only`, `docs/spec/cli.md#flags`). A name no loaded
-    /// rule has is an error naming it.
-    pub fn only(self, names: &[Name]) -> Result<RuleSet, Error> {
-        let unknown = names
+    /// selected rule's match (`--only`, `docs/spec/cli.md#flags`). A pattern no loaded
+    /// rule matches is an error naming it.
+    pub fn only(self, patterns: &[RulePattern]) -> Result<RuleSet, Error> {
+        let unmatched = patterns
             .iter()
-            .find(|name| !self.rules.iter().any(|rule| rule.id.rule == **name));
-        if let Some(name) = unknown {
-            return Err(Error::UnknownRule { name: name.clone() });
+            .find(|pattern| !self.rules.iter().any(|rule| pattern.matches(&rule.id)));
+        if let Some(pattern) = unmatched {
+            return Err(Error::NoRuleMatches {
+                pattern: pattern.clone(),
+            });
         }
 
         let kept = self
             .rules
             .into_vec()
             .into_iter()
-            .filter(|rule| names.contains(&rule.id.rule))
+            .filter(|rule| patterns.iter().any(|pattern| pattern.matches(&rule.id)))
             .collect();
         Ok(RuleSet::index(kept))
     }

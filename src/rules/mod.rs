@@ -15,7 +15,7 @@ pub use error::{Error, Problem};
 pub use glob::{Glob, GlobError};
 pub use layers::{PackFolder, RuleLayers};
 pub use lua::LuaSandbox;
-pub use name::{Name, NameError, PackName, RuleId};
+pub use name::{Name, NameError, PackName, RuleId, RulePattern};
 pub use pack::load_pack;
 pub use rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Rule, Shape,

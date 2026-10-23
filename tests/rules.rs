@@ -9,7 +9,7 @@ use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, Cleanup, DirEntry, FileKind, FsContext, FsOp, Op, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
-    Candidate, Error, LuaSandbox, Name, Problem, RuleId, RuleLayers, RuleSet, Shape, Source,
+    Candidate, Error, LuaSandbox, Problem, RuleId, RuleLayers, RulePattern, RuleSet, Shape, Source,
 };
 use rosie::tier::{Tier, Twin};
 
@@ -638,10 +638,10 @@ fn two_pack_fixture() -> FakeBackend {
     fake
 }
 
-fn rule_names(texts: &[&str]) -> Vec<Name> {
+fn patterns(texts: &[&str]) -> Vec<RulePattern> {
     texts
         .iter()
-        .map(|text| Name::parse(text).expect("valid rule name"))
+        .map(|text| RulePattern::parse(text).expect("valid rule pattern"))
         .collect()
 }
 
@@ -660,7 +660,7 @@ fn narrowing_keeps_the_named_rules_in_every_pack_and_reindexes_them() {
     let fake = two_pack_fixture();
 
     let rules = loaded(&fake)
-        .only(&rule_names(&["pycache", "go-build", "pycache"]))
+        .only(&patterns(&["pycache", "go-build", "pycache"]))
         .expect("known names");
 
     assert_eq!(
@@ -681,15 +681,45 @@ fn narrowing_keeps_the_named_rules_in_every_pack_and_reindexes_them() {
 }
 
 #[test]
-fn narrowing_to_a_name_no_rule_has_is_an_error_naming_it() {
+fn narrowing_by_wildcards_keeps_every_rule_a_pattern_matches() {
     let fake = two_pack_fixture();
 
-    let narrowed = loaded(&fake).only(&rule_names(&["pycache", "nope"]));
+    let by_rule = loaded(&fake)
+        .only(&patterns(&["py*", "go-*"]))
+        .expect("matches");
+    let by_pack = loaded(&fake)
+        .only(&patterns(&["extra-*/*", "rosie/cargo-?arget"]))
+        .expect("matches");
 
-    let Err(error @ Error::UnknownRule { .. }) = narrowed else {
-        panic!("an unknown rule error expected");
+    assert_eq!(
+        ids(&by_rule),
+        [
+            "extra-rules/go-build",
+            "extra-rules/pycache",
+            "rosie/pycache"
+        ]
+    );
+    assert_eq!(
+        ids(&by_pack),
+        [
+            "extra-rules/go-build",
+            "extra-rules/pycache",
+            "rosie/cargo-target"
+        ]
+    );
+    assert_eq!(targeting_ids(&by_pack, "__pycache__"), Vec::<String>::new());
+}
+
+#[test]
+fn narrowing_by_a_pattern_no_rule_matches_is_an_error_naming_it() {
+    let fake = two_pack_fixture();
+
+    let narrowed = loaded(&fake).only(&patterns(&["pycache", "rosie/go-*"]));
+
+    let Err(error @ Error::NoRuleMatches { .. }) = narrowed else {
+        panic!("a no-rule-matches error expected");
     };
-    assert!(error.to_string().contains("`nope`"), "{error}");
+    assert!(error.to_string().contains("`rosie/go-*`"), "{error}");
 }
 
 // the built-in pack

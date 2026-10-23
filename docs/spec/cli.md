@@ -225,7 +225,7 @@ Flags for `scan`, `plan`, `clean`, bare `rosie`, and `check`:
 
 | Flag                     | Effect                                                         |
 |--------------------------|----------------------------------------------------------------|
-| `--only <rule>`          | limits the run to that rule name in any pack; repeatable       |
+| `--only <pattern>`       | limits the run to the rules `<pattern>` matches; repeatable    |
 | `--aggressive`           | aggressive items are `clean`; `cmd_aggressive` replaces `cmd`  |
 | `--enter-bundles`        | walk into bundles (overrides `[walk] enter_bundles`)           |
 | `--enter-mounts`         | walk across volumes (overrides `[walk] enter_mounts`)          |
@@ -243,7 +243,12 @@ Flags for `scan`, `plan`, `clean`, bare `rosie`, and `check`:
 - `--only`, `--enter-bundles`, and `--enter-placeholders` exist only on `tree`, `caches`,
   and `check`.
 - Rule names for `--only` are listed by `rosie rules`.
-- `--only` accepts wildcards. *(target)*
+- `--only` accepts wildcards.
+- An `--only` pattern is `rule`, matched in any pack, or `pack/rule`.
+- `--only` wildcards are `*` and `?`, as in rule markers. *(agent-inferred)*
+- The pack side of an `--only` pattern ignores ASCII case, as pack names do.
+  *(agent-inferred)*
+- An `--only` pattern that matches no rule is an error. *(agent-inferred)*
 - A mode's flags follow its name or folder: `rosie scan caches --aggressive`, not
   `rosie scan --aggressive caches`. *(agent-inferred)*
 - Skip lines name the path and a short reason, with a flag hint only when that flag could

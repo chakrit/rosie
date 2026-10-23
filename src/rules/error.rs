@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::glob::GlobError;
-use super::name::{Name, NameError, RuleId};
+use super::name::{NameError, RuleId, RulePattern};
 use crate::fs::{self, InvalidCommand};
 
 #[derive(Debug, Error)]
@@ -77,8 +77,8 @@ pub enum Error {
         source: Box<fs::Error>,
     },
 
-    #[error("no pack has a rule named `{name}`")]
-    UnknownRule { name: Name },
+    #[error("no rule matches `{pattern}`")]
+    NoRuleMatches { pattern: RulePattern },
 }
 
 /// Why one rule table is invalid.

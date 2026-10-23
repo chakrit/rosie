@@ -279,7 +279,7 @@ fn packs_hints(error: &packs::Error) -> Vec<Hint> {
 fn rules_hints(error: &rules::Error) -> Vec<Hint> {
     match error {
         rules::Error::Fs(error) => fs_hints(error),
-        rules::Error::UnknownRule { .. } => {
+        rules::Error::NoRuleMatches { .. } => {
             vec![Hint::run("see the rule names", [Command::Rules])]
         }
         rules::Error::Toml { .. }

@@ -10,7 +10,7 @@ use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::EnterLinks;
 use crate::plan::{AggressiveItems, Selection};
-use crate::rules::Name;
+use crate::rules::RulePattern;
 use crate::run::elevated;
 use crate::scan::{Needs, Settings, WalkSkip};
 
@@ -427,9 +427,10 @@ fn verb(setting: WalkSetting) -> &'static str {
 /// rules and take only the mounts setting of `[walk]`, so they do not accept these.
 #[derive(Debug, Clone, Default, Args)]
 pub struct RuleFlags {
-    /// Limit the run to this rule name, in any pack; repeatable. See `rosie rules`.
-    #[arg(long = "only", value_name = "RULE", value_parser = parse_name)]
-    pub only: Vec<Name>,
+    /// Limit the run to rules matching `rule` or `pack/rule`, with `*` and `?`
+    /// wildcards; repeatable. See `rosie rules`.
+    #[arg(long = "only", value_name = "RULE", value_parser = parse_pattern)]
+    pub only: Vec<RulePattern>,
 
     /// Walk into bundles (overrides `[walk] enter_bundles`).
     #[arg(long)]
@@ -503,8 +504,8 @@ fn parse_plan_source(text: &str) -> Result<PlanSource, String> {
     }
 }
 
-fn parse_name(text: &str) -> Result<Name, String> {
-    Name::parse(text).map_err(|error| error.to_string())
+fn parse_pattern(text: &str) -> Result<RulePattern, String> {
+    RulePattern::parse(text).map_err(|error| error.to_string())
 }
 
 fn parse_enter_links(text: &str) -> Result<EnterLinks, String> {

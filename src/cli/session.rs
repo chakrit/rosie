@@ -13,7 +13,7 @@ use crate::config::{self, Config, ConfigFile};
 use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, Roots, UserInput};
 use crate::output::{Line, Mark};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
-use crate::rules::{Name, RuleLayers, RuleSet};
+use crate::rules::{RuleLayers, RulePattern, RuleSet};
 use crate::scan::{Scanner, Settings};
 
 /// Proof that stdin and stdout are terminals, which [`Session::pick`] takes: only
@@ -139,7 +139,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// The rules of every layer, narrowed to `only` when it names any. With no pack
     /// installed, the default source is pulled first; old packs draw the age warning
     /// (`docs/spec/rules.md#packs`).
-    pub fn rules(&mut self, only: &[Name]) -> Result<RuleSet, Error> {
+    pub fn rules(&mut self, only: &[RulePattern]) -> Result<RuleSet, Error> {
         let store = self.store();
         let first_run = packs::first_run(&store, self.network, self.env.now)?;
         let settled = SettlePacks.run(&store)?;
@@ -156,7 +156,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let rules = RuleSet::load(&self.own, &layers)?;
         match only {
             [] => Ok(rules),
-            names => Ok(rules.only(names)?),
+            patterns => Ok(rules.only(patterns)?),
         }
     }
 

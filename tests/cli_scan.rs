@@ -499,9 +499,11 @@ fn only_limits_the_scan_to_the_named_rules() {
 
     let all = sandbox.run(&["scan", "tree", ".", "--toml"]);
     let only = sandbox.run(&["scan", "tree", ".", "--toml", "--only", "cargo-target"]);
+    let wildcard = sandbox.run(&["scan", "tree", ".", "--toml", "--only", "*/cargo-*"]);
     let unknown = sandbox.run(&["scan", "tree", ".", "--toml", "--only", "nope"]);
 
     assert!(all.stdout.contains("node_modules") && all.stdout.contains("target"));
+    assert_eq!(wildcard.stdout, only.stdout);
     only.assert_status(ExitStatus::Success);
     assert!(
         only.stdout.contains(&format!("{CWD}/app/target")),

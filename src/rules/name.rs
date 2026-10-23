@@ -1,10 +1,13 @@
-//! Pack and rule names, and the `pack/rule` identity (`docs/spec/rules.md#names`).
+//! Pack and rule names, the `pack/rule` identity (`docs/spec/rules.md#names`), and the
+//! patterns `--only` selects rules by (`docs/spec/cli.md#flags`).
 
 use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use thiserror::Error;
+
+use super::glob::{Glob, GlobError};
 
 /// The longest pack or rule name, in characters.
 const MAX_CHARS: usize = 64;
@@ -141,6 +144,44 @@ impl fmt::Display for RuleId {
     }
 }
 
+/// A `rule` or `pack/rule` pattern with `*` and `?` wildcards. A bare rule pattern
+/// matches in any pack; the pack side matches ignoring ASCII case, as pack names compare.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RulePattern {
+    text: Box<str>,
+    pack: Glob,
+    rule: Glob,
+}
+
+impl RulePattern {
+    pub fn parse(text: &str) -> Result<RulePattern, NameError> {
+        let (pack, rule) = match text.split_once('/') {
+            Some((pack, rule)) => (pack.to_ascii_lowercase(), rule),
+            None => ("*".to_string(), text),
+        };
+        if rule.contains('/') {
+            return Err(NameError::PatternShape);
+        }
+
+        Ok(RulePattern {
+            text: text.into(),
+            pack: Glob::parse(&pack)?,
+            rule: Glob::parse(rule)?,
+        })
+    }
+
+    pub fn matches(&self, id: &RuleId) -> bool {
+        let pack = id.pack.as_str().to_ascii_lowercase();
+        self.rule.matches(id.rule.as_str()) && self.pack.matches(&pack)
+    }
+}
+
+impl fmt::Display for RulePattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
 pub enum NameError {
     #[error("a name cannot be empty")]
@@ -157,6 +198,12 @@ pub enum NameError {
 
     #[error("a qualified name is `pack/rule`")]
     Unqualified,
+
+    #[error("a rule pattern is `rule` or `pack/rule`")]
+    PatternShape,
+
+    #[error(transparent)]
+    Pattern(#[from] GlobError),
 }
 
 #[cfg(test)]
@@ -232,5 +279,58 @@ mod tests {
             RuleId::parse_qualified("my pack/x"),
             Err(NameError::BadChar(' '))
         );
+    }
+
+    fn pattern(text: &str) -> RulePattern {
+        RulePattern::parse(text).expect("valid pattern")
+    }
+
+    fn id(text: &str) -> RuleId {
+        RuleId::parse_qualified(text).expect("qualified")
+    }
+
+    #[test]
+    fn a_bare_pattern_matches_the_rule_name_in_any_pack() {
+        assert!(pattern("pycache").matches(&id("rosie/pycache")));
+        assert!(pattern("pycache").matches(&id("extra/pycache")));
+        assert!(pattern("py*").matches(&id("extra/pycache")));
+        assert!(pattern("go-buil?").matches(&id("rosie/go-build")));
+        assert!(!pattern("pycache").matches(&id("rosie/pycache-alt")));
+        assert!(!pattern("py*").matches(&id("python/cache")));
+    }
+
+    #[test]
+    fn a_qualified_pattern_matches_its_pack_side_and_rule_side() {
+        assert!(pattern("rosie/pycache").matches(&id("rosie/pycache")));
+        assert!(!pattern("rosie/pycache").matches(&id("extra/pycache")));
+        assert!(pattern("rosie/*").matches(&id("rosie/go-build")));
+        assert!(!pattern("rosie/*").matches(&id("extra/go-build")));
+        assert!(pattern("*/go-build").matches(&id("extra/go-build")));
+        assert!(pattern("ex*/py*").matches(&id("extra/pycache")));
+        assert!(!pattern("ex*/py*").matches(&id("extra/go-build")));
+    }
+
+    #[test]
+    fn the_pack_side_ignores_ascii_case_and_the_rule_side_does_not() {
+        assert!(pattern("Rosie/pycache").matches(&id("rosie/pycache")));
+        assert!(pattern("ro*/pycache").matches(&id("Rosie/pycache")));
+        assert!(!pattern("PyCache").matches(&id("rosie/pycache")));
+    }
+
+    #[test]
+    fn refuses_a_malformed_pattern() {
+        assert_eq!(RulePattern::parse("a/b/c"), Err(NameError::PatternShape));
+        assert_eq!(
+            RulePattern::parse(""),
+            Err(NameError::Pattern(GlobError::Empty))
+        );
+        assert_eq!(
+            RulePattern::parse("rosie/"),
+            Err(NameError::Pattern(GlobError::Empty))
+        );
+        assert!(matches!(
+            RulePattern::parse("py[c]"),
+            Err(NameError::Pattern(GlobError::Unsupported(..)))
+        ));
     }
 }

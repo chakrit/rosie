@@ -11,7 +11,7 @@ use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, FsContext, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::plan::{AggressiveItems, Status};
-use rosie::rules::{Name, RuleLayers, RuleSet};
+use rosie::rules::{RuleLayers, RulePattern, RuleSet};
 use rosie::scan::{Progress, Scan, Scanner, Settings};
 
 pub const HOME: &str = "/Users/me";
@@ -102,7 +102,9 @@ pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
         .expect("rules load");
     let rules = match options.only.is_empty() {
         true => rules,
-        false => rules.only(&names(&options.only)).expect("known rule names"),
+        false => rules
+            .only(&patterns(&options.only))
+            .expect("matching rule patterns"),
     };
     let settings = Settings {
         walk: options.walk,
@@ -111,10 +113,10 @@ pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     Scanner::new(ctx, rules, settings)
 }
 
-pub fn names(texts: &[&str]) -> Vec<Name> {
+pub fn patterns(texts: &[&str]) -> Vec<RulePattern> {
     texts
         .iter()
-        .map(|text| Name::parse(text).expect("valid rule name"))
+        .map(|text| RulePattern::parse(text).expect("valid rule pattern"))
         .collect()
 }
 

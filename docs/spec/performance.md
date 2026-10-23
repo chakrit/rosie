@@ -1,13 +1,13 @@
 # Performance
 
-Status: accepted. Target behavior; not implemented.
+Status: implemented.
 
 Everything should be fast, as per Rust standard. Speed budgets live in
 [testing.md](testing.md#benchmark).
 
 ## Scan
 
-- The walk is parallel and work-stealing, on `rayon` scopes, through `Gate<B>`
+- The walk is parallel and work-stealing, on `rayon` scopes, through `FsContext<B>`
   ([safety.md](safety.md#fs-interaction-layer)). Walk crates that call std directly,
   such as `jwalk`, are not used.
 - The walk stops descending once a folder matches. A normal match inside an aggressive

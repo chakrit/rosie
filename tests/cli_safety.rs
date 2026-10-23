@@ -311,6 +311,8 @@ fn clean_without_a_terminal_is_a_usage_error_before_any_scan() {
     let ran = sandbox.run_with(Script::piped(), &["clean", "tree", "."]);
 
     ran.assert_status(ExitStatus::Usage);
+    // Every stderr line starts with a marker (docs/spec/cli.md#output).
+    assert!(ran.stderr.starts_with("✗ "), "{}", ran.stderr);
     assert!(ran.stderr.contains("needs a terminal"), "{}", ran.stderr);
     let walked = sandbox
         .fake

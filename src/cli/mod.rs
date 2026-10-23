@@ -215,18 +215,14 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             _ => ExitStatus::Failed,
         };
         let palette = self.console.stderr_palette();
-        let written = match error {
-            // A usage message reads like clap's own usage errors: no marker.
-            Error::Usage(message) => writeln!(self.console.stderr(), "{message}"),
-            _ => failure::failures(error).iter().try_for_each(|failure| {
-                let text = std::iter::once(failure.problem.clone())
-                    .chain(crate::hint::hint_lines(palette, &failure.hints))
-                    .collect::<Vec<_>>()
-                    .join("\n");
-                let line = palette.line(&Line::new(Mark::Error, text));
-                writeln!(self.console.stderr(), "{line}")
-            }),
-        };
+        let written = failure::failures(error).iter().try_for_each(|failure| {
+            let text = std::iter::once(failure.problem.clone())
+                .chain(crate::hint::hint_lines(palette, &failure.hints))
+                .collect::<Vec<_>>()
+                .join("\n");
+            let line = palette.line(&Line::new(Mark::Error, text));
+            writeln!(self.console.stderr(), "{line}")
+        });
         match written {
             Ok(()) => status,
             Err(_) => ExitStatus::Failed,

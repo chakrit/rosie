@@ -17,6 +17,9 @@ Everything should be fast, as per Rust standard. Speed budgets live in
   candidates whose name matches, with one Lua state per worker thread.
 - Sizing starts as soon as a target is found, while the walk continues. Sizes are
   allocated bytes, deduplicated by dev and inode.
+- Sizes are the best possible guess that does not slow the scan down.
+- A target's first 10,000 files are each sized; past them, one file in 8 is `lstat`ed
+  and counted 8 times. *(agent-inferred)*
 - Progress shows live "found N · X GB".
 - Filesystem access uses std `readdir` and `lstat` only, with `lstat` before any
   `readdir`. `getattrlistbulk` is not used.

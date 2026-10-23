@@ -19,6 +19,7 @@ use rayon::prelude::*;
 use smoke_fixture::{SmokeHome, stderr, stdout};
 
 const WALK_BUDGET: Duration = Duration::from_secs(1);
+const SIZING_BUDGET: Duration = Duration::from_millis(1500);
 
 /// Folders per level, levels of folders, and files per leaf folder: 10⁴ leaf folders of
 /// 99 files, plus 11,110 folders, is 1,001,110 entries under `node_modules`.
@@ -54,6 +55,10 @@ fn sizing_of_1m_entries() {
     let best = best_of(&home, &["scan", "tree", &display(&project)]);
 
     println!("sizing, 1M entries: {best:?}");
+    assert!(
+        best < SIZING_BUDGET,
+        "sizing took {best:?}, budget {SIZING_BUDGET:?}"
+    );
 }
 
 #[test]

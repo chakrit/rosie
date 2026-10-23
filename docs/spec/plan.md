@@ -226,7 +226,8 @@ stderr, never written into the plan TOML.
 - The end of a run shows the total freed and the items done, plus skipped and failed
   items (stale, running process, sudo refused, errors) with their sizes, and walk-skip
   counts per reason.
-- Sizes are allocated bytes; hardlinks are counted once.
+- Sizes are allocated bytes; hardlinks are counted once. A large target's size is an
+  estimate ([performance.md](performance.md#scan)).
 - Tool items show "size unknown" in the plan and are excluded from totals.
 
 ## Editing a plan

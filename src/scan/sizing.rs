@@ -1,9 +1,12 @@
 //! Sizing found targets in parallel with the walk (`docs/spec/performance.md#scan`).
 //!
-//! Sizes are allocated bytes. A file with more than one name is counted once per
-//! sizer, by dev and inode, so a file hardlinked into two targets, or twice into one,
-//! weighs once in the plan (`docs/spec/plan.md#stats`); only such files enter the
-//! shared set of counted entries. Sizing descends into bundles, since deleting a target
+//! Sizes are allocated bytes. A target's first [`EXACT_FILES`] files are each sized;
+//! past them, one file in [`SAMPLE_EVERY`] is sized and counted for that many, so a
+//! huge target costs a fraction of its `lstat`s and its size is an estimate. A file
+//! with more than one name is counted once per sizer, by dev and inode, so a file
+//! hardlinked into two targets, or twice into one, weighs once in the plan
+//! (`docs/spec/plan.md#stats`); only such files enter the shared set of counted
+//! entries. Sizing descends into bundles, since deleting a target
 //! removes them too, but never into a mount root or a dataless placeholder it meets
 //! inside a target, told by `Sealed::of`; those are neither counted nor opened. A
 //! denied folder is a walk skip when the target was claimed, and is dropped for a
@@ -34,23 +37,51 @@ pub struct Sizer<'a, B: Backend, P: Progress> {
     counted: InodeSet,
 }
 
-/// The running total of one target, final once the sizing scope has ended.
+/// A target's first files, counted in the order its folders are listed, are all sized.
+const EXACT_FILES: u64 = 10_000;
+/// Past [`EXACT_FILES`], one file in this many is sized and counted this many times.
+const SAMPLE_EVERY: u64 = 8;
+
+/// The running total of one target, final once the sizing scope has ended, and how
+/// many of its files the sizing has met.
 #[derive(Debug, Clone, Default)]
-pub struct Measure(Arc<AtomicU64>);
+pub struct Measure(Arc<Tally>);
+
+#[derive(Debug, Default)]
+struct Tally {
+    bytes: AtomicU64,
+    files: AtomicU64,
+}
 
 impl Measure {
     pub fn get(&self) -> Size {
-        Size::bytes(self.0.load(Ordering::Relaxed))
+        Size::bytes(self.0.bytes.load(Ordering::Relaxed))
     }
 
     fn add(&self, bytes: u64) {
         let saturating = |total: u64| Some(total.saturating_add(bytes));
         let updated = self
             .0
+            .bytes
             .fetch_update(Ordering::Relaxed, Ordering::Relaxed, saturating);
         if let Err(total) = updated {
             unreachable!("a saturating add always yields a total, yet {total} was kept");
         }
+    }
+
+    /// Numbers the next `count` files of the target; the first one's number.
+    fn number_files(&self, count: u64) -> u64 {
+        self.0.files.fetch_add(count, Ordering::Relaxed)
+    }
+}
+
+/// How many files the file numbered `number` in its target stands for when sized: one
+/// within the first [`EXACT_FILES`], then [`SAMPLE_EVERY`] for one file in that many;
+/// none for a file left unsized.
+fn stands_for(number: u64) -> Option<u64> {
+    match number < EXACT_FILES {
+        true => Some(1),
+        false => number.is_multiple_of(SAMPLE_EVERY).then_some(SAMPLE_EVERY),
     }
 }
 
@@ -85,9 +116,10 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
     }
 
     /// Adds the weights of the folder's entries to `total` in one step, and starts
-    /// sizing each subfolder on its own task. A sealed entry, told by [`Sealed::of`]
-    /// against the folder's own `lstat`, is skipped. A symlink is weighed as a link,
-    /// since a delete removes it as one.
+    /// sizing each subfolder on its own task. Every subfolder is `lstat`ed; the other
+    /// entries are numbered within the target and sized as [`stands_for`] says. A sealed
+    /// entry, told by [`Sealed::of`] against the folder's own `lstat`, is skipped. A
+    /// symlink is weighed as a link, since a delete removes it as one.
     fn size_folder<'s>(
         &'s self,
         scope: &Scope<'s>,
@@ -100,8 +132,21 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
             Err(error) => return self.log.entry_failed(folder, error),
         };
 
+        let (folders, files): (Vec<_>, Vec<_>) = listed
+            .into_iter()
+            .partition(|entry| entry.kind == FileKind::Dir);
+        let first_file = total.number_files(files.len() as u64);
+        let sized_files = files
+            .into_iter()
+            .zip(first_file..)
+            .filter_map(|(entry, number)| Some((entry, stands_for(number)?)));
+        let sized = folders
+            .into_iter()
+            .map(|entry| (entry, 1))
+            .chain(sized_files);
+
         let mut sum = 0u64;
-        for entry in listed {
+        for (entry, stands_for) in sized {
             let path = folder.join(entry.name);
             let meta = match Cleanup::lstat(&path).perform(self.ctx) {
                 Ok(meta) => meta,
@@ -116,7 +161,7 @@ impl<'a, B: Backend + Sync, P: Progress> Sizer<'a, B, P> {
                 continue;
             }
 
-            sum = sum.saturating_add(self.weight(meta));
+            sum = sum.saturating_add(self.weight(meta).saturating_mul(stands_for));
             if meta.kind == FileKind::Dir {
                 let total = total.clone();
                 scope.spawn(move |scope| self.size_folder(scope, path, meta, total));
@@ -181,5 +226,25 @@ mod tests {
         assert!(counted.claim(1, 7));
         assert!(counted.claim(2, 7));
         assert!(!counted.claim(1, 7));
+    }
+
+    #[test]
+    fn past_the_exact_files_one_file_in_a_sample_stands_for_the_rest() {
+        let counted: Vec<_> = [0, EXACT_FILES - 1, EXACT_FILES, EXACT_FILES + 1]
+            .into_iter()
+            .chain([EXACT_FILES + SAMPLE_EVERY])
+            .map(stands_for)
+            .collect();
+
+        assert_eq!(
+            counted,
+            [
+                Some(1),
+                Some(1),
+                Some(SAMPLE_EVERY),
+                None,
+                Some(SAMPLE_EVERY)
+            ]
+        );
     }
 }

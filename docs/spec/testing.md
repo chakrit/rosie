@@ -54,4 +54,4 @@ the right strategy or script for each rule.
 ## Benchmark
 
 - Walk 1M entries in under 1 second, warm cache, on gz44.
-- The sizing budget is set from the first measurement.
+- Size 1M entries in under 1.5 seconds, warm cache, on gz44.

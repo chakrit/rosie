@@ -123,12 +123,13 @@ impl Needs {
         }
     }
 
-    /// The settings, outermost first: placeholders, then mounts, then bundles.
+    /// The settings, outermost first, in the walk's check order: placeholders, then
+    /// bundles, then mounts (`docs/spec/safety.md#walk-skips`).
     pub fn settings(self) -> impl Iterator<Item = WalkSetting> {
         [
             WalkSetting::Placeholders,
-            WalkSetting::Mounts,
             WalkSetting::Bundles,
+            WalkSetting::Mounts,
         ]
         .into_iter()
         .filter(move |setting| self.contains(*setting))
@@ -136,10 +137,10 @@ impl Needs {
 
     /// The first of [`Needs::settings`]; there is always one.
     pub fn outermost(self) -> WalkSetting {
-        match (self.placeholders, self.mounts) {
+        match (self.placeholders, self.bundles) {
             (true, _) => WalkSetting::Placeholders,
-            (false, true) => WalkSetting::Mounts,
-            (false, false) => WalkSetting::Bundles,
+            (false, true) => WalkSetting::Bundles,
+            (false, false) => WalkSetting::Mounts,
         }
     }
 }
@@ -238,6 +239,29 @@ impl fmt::Display for WalkSkips {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn closures_follow_the_walk_check_order() {
+        // docs/spec/safety.md#walk-skips: placeholder, bundle, then volume.
+        let every = Needs::PLACEHOLDERS
+            .and(Some(WalkSetting::Mounts))
+            .and(Some(WalkSetting::Bundles));
+        let mounted_bundle = Needs::MOUNTS.and(Some(WalkSetting::Bundles));
+        let mut skips = WalkSkips::default();
+
+        skips.record(WalkSkip::Closed(mounted_bundle));
+
+        assert_eq!(
+            every.settings().collect::<Vec<_>>(),
+            [
+                WalkSetting::Placeholders,
+                WalkSetting::Bundles,
+                WalkSetting::Mounts
+            ]
+        );
+        assert_eq!(mounted_bundle.outermost(), WalkSetting::Bundles);
+        assert_eq!((skips.bundles, skips.mounts), (1, 0));
+    }
 
     #[test]
     fn walk_skips_count_per_reason() {

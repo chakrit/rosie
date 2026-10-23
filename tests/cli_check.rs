@@ -409,8 +409,8 @@ fn a_folder_closed_several_ways_names_every_flag_that_enters_it() {
 
     assert_eq!(
         line_for(&ran, "~/src/Old.app/Contents").reason,
-        "cloud placeholder, not downloaded; another volume; bundle; to enter it: \
-         --enter-placeholders --enter-mounts --enter-bundles"
+        "cloud placeholder, not downloaded; bundle; another volume; to enter it: \
+         --enter-placeholders --enter-bundles --enter-mounts"
     );
 }
 

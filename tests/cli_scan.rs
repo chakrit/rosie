@@ -81,8 +81,8 @@ fn a_skip_closed_several_ways_names_every_flag_it_needs() {
 
     ran.assert_status(ExitStatus::Success);
     let line = format!(
-        "- skipped {CWD}/Old.app: cloud placeholder, not downloaded; another volume; bundle \
-         (to enter it: --enter-placeholders --enter-mounts --enter-bundles)"
+        "- skipped {CWD}/Old.app: cloud placeholder, not downloaded; bundle; another volume \
+         (to enter it: --enter-placeholders --enter-bundles --enter-mounts)"
     );
     assert!(
         ran.stderr.lines().any(|shown| shown == line),

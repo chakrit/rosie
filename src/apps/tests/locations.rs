@@ -95,7 +95,7 @@ fn an_item_that_cannot_be_sized_fails_the_scan() {
     let fails = |result: Result<Scan, Error>| {
         matches!(
             result,
-            Err(Error::Item(crate::scan::Problem::Path {
+            Err(Error::Item(Problem::Path {
                 error: fs::Error::Io {
                     op: Op::ReadDir,
                     ..
@@ -217,10 +217,8 @@ fn a_leftover_location_behind_a_mount_is_searched_only_with_enter_mounts() {
         ]
     );
     let calls = closed_fake.calls();
-    assert!(!calls.contains(&crate::fs::fake::Call::ReadDir(lib("Caches").into())));
-    assert!(!calls.contains(&crate::fs::fake::Call::ReadDir(
-        "/Library/LaunchDaemons".into()
-    )));
+    assert!(!calls.contains(&Call::ReadDir(lib("Caches").into())));
+    assert!(!calls.contains(&Call::ReadDir("/Library/LaunchDaemons".into())));
     assert_eq!(
         deletes(&crossed),
         [

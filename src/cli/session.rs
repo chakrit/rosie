@@ -188,15 +188,6 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         Ok(Scanner::new(ctx, rules, settings))
     }
 
-    /// Runs `work` under the live progress spinner and clears it whatever `work` returns;
-    /// failing to clear it is the only error added.
-    pub fn with_progress<T>(&self, work: impl FnOnce(&C::Progress) -> T) -> Result<T, Error> {
-        let progress = self.console.progress();
-        let done = work(&progress);
-        progress.finish()?;
-        Ok(done)
-    }
-
     pub fn store(&self) -> Store<'_, &'a B> {
         Store::new(&self.own, &self.env.paths.data_dir())
     }
@@ -219,6 +210,15 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     }
 
     // output
+
+    /// Runs `work` under the live progress spinner and clears it whatever `work` returns;
+    /// failing to clear it is the only error added.
+    pub fn with_progress<T>(&self, work: impl FnOnce(&C::Progress) -> T) -> Result<T, Error> {
+        let progress = self.console.progress();
+        let done = work(&progress);
+        progress.finish()?;
+        Ok(done)
+    }
 
     /// A line on stdout.
     pub fn say(&mut self, text: &str) -> io::Result<()> {

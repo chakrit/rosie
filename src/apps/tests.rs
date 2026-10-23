@@ -11,10 +11,10 @@ use super::fixture::{
 use super::*;
 use crate::config::Walk;
 use crate::fs::ROOT_UID;
-use crate::fs::fake::{FakeBackend, USER_UID};
+use crate::fs::fake::{Call, FakeBackend, USER_UID};
 use crate::fs::{self, Op};
 use crate::plan::{AggressiveItems, Delete, LaunchDomain, RunAs, Size, SkipReason, Status};
-use crate::scan::{Needs, NoProgress, Progress, Scan, Settings, WalkSkip};
+use crate::scan::{Needs, NoProgress, Problem, Progress, Scan, Settings, WalkSkip};
 
 mod app_bundle;
 mod app_scan;

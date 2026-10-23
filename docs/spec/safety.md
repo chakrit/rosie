@@ -14,6 +14,7 @@ forced through it; there are no exceptions.
   reports), metadata via `lstat` (allocated size, dev and inode, file type, owner,
   `st_flags`), file reads for Lua, remove, commands, sudo, and the metadata methods
   below.
+- An interrupted system call (EINTR) is not retried; it fails like any other error.
 - `RealBackend` implements it for the machine; tests inject an in-memory fake
   ([testing.md](testing.md)).
 - The layer's one concrete wrapper is `FsContext<B: Backend>`, mostly for security

@@ -1,6 +1,6 @@
 # CLI
 
-Status: accepted. Target behavior; not implemented.
+Status: implemented.
 
 ## Modes
 

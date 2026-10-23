@@ -1,6 +1,6 @@
 # App and orphan cleanup
 
-Status: accepted. Target behavior; not implemented.
+Status: implemented.
 
 ## `rosie clean app <X.app>`
 

@@ -1,6 +1,6 @@
 # Safety
 
-Status: accepted. Target behavior; not implemented.
+Status: implemented.
 
 ## FS interaction layer
 

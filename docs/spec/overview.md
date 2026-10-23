@@ -1,6 +1,6 @@
 # Rosie overview
 
-Status: accepted. Nothing here is implemented yet; every section is target behavior.
+Status: implemented.
 
 ## What rosie is
 

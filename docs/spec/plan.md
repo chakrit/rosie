@@ -1,6 +1,6 @@
 # Plan and run
 
-Status: accepted. Target behavior; not implemented.
+Status: implemented.
 
 Cleanup runs in two phases that can also be invoked independently: scan produces a
 plan, run executes it, like `terraform plan -out` followed by `terraform apply`.

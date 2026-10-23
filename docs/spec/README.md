@@ -23,14 +23,14 @@ already has a row.
 
 | File             | Covers                                                  | Status      |
 |------------------|---------------------------------------------------------|-------------|
-| `overview.md`    | what rosie is, its principles, map of subject specs     | accepted    |
-| `cli.md`         | commands, modes, flags, config keys, exit codes         | accepted    |
-| `plan.md`        | plan file, stats, confirmation, run, `.sh` export       | accepted    |
-| `rules.md`       | rule format, detection strategies, packs, layering, Lua | accepted    |
-| `safety.md`      | FS layer, roots, symlinks, walk skips, deletion, sudo   | accepted    |
-| `app.md`         | `clean app` and `clean orphans`                         | accepted    |
+| `overview.md`    | what rosie is, its principles, map of subject specs     | implemented |
+| `cli.md`         | commands, modes, flags, config keys, exit codes         | implemented |
+| `plan.md`        | plan file, stats, confirmation, run, `.sh` export       | implemented |
+| `rules.md`       | rule format, detection strategies, packs, layering, Lua | implemented |
+| `safety.md`      | FS layer, roots, symlinks, walk skips, deletion, sudo   | implemented |
+| `app.md`         | `clean app` and `clean orphans`                         | implemented |
 | `performance.md` | parallel walk, sizing, delete                           | implemented |
-| `stack.md`       | toolchain, crates, FFI policy                           | accepted    |
+| `stack.md`       | toolchain, crates, FFI policy                           | implemented |
 | `testing.md`     | test tiers, fixtures, fakes, benchmark budgets          | accepted    |
 
 ## Format

@@ -1,6 +1,6 @@
 # Stack
 
-Status: accepted.
+Status: implemented.
 
 - Rust stable, pinned in `rust-toolchain.toml`; edition 2024.
 - Target: Apple Silicon (`aarch64-apple-darwin`), macOS 11 and later.
@@ -38,6 +38,8 @@ Status: accepted.
 | `ureq`                        | pack downloads over HTTPS                                            |
 | `tar` + `flate2`              | pack unpacking ([safety.md](safety.md#rosies-own-data))              |
 | `rayon`                       | parallel walk, sizing, and delete ([performance.md](performance.md)) |
+| `strsim`                      | ranking close names in usage-error hints *(agent-inferred)*          |
+| `tempfile` (dev)              | temp folders for the contract and smoke tiers *(agent-inferred)*     |
 
 `ureq` uses native TLS (macOS Security framework, Keychain trust, no `ring`). Rosie does
 not use `rustls` or another pure-Rust TLS stack, for macOS adherence, not for any TLS

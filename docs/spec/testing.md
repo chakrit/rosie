@@ -1,6 +1,6 @@
 # Testing
 
-Status: accepted. Target behavior; not implemented.
+Status: accepted. Implemented except the record-and-replay tier.
 
 Tests prove that rosie cleans the right files and not the wrong ones, and that it runs
 the right strategy or script for each rule.
@@ -29,6 +29,8 @@ the right strategy or script for each rule.
 
 ## Record-and-replay fixtures
 
+Target behavior; not implemented. Fixture trees are written by hand until it is.
+
 - A capture script runs the real tools (for example `npm install`) inside Docker and
   records the resulting tree shapes (paths and sizes) as committed manifests.
 - `cargo test` loads each manifest into the in-memory fake and checks which paths
@@ -46,9 +48,10 @@ the right strategy or script for each rule.
 - One contract suite runs against both the fake and `RealBackend` on a temp folder. It
   covers file operations only; `lsof`, `ps`, and sudo are covered by the fake plus smoke tests of
   the refusal paths.
-- The sandbox tier runs the CLI in-process through `App<B>` with the fake. A few smoke
-  tests run the real binary on temp folders with `env_clear()` and a sandboxed `HOME`
-  and `PATH`. Smoke tests pre-seed the pack folder, so they never pull from the network.
+- The sandbox tier runs the CLI in-process through `App<B, N, C>` with the fake. A few
+  smoke tests run the real binary on temp folders with `env_clear()` and a sandboxed
+  `HOME` and `PATH`. Smoke tests pre-seed the pack folder, so they never pull from the
+  network.
 - Roots are injected, so tests point every root at the fake tree or a temp folder.
 
 ## Benchmark

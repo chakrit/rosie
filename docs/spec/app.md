@@ -38,6 +38,13 @@ is a plan like any other ([plan.md](plan.md)).
   the reason ([safety.md](safety.md#running-processes)).
 - Every filesystem item is gated by `roots` ([safety.md](safety.md#roots)).
 
+### App name matching
+
+Status: target.
+
+- The app argument is user-supplied and matches installed apps leniently, for example by
+  wildcard: `rosie scan app Code` finds Visual Studio Code.
+
 ## `rosie clean orphans`
 
 Orphans mode finds leftovers of apps that are no longer installed. It is its own mode,

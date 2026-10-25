@@ -28,7 +28,7 @@ already has a row.
 | `plan.md`        | plan file, stats, confirmation, run, `.sh` export       | implemented |
 | `rules.md`       | rule format, detection strategies, packs, layering, Lua | implemented |
 | `safety.md`      | FS layer, roots, symlinks, walk skips, deletion, sudo   | implemented |
-| `app.md`         | `clean app` and `clean orphans`                         | implemented |
+| `app.md`         | `clean app`, app name matching, `clean orphans`         | implemented |
 | `performance.md` | parallel walk, sizing, delete                           | implemented |
 | `stack.md`       | toolchain, crates, FFI policy                           | implemented |
 | `testing.md`     | test tiers, fixtures, fakes, benchmark budgets          | accepted    |

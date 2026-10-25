@@ -42,8 +42,18 @@ is a plan like any other ([plan.md](plan.md)).
 
 Status: target.
 
-- The app argument is user-supplied and matches installed apps leniently, for example by
-  wildcard: `rosie scan app Code` finds Visual Studio Code.
+- The app argument is a wildcard pattern, as with `--only`
+  ([cli.md](cli.md#flags)): `rosie scan app Code` finds Visual Studio Code.
+- rosie searches every applications folder for the pattern.
+- The folders searched are `/Applications` and `~/Applications`. *(agent-inferred)*
+- A pattern matches an app whose `.app` file name, without `.app`, or whose
+  `CFBundleName` it matches whole. *(agent-inferred)*
+- Matching ignores case. *(agent-inferred)*
+- An argument that names an existing path is that path, not a pattern.
+  *(agent-inferred)*
+- Several matches open the app picker, limited to the matches; with no terminal, they
+  are a usage error listing them. *(agent-inferred)*
+- A pattern that matches no app is an error. *(agent-inferred)*
 
 ## `rosie clean orphans`
 

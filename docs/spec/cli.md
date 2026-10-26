@@ -223,7 +223,7 @@ When stdin or stdout is not a terminal, rosie prints the usage error instead.
 
 ## Patterns
 
-Status: target.
+Status: implemented.
 
 Patterns are the `--only` rule patterns, the `app` argument
 ([app.md](app.md#app-name-matching)), and `tree <dir>`.

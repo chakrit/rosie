@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use super::name::{NameError, RuleId, RulePattern};
 use crate::fs::{self, InvalidCommand};
-use crate::glob::GlobError;
+use crate::glob;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -130,7 +130,7 @@ pub enum Problem {
     BadGlob {
         field: &'static str,
         #[source]
-        source: GlobError,
+        source: glob::Error,
     },
 
     #[error("`{field}`: {source}")]

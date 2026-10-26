@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use super::Error;
 use super::bundle::bundle_stem;
 use crate::fs::{Backend, FsContext};
-use crate::glob::GlobError;
+use crate::glob;
 use crate::pattern::Pattern;
 
 /// A command-line [`Pattern`] over app file names. One ending in `.app` is compared
@@ -27,8 +27,8 @@ enum Against {
 }
 
 impl AppPattern {
-    pub fn parse(text: &str) -> Result<AppPattern, GlobError> {
-        let against = match text.to_lowercase().ends_with(".app") {
+    pub fn parse(text: &str) -> Result<AppPattern, glob::Error> {
+        let against = match names_an_app(text) {
             true => Against::FileName,
             false => Against::Stem,
         };
@@ -52,6 +52,12 @@ impl fmt::Display for AppPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.pattern.fmt(f)
     }
+}
+
+/// Whether a word on the command line names an app: it ends in `.app`, case ignored
+/// (`docs/spec/cli.md#modes`).
+pub fn names_an_app(word: &str) -> bool {
+    word.to_lowercase().ends_with(".app")
 }
 
 /// The apps the picker offers that `pattern` matches, sorted.

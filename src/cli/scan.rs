@@ -3,7 +3,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::args::{AppArg, Format, Mode, Place, PlanSource, ScanArgs, Target, TreeArgs, Verb};
+use super::args::{AppArg, FolderWord, Format, Mode, PlanSource, ScanArgs, TreeArgs, Verb};
 use super::console::{Console, Finish, PromptError};
 use super::findings::{findings_lines, problem_line, stats_lines};
 use super::plan_list::{LeftOut, plan_listing};
@@ -80,10 +80,11 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         let format = args.format.or(by_terminal)?;
         let config = self.config()?;
-        let mode = args.target.mode(Place::Mode(Verb::Scan))?;
+        let mode = args.target.mode()?;
+        let folder = args.target.folder_word(Verb::Scan);
         let scan = self
             .find(&config, &mode, Verb::Scan)
-            .map_err(|error| named_nothing(error, &args.target, Place::Mode(Verb::Scan)))?;
+            .map_err(|error| named_nothing(error, folder))?;
         let plan = answered(&scan.plan, mode.flags().conflicts.conflicts);
 
         let left_out = LeftOut {
@@ -109,8 +110,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         Ok(ExitStatus::failed_if(!scan.problems.is_empty()))
     }
 
-    /// Scans, shows the plan, and runs it once the user answers `y`; `e` trims it first.
-    pub fn clean(&mut self, target: Target, place: Place) -> Result<ExitStatus, Error> {
+    /// Scans `mode`, shows the plan, and runs it once the user answers `y`; `e` trims it
+    /// first. `folder` is the folder given in place of a command or mode, if any.
+    pub fn clean(&mut self, mode: Mode, folder: Option<FolderWord>) -> Result<ExitStatus, Error> {
         if !self.console.terminals().interactive() {
             return Err(Error::Usage(
                 "rosie clean asks for confirmation and needs a terminal; save a plan with \
@@ -119,10 +121,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             ));
         }
         let config = self.config()?;
-        let mode = target.mode(place)?;
         let scan = self
             .find(&config, &mode, Verb::Clean)
-            .map_err(|error| named_nothing(error, &target, place))?;
+            .map_err(|error| named_nothing(error, folder))?;
         let skips = ScanSkips {
             walk: scan.skip_counts(),
             refused: &scan.refused,
@@ -441,14 +442,13 @@ fn answered(plan: &Plan, answer: Option<Selection>) -> Plan {
     }
 }
 
-/// `error`, unless it says the folder `target` gives in place of a mode does not exist:
-/// that word names no command, mode, or folder (`docs/spec/cli.md#modes`).
-fn named_nothing(error: Error, target: &Target, place: Place) -> Error {
-    match (error, target.folder_word()) {
-        (Error::Scan(scan::Error::Missing { .. }), Some(word)) => Error::UnknownWord {
-            word: word.to_path_buf(),
-            place,
-        },
+/// `error`, unless it says `folder`, given in place of a command or mode, does not
+/// exist: that word names no command, mode, or folder (`docs/spec/cli.md#modes`).
+fn named_nothing(error: Error, folder: Option<FolderWord>) -> Error {
+    match (error, folder) {
+        (Error::Scan(scan::Error::Missing { .. }), Some(FolderWord { word, place })) => {
+            Error::UnknownWord { word, place }
+        }
         (error, _) => error,
     }
 }

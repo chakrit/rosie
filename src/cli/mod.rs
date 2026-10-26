@@ -34,7 +34,7 @@ use crate::packs::Network;
 use crate::run::RunStats;
 use crate::run::elevated::{self, Invocation};
 
-use args::{Cli, Command, Place, Target};
+use args::{Cli, Command, FolderWord, Mode, Place};
 use session::Session;
 
 pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals, Width};
@@ -119,7 +119,11 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
                 self.command(env, typed_args(&argv), |session| session.dispatch(command))
             }
             None => self.command(env, typed_args(&argv), |session| {
-                session.clean(Target::tree(cli.tree), Place::Command)
+                let folder = cli.tree.dir.clone().map(|word| FolderWord {
+                    word,
+                    place: Place::Command,
+                });
+                session.clean(Mode::Tree(cli.tree), folder)
             }),
         };
         let status = match outcome {
@@ -219,12 +223,9 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
     }
 
     fn show_error(&mut self, error: &Error) -> ExitStatus {
-        let status = match error {
-            Error::Usage(_)
-            | Error::UnknownWord { .. }
-            | Error::ManyApps { .. }
-            | Error::Scan(crate::scan::Error::NoFolderMatches { .. }) => ExitStatus::Usage,
-            _ => ExitStatus::Failed,
+        let status = match error.is_usage() {
+            true => ExitStatus::Usage,
+            false => ExitStatus::Failed,
         };
         let palette = self.console.stderr_palette();
         let written = failure::failures(error).iter().try_for_each(|failure| {

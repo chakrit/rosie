@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 
 use thiserror::Error;
 
-use crate::glob::GlobError;
+use crate::glob;
 use crate::pattern::Pattern;
 
 /// The longest pack or rule name, in characters.
@@ -156,10 +156,7 @@ pub struct RulePattern {
 
 impl RulePattern {
     pub fn parse(text: &str) -> Result<RulePattern, NameError> {
-        let (pack, rule) = match text.split_once('/') {
-            Some((pack, rule)) => (pack, rule),
-            None => ("*", text),
-        };
+        let (pack, rule) = text.split_once('/').unwrap_or(("*", text));
         if rule.contains('/') {
             return Err(NameError::PatternShape);
         }
@@ -203,7 +200,7 @@ pub enum NameError {
     PatternShape,
 
     #[error(transparent)]
-    Pattern(#[from] GlobError),
+    Pattern(#[from] glob::Error),
 }
 
 #[cfg(test)]
@@ -331,15 +328,15 @@ mod tests {
         assert_eq!(RulePattern::parse("a/b/c"), Err(NameError::PatternShape));
         assert_eq!(
             RulePattern::parse(""),
-            Err(NameError::Pattern(GlobError::Empty))
+            Err(NameError::Pattern(glob::Error::Empty))
         );
         assert_eq!(
             RulePattern::parse("rosie/"),
-            Err(NameError::Pattern(GlobError::Empty))
+            Err(NameError::Pattern(glob::Error::Empty))
         );
         assert!(matches!(
             RulePattern::parse("py[c]"),
-            Err(NameError::Pattern(GlobError::Unsupported(..)))
+            Err(NameError::Pattern(glob::Error::Unsupported(..)))
         ));
     }
 }

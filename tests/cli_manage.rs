@@ -401,6 +401,23 @@ fn a_word_ending_in_app_in_place_of_a_mode_enters_app_mode() {
 }
 
 #[test]
+fn an_app_word_in_place_of_a_mode_ignores_case() {
+    let sandbox = code_sandbox();
+
+    let scanned = sandbox.run(&["scan", "XCODE.APP", "--toml"]);
+    let cleaned = sandbox.run_with(Script::terminal().answer("n"), &["clean", "Xcode.APP"]);
+
+    scanned.assert_status(ExitStatus::Success);
+    assert!(
+        scanned.stdout.contains(&format!("path = \"{XCODE}\"")),
+        "{}",
+        scanned.stdout
+    );
+    cleaned.assert_status(ExitStatus::Success);
+    assert!(cleaned.stdout.contains("Xcode.app"), "{}", cleaned.stdout);
+}
+
+#[test]
 fn an_app_path_in_place_of_a_mode_enters_app_mode() {
     let downloaded = "/Users/me/Downloads/Some.app";
     let sandbox = Sandbox::with_roots(&["/Users/me/Downloads", "/Users/me/Library"]);

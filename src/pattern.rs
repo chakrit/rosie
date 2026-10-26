@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::glob::{Glob, GlobError, NameMatch};
+use crate::glob::{self, Glob, NameMatch, has_wildcard};
 
 /// A name pattern as the user types one. A word without `*` or `?` matches anywhere in
 /// the name; a word with them is a glob over the whole name. Case is ignored.
@@ -14,9 +14,9 @@ pub struct Pattern {
 }
 
 impl Pattern {
-    pub fn parse(text: &str) -> Result<Pattern, GlobError> {
+    pub fn parse(text: &str) -> Result<Pattern, glob::Error> {
         let typed = Glob::parse(&text.to_lowercase())?;
-        let glob = match has_wildcard(text) {
+        let glob = match has_wildcard(text.as_bytes()) {
             true => typed,
             false => Glob::parse(&format!("*{}*", typed.as_str()))?,
         };
@@ -33,7 +33,7 @@ impl Pattern {
 }
 
 impl NameMatch for Pattern {
-    fn parse(text: &str) -> Result<Pattern, GlobError> {
+    fn parse(text: &str) -> Result<Pattern, glob::Error> {
         Pattern::parse(text)
     }
 
@@ -46,11 +46,6 @@ impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.text)
     }
-}
-
-/// Whether `text` holds a `*` or `?`, which make a pattern a whole-name glob.
-fn has_wildcard(text: &str) -> bool {
-    text.contains(['*', '?'])
 }
 
 #[cfg(test)]
@@ -94,10 +89,10 @@ mod tests {
 
     #[test]
     fn refuses_what_a_glob_refuses() {
-        assert_eq!(Pattern::parse(""), Err(GlobError::Empty));
+        assert_eq!(Pattern::parse(""), Err(glob::Error::Empty));
         assert!(matches!(
             Pattern::parse("[ab]"),
-            Err(GlobError::Unsupported(_, '['))
+            Err(glob::Error::Unsupported(_, '['))
         ));
     }
 }

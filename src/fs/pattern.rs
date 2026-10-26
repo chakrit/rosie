@@ -11,7 +11,7 @@ use super::context::{FsContext, resolve_dots};
 use super::error::Error;
 use super::links::EnterLinks;
 use super::ops::{Cleanup, FsOp, UserInput};
-use crate::glob::NameMatch;
+use crate::glob::{NameMatch, has_wildcard};
 
 /// A path pattern split at its first wildcard component: the literal folder above it,
 /// which the caller checks under its own policy, and the components from there down.
@@ -39,7 +39,7 @@ impl<M: NameMatch> PathPattern<M> {
             .collect();
         let literal_len = names
             .iter()
-            .position(|name| has_wildcard(name))
+            .position(|name| has_wildcard(name.as_bytes()))
             .unwrap_or(names.len());
 
         let base: PathBuf = std::iter::once(OsStr::new("/"))
@@ -93,17 +93,17 @@ impl<M: NameMatch> PathPattern<M> {
         base: &Path,
         base_kind: FileKind,
     ) -> Result<Vec<(PathBuf, FileKind)>, Error> {
-        let mut found = vec![(base.to_path_buf(), base_kind)];
-        for part in &self.below {
+        let start = vec![(base.to_path_buf(), base_kind)];
+        let mut found = self.below.iter().try_fold(start, |found, part| {
             let folders = found
                 .into_iter()
                 .filter(|&(_, kind)| kind == FileKind::Dir)
                 .map(|(folder, _)| folder);
-            found = folders
+            folders
                 .map(|folder| part.children(ctx, &folder))
-                .collect::<Result<Vec<_>, Error>>()?
-                .concat();
-        }
+                .collect::<Result<Vec<_>, Error>>()
+                .map(|children| children.concat())
+        })?;
 
         found.sort_by(|(a, _), (b, _)| a.cmp(b));
         Ok(found)
@@ -112,7 +112,7 @@ impl<M: NameMatch> PathPattern<M> {
 
 impl<M: NameMatch> Part<M> {
     fn parse(name: &OsStr) -> Result<Part<M>, Error> {
-        if !has_wildcard(name) {
+        if !has_wildcard(name.as_bytes()) {
             return Ok(Part::Literal(name.to_os_string()));
         }
 
@@ -146,21 +146,14 @@ impl<M: NameMatch> Part<M> {
                 .collect(),
         };
 
-        let mut children = Vec::new();
-        for child in candidates {
-            match Cleanup::lstat(&child).perform(ctx) {
-                Ok(meta) if meta.kind == FileKind::Symlink => {}
-                Ok(meta) => children.push((child, meta.kind)),
-                Err(error) if error.has_vanished() => {}
-                Err(error) => return Err(error),
-            }
-        }
-        Ok(children)
+        candidates
+            .into_iter()
+            .filter_map(|child| match Cleanup::lstat(&child).perform(ctx) {
+                Ok(meta) if meta.kind == FileKind::Symlink => None,
+                Ok(meta) => Some(Ok((child, meta.kind))),
+                Err(error) if error.has_vanished() => None,
+                Err(error) => Some(Err(error)),
+            })
+            .collect()
     }
-}
-
-fn has_wildcard(name: &OsStr) -> bool {
-    name.as_bytes()
-        .iter()
-        .any(|byte| matches!(byte, b'*' | b'?'))
 }

@@ -16,15 +16,15 @@ const UNSUPPORTED: [char; 5] = ['[', ']', '{', '}', '\\'];
 pub struct Glob(Box<str>);
 
 impl Glob {
-    pub fn parse(pattern: &str) -> Result<Glob, GlobError> {
+    pub fn parse(pattern: &str) -> Result<Glob, Error> {
         if pattern.is_empty() {
-            return Err(GlobError::Empty);
+            return Err(Error::Empty);
         }
         if pattern.contains('/') {
-            return Err(GlobError::Separator(pattern.into()));
+            return Err(Error::Separator(pattern.into()));
         }
         if let Some(bad) = pattern.chars().find(|c| UNSUPPORTED.contains(c)) {
-            return Err(GlobError::Unsupported(pattern.into(), bad));
+            return Err(Error::Unsupported(pattern.into(), bad));
         }
         Ok(Glob(pattern.into()))
     }
@@ -40,17 +40,23 @@ impl Glob {
     }
 }
 
+/// Whether `text` holds a `*` or `?`, which make a pattern a glob rather than a literal
+/// name.
+pub fn has_wildcard(text: &[u8]) -> bool {
+    text.iter().any(|byte| matches!(byte, b'*' | b'?'))
+}
+
 /// How one wildcard component of a path pattern matches the names in a folder: exactly,
 /// as [`Glob`] does for rule files, or folded, as [`crate::pattern::Pattern`] does for the
 /// command line.
 pub trait NameMatch: Sized {
-    fn parse(text: &str) -> Result<Self, GlobError>;
+    fn parse(text: &str) -> Result<Self, Error>;
 
     fn matches(&self, name: &str) -> bool;
 }
 
 impl NameMatch for Glob {
-    fn parse(text: &str) -> Result<Glob, GlobError> {
+    fn parse(text: &str) -> Result<Glob, Error> {
         Glob::parse(text)
     }
 
@@ -90,7 +96,7 @@ fn wildcard_match(pattern: &[char], name: &[char]) -> bool {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum GlobError {
+pub enum Error {
     #[error("a glob pattern cannot be empty")]
     Empty,
 
@@ -139,18 +145,15 @@ mod tests {
 
     #[test]
     fn refuses_patterns_outside_the_syntax() {
-        assert_eq!(Glob::parse(""), Err(GlobError::Empty));
-        assert!(matches!(
-            Glob::parse("src/*.rs"),
-            Err(GlobError::Separator(_))
-        ));
+        assert_eq!(Glob::parse(""), Err(Error::Empty));
+        assert!(matches!(Glob::parse("src/*.rs"), Err(Error::Separator(_))));
         assert!(matches!(
             Glob::parse("*.{js,ts}"),
-            Err(GlobError::Unsupported(_, '{'))
+            Err(Error::Unsupported(_, '{'))
         ));
         assert!(matches!(
             Glob::parse("[ab].txt"),
-            Err(GlobError::Unsupported(_, '['))
+            Err(Error::Unsupported(_, '['))
         ));
     }
 }

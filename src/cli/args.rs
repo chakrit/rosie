@@ -2,11 +2,11 @@
 //! plain values clap needs; `super` turns them into typed settings once.
 
 use std::fmt;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
-use crate::apps::{AppPattern, is_app_path};
+use crate::apps::{AppPattern, names_an_app};
 use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::EnterLinks;
@@ -168,28 +168,26 @@ pub struct Target {
 }
 
 impl Target {
-    /// `tree` on the folder in `tree`, as bare `rosie` scans it.
-    pub fn tree(tree: TreeArgs) -> Target {
-        Target { mode: None, tree }
-    }
-
-    /// The mode this target runs when its words stand at `place`. In place of a command,
-    /// as bare `rosie` takes them, a word is always a folder.
-    pub fn mode(&self, place: Place) -> Result<Mode, Error> {
+    pub fn mode(&self) -> Result<Mode, Error> {
         if let Some(mode) = &self.mode {
             return Ok(mode.clone());
         }
 
-        let app_word = self.tree.dir.as_deref().filter(|dir| is_app_path(dir));
-        match (place, app_word) {
-            (Place::Mode(_), Some(word)) => self.app_mode(word),
-            (Place::Command, _) | (Place::Mode(_), None) => Ok(Mode::Tree(self.tree.clone())),
+        match self.app_word() {
+            Some(word) => self.app_mode(word),
+            None => Ok(Mode::Tree(self.tree.clone())),
         }
+    }
+
+    /// The word given in place of a mode name, when it names an app.
+    fn app_word(&self) -> Option<&str> {
+        let word = self.tree.dir.as_deref()?.to_str()?;
+        names_an_app(word).then_some(word)
     }
 
     /// App mode on `word`, which took the place of a mode; the rule flags parsed beside
     /// it belong to `tree` alone.
-    fn app_mode(&self, word: &Path) -> Result<Mode, Error> {
+    fn app_mode(&self, word: &str) -> Result<Mode, Error> {
         let rules = &self.tree.rules;
         let rule_flags = [
             (!rules.only.is_empty(), "--only"),
@@ -200,24 +198,31 @@ impl Target {
             return Err(Error::Usage(format!("app mode does not take {flag}")));
         }
 
-        let text = word
-            .to_str()
-            .ok_or_else(|| Error::Usage(format!("{} is not UTF-8", word.display())))?;
-        let app = parse_app(text).map_err(Error::Usage)?;
+        let app = parse_app(word).map_err(Error::Usage)?;
         Ok(Mode::App {
             app: Some(app),
             flags: self.tree.flags.clone(),
         })
     }
 
-    /// The folder given in place of a mode name. When no such folder exists, it was
-    /// likely meant as a command or mode.
-    pub fn folder_word(&self) -> Option<&Path> {
-        match self.mode {
-            Some(_) => None,
-            None => self.tree.dir.as_deref(),
+    /// The folder given in place of a mode name after `verb`. When no such folder
+    /// exists, it was likely meant as a command or mode.
+    pub fn folder_word(&self, verb: Verb) -> Option<FolderWord> {
+        match (&self.mode, self.app_word()) {
+            (Some(_), _) | (None, Some(_)) => None,
+            (None, None) => self.tree.dir.clone().map(|word| FolderWord {
+                word,
+                place: Place::Mode(verb),
+            }),
         }
     }
+}
+
+/// A folder given in place of a command or mode name, and where it stands.
+#[derive(Debug, Clone)]
+pub struct FolderWord {
+    pub word: PathBuf,
+    pub place: Place,
 }
 
 /// Where a folder given in place of a command or mode name stands on the command line.

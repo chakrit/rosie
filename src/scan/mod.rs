@@ -126,31 +126,37 @@ impl Scan {
     }
 }
 
-/// One way a walk goes: from `start`, whose own `lstat` gave `start_meta`, down toward
-/// `target`, at or below it, judging each folder on the way as a `tree` walk would, and
-/// taking `target` as any other entry; unless `target` is `start`: then the walk starts
-/// there as a `tree` walk does, and `start` itself is never a target.
-pub(super) struct Way {
-    start: PathBuf,
-    start_meta: Metadata,
-    target: PathBuf,
+/// One way a walk goes. Each start's own `lstat` rides along.
+pub(super) enum Way {
+    /// A `tree` walk of `root`: everything below it, never `root` itself.
+    Whole { root: PathBuf, root_meta: Metadata },
+    /// From `start` down toward `target`, below it, judging each folder on the way as a
+    /// `tree` walk would, and taking `target` as any other entry.
+    Toward {
+        start: PathBuf,
+        start_meta: Metadata,
+        target: PathBuf,
+    },
 }
 
 impl Way {
-    /// A `tree` walk of `root`.
-    fn whole(root: PathBuf, root_meta: Metadata) -> Way {
-        Way {
-            target: root.clone(),
-            start: root,
-            start_meta: root_meta,
+    fn start(&self) -> &Path {
+        match self {
+            Way::Whole { root, .. } => root,
+            Way::Toward { start, .. } => start,
         }
     }
 
-    /// Whether the walk can meet the fixed rule path `fixed`: under the start, and on
-    /// the way down to the target or at or below it.
+    /// Whether the walk can meet the fixed rule path `fixed`: under the start, and for
+    /// a way toward a target, on the way down to it or at or below it.
     fn meets(&self, fixed: &Path) -> bool {
-        let on_the_way = self.target.starts_with(fixed) || fixed.starts_with(&self.target);
-        fixed.starts_with(&self.start) && on_the_way
+        match self {
+            Way::Whole { root, .. } => fixed.starts_with(root),
+            Way::Toward { start, target, .. } => {
+                let on_the_way = target.starts_with(fixed) || fixed.starts_with(target);
+                fixed.starts_with(start) && on_the_way
+            }
+        }
     }
 }
 
@@ -213,7 +219,7 @@ impl<B: Backend + Sync> Scanner<B> {
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }
-        Ok(Way::whole(root, root_meta))
+        Ok(Way::Whole { root, root_meta })
     }
 
     /// The folders `pattern`, typed as `typed`, matches: the literal folder above its
@@ -260,10 +266,16 @@ impl<B: Backend + Sync> Scanner<B> {
         let anchor = entry::anchor(&real, self.ctx.paths()).to_path_buf();
         let anchor_meta = Cleanup::lstat(&anchor).perform(&self.ctx)?;
 
-        let way = Way {
-            start: anchor,
-            start_meta: anchor_meta,
-            target: real.clone(),
+        let way = match anchor == real {
+            true => Way::Whole {
+                root: anchor,
+                root_meta: anchor_meta,
+            },
+            false => Way::Toward {
+                start: anchor,
+                start_meta: anchor_meta,
+                target: real.clone(),
+            },
         };
         let scan = self.beside_snapshot(|| self.walk(&[way], progress))?;
         Ok(PathScan { path: real, scan })
@@ -326,15 +338,18 @@ impl<B: Backend + Sync> Scanner<B> {
             flags: self.settings.walk,
             targets: &targets,
             log: &log,
-            walked: Walked::starting_at(ways.iter().map(|way| way.start.as_path()), links),
+            walked: Walked::starting_at(ways.iter().map(Way::start), links),
         };
 
         rayon::scope(|scope| {
             for way in ways {
-                let start = way.start.clone();
-                match way.start == way.target {
-                    true => walk.start(scope, start, way.start_meta),
-                    false => walk.visit_toward(scope, start, way.start_meta, &way.target),
+                match way {
+                    Way::Whole { root, root_meta } => walk.start(scope, root.clone(), *root_meta),
+                    Way::Toward {
+                        start,
+                        start_meta,
+                        target,
+                    } => walk.visit_toward(scope, start.clone(), *start_meta, target),
                 }
             }
         });

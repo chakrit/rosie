@@ -87,3 +87,17 @@ impl From<PromptError> for Error {
         }
     }
 }
+
+impl Error {
+    /// Whether the command line was wrong, so rosie exits with the usage status
+    /// (`docs/spec/cli.md#exit-status`).
+    pub fn is_usage(&self) -> bool {
+        matches!(
+            self,
+            Error::Usage(_)
+                | Error::UnknownWord { .. }
+                | Error::ManyApps { .. }
+                | Error::Scan(scan::Error::NoFolderMatches { .. })
+        )
+    }
+}

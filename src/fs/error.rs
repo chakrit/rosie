@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::backend::{Argv, Exit};
-use crate::glob::GlobError;
+use crate::glob;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -94,7 +94,7 @@ pub enum Error {
     NotAFolder { path: PathBuf, found: &'static str },
 
     #[error(transparent)]
-    Glob(#[from] GlobError),
+    Glob(#[from] glob::Error),
 
     #[error("glob pattern component {part:?} is not UTF-8")]
     PatternNotUtf8 { part: std::ffi::OsString },

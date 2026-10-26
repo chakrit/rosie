@@ -11,10 +11,9 @@ use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
 use crate::apps::{self, AppScanner};
 use crate::config::Config;
-use crate::fs::{Backend, EnterLinks, FileKind, FsContext, FsOp, PathPattern, UserInput};
+use crate::fs::{Backend, EnterLinks, FileKind, FsContext, FsOp, UserInput};
 use crate::output::Mark;
 use crate::packs::Network;
-use crate::pattern::Pattern;
 use crate::plan::{ItemSize, Plan, PlanStats, Selection, Sides};
 use crate::run::{Elevation, Outcome, Runner, SkipReason};
 use crate::scan::{self, Refused, Scan, WalkSkips};
@@ -200,7 +199,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         match mode {
             Mode::Tree(TreeArgs { dir, rules, .. }) => {
                 let scanner = self.rule_scanner(config, settings, rules)?;
-                let root = self.absolute(dir.as_deref().unwrap_or(Path::new(".")));
+                let root = self.typed_pattern(dir.as_deref().unwrap_or(Path::new(".")))?;
                 Ok(self.with_progress(|progress| scanner.tree(&root, progress))??)
             }
             Mode::Caches { rules, .. } => {
@@ -246,10 +245,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         links: EnterLinks,
         verb: Verb,
     ) -> Result<PathBuf, Error> {
-        let path = self.absolute(given);
-        let pattern = PathPattern::<Pattern>::parse(&path)?;
+        let pattern = self.typed_pattern(given)?;
         if !pattern.has_wildcard() {
-            return Ok(path);
+            return Ok(pattern.path().to_path_buf());
         }
 
         let found = pattern

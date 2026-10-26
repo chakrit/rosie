@@ -3,7 +3,7 @@
 
 mod scan_fixture;
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use rosie::config::Walk;
 use rosie::fs::fake::{Call, FakeBackend};
@@ -50,7 +50,7 @@ fn a_scan_folder_through_a_symlink_is_walked_at_its_real_location_when_links_are
     node_project(&fake, "/Users/me/code/app");
     fake.add_symlink("/Users/me/work", "/Users/me/code");
 
-    let refused = scanner(&fake, Options::default()).tree(Path::new("/Users/me/work"), &NoProgress);
+    let refused = scanner(&fake, Options::default()).tree(&typed("/Users/me/work"), &NoProgress);
     let scan = tree_with(&fake, "/Users/me/work", links(EnterLinks::Roots));
 
     assert!(

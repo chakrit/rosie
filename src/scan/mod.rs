@@ -154,17 +154,20 @@ impl<B: Backend + Sync> Scanner<B> {
         &self.ctx
     }
 
-    /// Scans `dir`, a path the user typed, or every folder it matches when a component
-    /// holds a wildcard, into one plan (`docs/spec/cli.md#patterns`). Each folder is
+    /// Scans `dir`, a path the user typed, or every folder it matches when one of its
+    /// components holds a wildcard, into one plan (`docs/spec/cli.md#patterns`). Each folder is
     /// refused when it passes through a symlink or is spelled differently from the disk.
     /// A folder itself is never a target; the walk looks at everything below it. A
     /// folder that is a dataless placeholder is not opened unless the walk may enter
     /// placeholders.
-    pub fn tree<P: Progress>(&self, dir: &Path, progress: &P) -> Result<Scan, Error> {
-        let pattern = PathPattern::<Pattern>::parse(dir)?;
-        let folders = match pattern.has_wildcard() {
-            true => self.matching_folders(&pattern, dir)?,
-            false => vec![dir.to_path_buf()],
+    pub fn tree<P: Progress>(
+        &self,
+        dir: &PathPattern<Pattern>,
+        progress: &P,
+    ) -> Result<Scan, Error> {
+        let folders = match dir.has_wildcard() {
+            true => self.matching_folders(dir)?,
+            false => vec![dir.path().to_path_buf()],
         };
         let ways = folders
             .iter()
@@ -189,13 +192,9 @@ impl<B: Backend + Sync> Scanner<B> {
         Ok(Way::Whole { root, root_meta })
     }
 
-    /// The folders `pattern`, typed as `typed`, matches: the literal folder above its
+    /// The folders `pattern` matches: the literal folder above its
     /// first wildcard is checked as typed, and the components below match ignoring case.
-    fn matching_folders(
-        &self,
-        pattern: &PathPattern<Pattern>,
-        typed: &Path,
-    ) -> Result<Vec<PathBuf>, Error> {
+    fn matching_folders(&self, pattern: &PathPattern<Pattern>) -> Result<Vec<PathBuf>, Error> {
         let links = self.settings.walk.enter_links;
 
         let folders: Vec<PathBuf> = pattern
@@ -206,7 +205,7 @@ impl<B: Backend + Sync> Scanner<B> {
             .collect();
         match folders.is_empty() {
             true => Err(Error::NoFolderMatches {
-                pattern: typed.to_path_buf(),
+                pattern: pattern.path().to_path_buf(),
             }),
             false => Ok(folders),
         }

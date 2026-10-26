@@ -10,9 +10,10 @@ use super::root::refuse_root;
 use super::shown::Shown;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
-use crate::fs::{Backend, FsContext, FsOp, ROOT_UID, Roots, UserInput};
+use crate::fs::{self, Backend, FsContext, FsOp, PathPattern, ROOT_UID, Roots, UserInput};
 use crate::output::{Line, Mark};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
+use crate::pattern::Pattern;
 use crate::rules::{RuleLayers, RulePattern, RuleSet};
 use crate::scan::{Scanner, Settings};
 
@@ -203,6 +204,12 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             true => path.to_path_buf(),
             false => self.env.cwd.join(path),
         }
+    }
+
+    /// `typed`, a path the user typed, as a pattern under the current folder; only its own
+    /// components may hold wildcards (`docs/spec/cli.md#patterns`).
+    pub fn typed_pattern(&self, typed: &Path) -> Result<PathPattern<Pattern>, fs::Error> {
+        PathPattern::typed_under(&self.env.cwd, typed)
     }
 
     /// How this session prints paths: under the injected home as `~`.

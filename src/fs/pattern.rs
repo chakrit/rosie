@@ -7,7 +7,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::{Component, Path, PathBuf};
 
 use super::backend::{Backend, FileKind};
-use super::context::{FsContext, resolve_dots};
+use super::context::FsContext;
 use super::error::Error;
 use super::links::EnterLinks;
 use super::ops::{Cleanup, FsOp, UserInput};
@@ -16,6 +16,8 @@ use crate::glob::{NameMatch, has_wildcard};
 /// A path pattern split at its first wildcard component: the literal folder above it,
 /// which the caller checks under its own policy, and the components from there down.
 pub struct PathPattern<M> {
+    /// The path as given, made absolute.
+    path: PathBuf,
     base: PathBuf,
     below: Vec<Part<M>>,
 }
@@ -29,27 +31,61 @@ enum Part<M> {
 impl<M: NameMatch> PathPattern<M> {
     /// Parses an absolute path, `..` resolved first.
     pub fn parse(path: &Path) -> Result<PathPattern<M>, Error> {
-        let resolved = resolve_dots(path)?;
-        let names: Vec<&OsStr> = resolved
+        if !path.has_root() {
+            return Err(Error::Relative {
+                path: path.to_path_buf(),
+            });
+        }
+        PathPattern::typed_under(Path::new("/"), path)
+    }
+
+    /// Parses `typed`, a path the user typed, taken under `folder` when it is relative,
+    /// `..` resolved first. Only `typed`'s own components may hold wildcards: `folder` is
+    /// literal however it is spelled.
+    pub fn typed_under(folder: &Path, typed: &Path) -> Result<PathPattern<M>, Error> {
+        let path = folder.join(typed);
+        if !path.has_root() {
+            return Err(Error::Relative { path });
+        }
+        let anchor = match typed.has_root() {
+            true => Path::new("/"),
+            false => folder,
+        };
+        let components = anchor
             .components()
-            .filter_map(|component| match component {
-                Component::Normal(name) => Some(name),
-                _ => None,
-            })
-            .collect();
+            .map(|component| (component, false))
+            .chain(typed.components().map(|component| (component, true)));
+
+        let names = components.fold(Vec::new(), |mut names, (component, from_typed)| {
+            match component {
+                Component::Normal(name) => names.push((name, from_typed)),
+                Component::ParentDir => drop(names.pop()),
+                Component::RootDir => names.clear(),
+                Component::CurDir | Component::Prefix(_) => {}
+            }
+            names
+        });
         let literal_len = names
             .iter()
-            .position(|name| has_wildcard(name.as_bytes()))
+            .position(|&(name, from_typed)| from_typed && has_wildcard(name.as_bytes()))
             .unwrap_or(names.len());
-
         let base: PathBuf = std::iter::once(OsStr::new("/"))
-            .chain(names[..literal_len].iter().copied())
+            .chain(names[..literal_len].iter().map(|&(name, _)| name))
             .collect();
         let below = names[literal_len..]
             .iter()
-            .map(|name| Part::parse(name))
+            .map(|&(name, from_typed)| match from_typed {
+                true => Part::parse(name),
+                false => Ok(Part::Literal(name.to_os_string())),
+            })
             .collect::<Result<_, _>>()?;
-        Ok(PathPattern { base, below })
+
+        Ok(PathPattern { path, base, below })
+    }
+
+    /// The path as given, made absolute, `..` unresolved.
+    pub fn path(&self) -> &Path {
+        &self.path
     }
 
     /// Checks every wildcard component of `path`, relative or not, as
@@ -164,5 +200,49 @@ impl<M: NameMatch> Part<M> {
                 Err(error) => Some(Err(error)),
             })
             .collect()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::pattern::Pattern;
+
+    fn typed(folder: &str, typed: &str) -> PathPattern<Pattern> {
+        PathPattern::typed_under(Path::new(folder), Path::new(typed)).expect("parses")
+    }
+
+    #[test]
+    fn the_folder_a_relative_path_is_under_is_literal() {
+        let here = typed("/Users/me/what?", ".");
+        let below = typed("/Users/me/what?", "web-*");
+
+        assert!(!here.has_wildcard());
+        assert_eq!(here.base(), Path::new("/Users/me/what?"));
+        assert!(below.has_wildcard());
+        assert_eq!(below.base(), Path::new("/Users/me/what?"));
+    }
+
+    #[test]
+    fn an_absolute_typed_path_ignores_the_folder() {
+        let pattern = typed("/Users/me/what?", "/Users/me/code/*");
+
+        assert_eq!(pattern.base(), Path::new("/Users/me/code"));
+        assert_eq!(pattern.path(), Path::new("/Users/me/code/*"));
+    }
+
+    #[test]
+    fn dot_dot_climbs_out_of_the_folder_before_matching() {
+        let pattern = typed("/Users/me/code/app", "../web-*");
+
+        assert_eq!(pattern.base(), Path::new("/Users/me/code"));
+        assert!(pattern.has_wildcard());
+    }
+
+    #[test]
+    fn refuses_a_relative_folder() {
+        let result = PathPattern::<Pattern>::typed_under(Path::new("rel"), Path::new("x"));
+
+        assert!(matches!(result, Err(Error::Relative { .. })));
     }
 }

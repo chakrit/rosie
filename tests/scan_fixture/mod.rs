@@ -8,8 +8,9 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 use rosie::config::Walk;
 use rosie::fs::fake::{FakeBackend, USER_UID};
-use rosie::fs::{Bounds, FsContext, Paths, Roots};
+use rosie::fs::{Bounds, FsContext, PathPattern, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
+use rosie::pattern::Pattern;
 use rosie::plan::{AggressiveItems, Status};
 use rosie::rules::{RuleLayers, RulePattern, RuleSet};
 use rosie::scan::{Progress, Scan, Scanner, Settings};
@@ -120,6 +121,11 @@ pub fn patterns(texts: &[&str]) -> Vec<RulePattern> {
         .collect()
 }
 
+/// `dir` as the tree scan takes it, a pattern only where it holds a wildcard.
+pub fn typed(dir: &str) -> PathPattern<Pattern> {
+    PathPattern::parse(Path::new(dir)).expect("an absolute path")
+}
+
 pub fn tree(fake: &FakeBackend, dir: &str) -> Scan {
     tree_with(fake, dir, Options::default())
 }
@@ -127,7 +133,7 @@ pub fn tree(fake: &FakeBackend, dir: &str) -> Scan {
 pub fn tree_with(fake: &FakeBackend, dir: &str, options: Options) -> Scan {
     let progress = Recording::default();
     scanner(fake, options)
-        .tree(Path::new(dir), &progress)
+        .tree(&typed(dir), &progress)
         .expect("tree scan runs")
 }
 

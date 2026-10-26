@@ -165,9 +165,9 @@ fn the_start_folder_is_checked_as_typed() {
     fake.add_symlink("/Users/me/src", "/Users/me/code");
     let scanner = scanner(&fake, Options::default());
 
-    let through_link = scanner.tree(Path::new("/Users/me/src"), &NoProgress);
-    let misspelled = scanner.tree(Path::new("/Users/me/Code"), &NoProgress);
-    let a_file = scanner.tree(Path::new("/Users/me/code/app/package.json"), &NoProgress);
+    let through_link = scanner.tree(&typed("/Users/me/src"), &NoProgress);
+    let misspelled = scanner.tree(&typed("/Users/me/Code"), &NoProgress);
+    let a_file = scanner.tree(&typed("/Users/me/code/app/package.json"), &NoProgress);
 
     assert!(
         matches!(&through_link, Err(Error::Fs(fs::Error::Symlink { link, .. })) if link == Path::new("/Users/me/src")),
@@ -246,8 +246,8 @@ fn a_wildcard_start_matching_no_folder_is_refused() {
     fake.add_file("/Users/me/code/web-notes.txt", "x");
     let scanner = scanner(&fake, Options::default());
 
-    let none = scanner.tree(Path::new("/Users/me/code/web-*"), &NoProgress);
-    let no_base = scanner.tree(Path::new("/Users/me/nowhere/*"), &NoProgress);
+    let none = scanner.tree(&typed("/Users/me/code/web-*"), &NoProgress);
+    let no_base = scanner.tree(&typed("/Users/me/nowhere/*"), &NoProgress);
 
     for result in [none, no_base] {
         assert!(
@@ -264,8 +264,8 @@ fn the_literal_folder_above_a_wildcard_is_checked_as_typed() {
     fake.add_symlink("/Users/me/src", "/Users/me/code");
     let scanner = scanner(&fake, Options::default());
 
-    let through_link = scanner.tree(Path::new("/Users/me/src/*"), &NoProgress);
-    let misspelled = scanner.tree(Path::new("/Users/me/Code/*"), &NoProgress);
+    let through_link = scanner.tree(&typed("/Users/me/src/*"), &NoProgress);
+    let misspelled = scanner.tree(&typed("/Users/me/Code/*"), &NoProgress);
 
     assert!(
         matches!(&through_link, Err(Error::Fs(fs::Error::Symlink { .. }))),
@@ -671,7 +671,7 @@ fn progress_counts_every_target_and_byte() {
     let progress = Recording::default();
 
     let scan = scanner(&fake, Options::default())
-        .tree(Path::new(CODE), &progress)
+        .tree(&typed(CODE), &progress)
         .expect("scan runs");
 
     assert_eq!(paths(&scan).len(), 2);
@@ -691,7 +691,7 @@ fn sizing_reports_progress_once_per_folder_not_per_entry() {
     let progress = Recording::default();
 
     let scan = scanner(&fake, Options::default())
-        .tree(Path::new(CODE), &progress)
+        .tree(&typed(CODE), &progress)
         .expect("scan runs");
 
     assert_eq!(size_of(&scan, "/Users/me/code/app/node_modules"), 8000);

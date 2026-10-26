@@ -58,7 +58,7 @@ fn a_refused_target_is_sized_apart_from_the_plan() {
     let progress = Recording::default();
 
     let scan = scanner(&fake, Options::default())
-        .tree(Path::new(CODE), &progress)
+        .tree(&typed(CODE), &progress)
         .expect("scan runs");
 
     let [refused] = &scan.refused[..] else {
@@ -196,7 +196,7 @@ fn unreadable_running_programs_fail_the_scan() {
         },
     );
 
-    let result = scanner(&fake, Options::default()).tree(Path::new(CODE), &NoProgress);
+    let result = scanner(&fake, Options::default()).tree(&typed(CODE), &NoProgress);
 
     assert!(
         matches!(

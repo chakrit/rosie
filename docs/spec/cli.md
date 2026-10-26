@@ -221,6 +221,28 @@ When a command that asks for an item is run without it, rosie shows a picker:
 
 When stdin or stdout is not a terminal, rosie prints the usage error instead.
 
+## Patterns
+
+Status: target.
+
+Patterns are the `--only` rule patterns, the `app` argument
+([app.md](app.md#app-name-matching)), and `tree <dir>`.
+
+- Wildcards work the same in every mode, flag, and command.
+- A word without `*` or `?` matches anywhere in the name: `code` matches `CodeWrangler`
+  and `Xcode`.
+- A word with `*` or `?` is a shell-style glob over the whole name: `code*` starts with
+  `code`, `*code` ends with it.
+- Patterns ignore case.
+- A wildcard part of a path matches the folder's listing ignoring case; a literal part is
+  looked up as typed.
+- rosie does nothing about the shell expanding an unquoted `*`.
+- Rule markers and Lua `glob` keep exact, case-sensitive matching. *(agent-inferred)*
+- A `tree <dir>` part is a pattern only when it holds `*` or `?`; `rosie scan ~/code` is
+  that folder. *(agent-inferred)*
+- Every folder a `tree <dir>` pattern matches goes into one plan. *(agent-inferred)*
+- A `tree <dir>` pattern that matches no folder is a usage error. *(agent-inferred)*
+
 ## Flags
 
 Flags for `scan`, `plan`, `clean`, bare `rosie`, and `check`:
@@ -248,7 +270,7 @@ Flags for `scan`, `plan`, `clean`, bare `rosie`, and `check`:
 - `--only` accepts wildcards.
 - An `--only` pattern is `rule`, matched in any pack, or `pack/rule`.
 - `--only` wildcards are `*` and `?`, as in rule markers.
-- The pack side of an `--only` pattern ignores ASCII case, as pack names do.
+- `--only` patterns follow [Patterns](#patterns).
 - An `--only` pattern that matches no rule is an error.
 - A mode's flags follow its name or folder: `rosie scan caches --aggressive`, not
   `rosie scan --aggressive caches`. *(agent-inferred)*

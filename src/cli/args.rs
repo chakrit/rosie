@@ -182,6 +182,15 @@ impl Target {
         }
     }
 
+    /// The folder given in place of a mode name after `verb`. When no such folder
+    /// exists, it was likely meant as a command or mode.
+    pub fn folder_word(&self, verb: Verb) -> Option<FolderWord> {
+        match (&self.mode, self.app_word()) {
+            (Some(_), _) | (None, Some(_)) => None,
+            (None, None) => self.tree.folder_word(Place::Mode(verb)),
+        }
+    }
+
     /// The word given in place of a mode name, when it names an app.
     fn app_word(&self) -> Option<&str> {
         let word = self.tree.dir.as_deref()?.to_str()?;
@@ -206,15 +215,6 @@ impl Target {
             app: Some(app),
             flags: self.tree.flags.clone(),
         })
-    }
-
-    /// The folder given in place of a mode name after `verb`. When no such folder
-    /// exists, it was likely meant as a command or mode.
-    pub fn folder_word(&self, verb: Verb) -> Option<FolderWord> {
-        match (&self.mode, self.app_word()) {
-            (Some(_), _) | (None, Some(_)) => None,
-            (None, None) => self.tree.folder_word(Place::Mode(verb)),
-        }
     }
 }
 

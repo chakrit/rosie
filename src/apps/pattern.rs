@@ -1,104 +1,121 @@
 //! Finding installed apps by a name pattern (`docs/spec/app.md#app-name-matching`).
 
 use std::fmt;
-use std::path::PathBuf;
-
-use rayon::prelude::*;
+use std::path::{Path, PathBuf};
 
 use super::Error;
-use super::bundle::{bundle_stem, read_name};
+use super::bundle::bundle_stem;
 use crate::fs::{Backend, FsContext};
-use crate::glob::{Glob, GlobError};
+use crate::glob::GlobError;
+use crate::pattern::Pattern;
 
-/// An app name with `*` and `?` wildcards, as `--only` takes, matched whole and ignoring
-/// case.
+/// A command-line [`Pattern`] over app file names. One ending in `.app` is compared
+/// against the full file name; any other against the file name without its final `.app`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct AppPattern {
-    text: Box<str>,
-    glob: Glob,
+    pattern: Pattern,
+    against: Against,
+}
+
+/// Which spelling of an app's file name a pattern is compared against.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Against {
+    /// `Visual Studio Code.app`.
+    FileName,
+    /// `Visual Studio Code`.
+    Stem,
 }
 
 impl AppPattern {
     pub fn parse(text: &str) -> Result<AppPattern, GlobError> {
+        let against = match text.to_lowercase().ends_with(".app") {
+            true => Against::FileName,
+            false => Against::Stem,
+        };
+
         Ok(AppPattern {
-            text: text.into(),
-            glob: Glob::parse(&text.to_lowercase())?,
+            pattern: Pattern::parse(text)?,
+            against,
         })
     }
 
-    pub fn matches(&self, name: &str) -> bool {
-        self.glob.matches(&name.to_lowercase())
+    pub fn matches(&self, bundle: &Path) -> bool {
+        let name = match self.against {
+            Against::FileName => bundle.file_name().unwrap_or_default().to_string_lossy(),
+            Against::Stem => bundle_stem(bundle).into(),
+        };
+        self.pattern.matches(&name)
     }
 }
 
 impl fmt::Display for AppPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        f.write_str(&self.text)
+        self.pattern.fmt(f)
     }
 }
 
-/// The apps the picker offers whose file name, without `.app`, or whose `CFBundleName`
-/// `pattern` matches, sorted. Names are read only for bundles whose file name does not
-/// match.
-pub fn apps_matching<B>(ctx: &FsContext<B>, pattern: &AppPattern) -> Result<Vec<PathBuf>, Error>
-where
-    B: Backend + Sync,
-{
-    let (by_file, others): (Vec<PathBuf>, Vec<PathBuf>) = super::picker_apps(ctx)?
+/// The apps the picker offers that `pattern` matches, sorted.
+pub fn apps_matching<B: Backend>(
+    ctx: &FsContext<B>,
+    pattern: &AppPattern,
+) -> Result<Vec<PathBuf>, Error> {
+    let apps = super::picker_apps(ctx)?;
+    Ok(apps
         .into_iter()
-        .partition(|path| pattern.matches(&bundle_stem(path)));
-
-    let named: Vec<Option<PathBuf>> = others
-        .into_par_iter()
-        .map(|path| {
-            let name = read_name(ctx, &path)?;
-            Ok(name
-                .is_some_and(|name| pattern.matches(name.as_str()))
-                .then_some(path))
-        })
-        .collect::<Result<_, Error>>()?;
-    let by_name = named.into_iter().flatten();
-
-    let mut found: Vec<PathBuf> = by_file.into_iter().chain(by_name).collect();
-    found.sort();
-    Ok(found)
+        .filter(|app| pattern.matches(app))
+        .collect())
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn pattern(text: &str) -> AppPattern {
-        AppPattern::parse(text).expect("a valid pattern")
+    const APPS: [&str; 5] = [
+        "/Applications/Visual Studio Code.app",
+        "/Applications/Xcode.app",
+        "/Applications/CodeWrangler.app",
+        "/Applications/Code.app",
+        "/Applications/myapp.app.co.th.app",
+    ];
+
+    /// The file names, without `.app`, of the apps `text` matches.
+    fn matched(text: &str) -> Vec<String> {
+        let pattern = AppPattern::parse(text).expect("a valid pattern");
+        APPS.iter()
+            .map(Path::new)
+            .filter(|app| pattern.matches(app))
+            .map(bundle_stem)
+            .collect()
     }
 
     #[test]
-    fn matches_the_whole_name_ignoring_case() {
-        assert!(pattern("code").matches("Code"));
-        assert!(pattern("VISUAL STUDIO CODE").matches("Visual Studio Code"));
-        assert!(!pattern("Code").matches("Visual Studio Code"));
-        assert!(!pattern("Code").matches("Xcode"));
+    fn a_plain_word_matches_anywhere_in_the_name() {
+        assert_eq!(
+            matched("code"),
+            ["Visual Studio Code", "Xcode", "CodeWrangler", "Code"]
+        );
+        assert_eq!(matched("app"), ["myapp.app.co.th"]);
+        assert_eq!(matched("myapp.app"), ["myapp.app.co.th"]);
     }
 
     #[test]
-    fn matches_wildcards_as_only_does() {
-        assert!(pattern("*code").matches("Xcode"));
-        assert!(pattern("visual*").matches("Visual Studio Code"));
-        assert!(pattern("Sla?k").matches("Slack"));
-        assert!(!pattern("Sla?k").matches("Slak"));
+    fn a_word_ending_in_app_is_compared_against_the_full_file_name() {
+        assert_eq!(matched("Code.app"), ["Visual Studio Code", "Xcode", "Code"]);
+        assert_eq!(matched("*.app").len(), APPS.len());
+        assert!(matched("myapp.app?").is_empty());
     }
 
     #[test]
-    fn folds_case_beyond_ascii() {
-        assert!(pattern("éclair").matches("Éclair"));
+    fn a_wildcard_word_is_a_glob_over_the_name_without_app() {
+        assert_eq!(matched("*code"), ["Visual Studio Code", "Xcode", "Code"]);
+        assert_eq!(matched("code*"), ["CodeWrangler", "Code"]);
+        assert_eq!(matched("?code"), ["Xcode"]);
+        assert_eq!(matched("myapp.app*"), ["myapp.app.co.th"]);
     }
 
     #[test]
-    fn refuses_what_a_glob_refuses() {
-        assert_eq!(AppPattern::parse(""), Err(GlobError::Empty));
-        assert!(matches!(
-            AppPattern::parse("[ab]"),
-            Err(GlobError::Unsupported(_, '['))
-        ));
+    fn ignores_case() {
+        assert_eq!(matched("VISUAL*"), ["Visual Studio Code"]);
+        assert_eq!(matched("XCODE.APP"), ["Xcode"]);
     }
 }

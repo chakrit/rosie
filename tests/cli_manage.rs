@@ -310,10 +310,10 @@ fn code_sandbox() -> Sandbox {
 }
 
 #[test]
-fn scan_app_finds_an_app_by_its_bundle_name() {
+fn scan_app_finds_an_app_by_a_word_in_its_file_name() {
     let sandbox = code_sandbox();
 
-    let ran = sandbox.run(&["scan", "app", "Code", "--toml"]);
+    let ran = sandbox.run(&["scan", "app", "Studio", "--toml"]);
 
     ran.assert_status(ExitStatus::Success);
     assert!(ran.asked.is_empty(), "{:?}", ran.asked);
@@ -337,6 +337,53 @@ fn scan_app_matches_a_file_name_pattern_ignoring_case() {
         "{}",
         ran.stdout
     );
+}
+
+#[test]
+fn scan_app_finds_a_bundle_file_name_in_the_app_folders() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run(&["scan", "app", "visual studio code.app", "--toml"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{VS_CODE}\"")),
+        "{}",
+        ran.stdout
+    );
+}
+
+#[test]
+fn scan_app_never_matches_the_bundle_name() {
+    let sandbox = code_sandbox();
+    sandbox.install_app("/Applications/Sublime.app", "com.sublime.Text", "Editor");
+
+    let ran = sandbox.run(&["scan", "app", "Editor"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert!(
+        ran.stderr.contains("no installed app matches Editor"),
+        "{}",
+        ran.stderr
+    );
+}
+
+#[test]
+fn scan_app_compares_a_word_ending_in_app_against_the_full_file_name() {
+    let sandbox = code_sandbox();
+    sandbox.install_app(
+        "/Applications/CodeWrangler.app",
+        "com.wrangler.Code",
+        "CodeWrangler",
+    );
+
+    let ran = sandbox.run_with(
+        Script::terminal().pick(0),
+        &["scan", "app", "Code.app", "--toml"],
+    );
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(ran.asked, [format!("Choose an app: {VS_CODE} | {XCODE}")]);
 }
 
 #[test]

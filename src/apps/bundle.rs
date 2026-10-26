@@ -108,16 +108,6 @@ pub(super) fn read_bundle<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Result
     })
 }
 
-/// The `CFBundleName` of the bundle at `path`, a folder already listed, if it has a
-/// non-empty one.
-pub(super) fn read_name<B: Backend>(
-    ctx: &FsContext<B>,
-    path: &Path,
-) -> Result<Option<BundleName>, Error> {
-    let plist = locate_info_plist(ctx, path)?;
-    read_name_at(ctx, &plist)
-}
-
 fn read_name_at<B: Backend>(ctx: &FsContext<B>, plist: &Path) -> Result<Option<BundleName>, Error> {
     match extract(ctx, plist, NAME_KEY) {
         Ok(name) => Ok(BundleName::parse(name)),

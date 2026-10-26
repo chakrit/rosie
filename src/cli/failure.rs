@@ -4,7 +4,7 @@
 
 use std::path::{Path, PathBuf};
 
-use super::args::{self, Place};
+use super::args::{self, Place, Verb};
 use super::error::Error;
 use super::root::RootError;
 use super::session::PickKind;
@@ -54,6 +54,7 @@ pub fn failures(error: &Error) -> Vec<Failure> {
 fn hints(error: &Error) -> Vec<Hint> {
     match error {
         Error::NothingToPick { kind } => nothing_to_pick_hints(*kind),
+        Error::ManyApps { apps, verb, .. } => many_apps_hints(apps, *verb),
         Error::UnknownWord { word, place } => unknown_word_hints(word, *place),
         Error::Fs(error) => fs_hints(error),
         Error::Config(error) => config_hints(error),
@@ -69,6 +70,7 @@ fn hints(error: &Error) -> Vec<Hint> {
         )],
         Error::Root(RootError::Process(_))
         | Error::Usage(_)
+        | Error::NoAppMatches { .. }
         | Error::Cancelled
         | Error::PlanNotText(_)
         | Error::UnansweredConflicts { .. }
@@ -121,6 +123,15 @@ fn nothing_to_pick_hints(kind: PickKind) -> Vec<Hint> {
         PickKind::Pack => vec![Hint::run("pull the default pack", [Command::RulesPull])],
         PickKind::App | PickKind::Key | PickKind::Value => Vec::new(),
     }
+}
+
+/// The same command for each app a pattern matched.
+fn many_apps_hints(apps: &[PathBuf], verb: Verb) -> Vec<Hint> {
+    let commands = apps.iter().map(|app| {
+        let app = app.to_string_lossy().into_owned();
+        Command::Named(vec![verb.label().to_owned(), "app".to_owned(), app])
+    });
+    vec![Hint::run("give one", commands)]
 }
 
 /// How close a name must be to the word typed to be suggested, as clap suggests

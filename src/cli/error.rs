@@ -4,10 +4,11 @@ use std::str::Utf8Error;
 
 use thiserror::Error;
 
-use super::args::Place;
+use super::args::{Place, Verb};
 use super::console::PromptError;
 use super::root::RootError;
 use super::session::PickKind;
+use crate::apps::AppPattern;
 use crate::{apps, config, fs, packs, plan, rules, run, scan};
 
 #[derive(Debug, Error)]
@@ -26,6 +27,18 @@ pub enum Error {
 
     #[error("there are no {} to choose from", .kind.empty())]
     NothingToPick { kind: PickKind },
+
+    #[error("no installed app matches {pattern}")]
+    NoAppMatches { pattern: AppPattern },
+
+    /// A pattern matching several apps with no terminal to pick on; rosie exits with the
+    /// usage status (`docs/spec/app.md#app-name-matching`).
+    #[error("{pattern} matches {} apps", .apps.len())]
+    ManyApps {
+        pattern: AppPattern,
+        apps: Vec<PathBuf>,
+        verb: Verb,
+    },
 
     #[error("the plan is not UTF-8 text: {0}")]
     PlanNotText(#[source] Utf8Error),

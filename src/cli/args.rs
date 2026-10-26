@@ -6,6 +6,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
+use crate::apps::{AppPattern, is_app_path};
 use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::EnterLinks;
@@ -345,7 +346,9 @@ pub enum Mode {
 
     /// An application and its leftovers.
     App {
-        app: Option<PathBuf>,
+        /// The app bundle, or its name with `*` and `?` wildcards.
+        #[arg(value_name = "APP", value_parser = parse_app)]
+        app: Option<AppArg>,
         #[command(flatten)]
         flags: ModeFlags,
     },
@@ -355,6 +358,15 @@ pub enum Mode {
         #[command(flatten)]
         flags: ModeFlags,
     },
+}
+
+/// The app `app` mode was given (`docs/spec/app.md#app-name-matching`).
+#[derive(Debug, Clone)]
+pub enum AppArg {
+    /// A word with a `/` or ending in `.app`.
+    Path(PathBuf),
+    /// Any other word: a name to find among the installed apps.
+    Pattern(AppPattern),
 }
 
 /// `tree` and its folder.
@@ -506,6 +518,16 @@ fn parse_plan_source(text: &str) -> Result<PlanSource, String> {
 
 fn parse_pattern(text: &str) -> Result<RulePattern, String> {
     RulePattern::parse(text).map_err(|error| error.to_string())
+}
+
+fn parse_app(text: &str) -> Result<AppArg, String> {
+    let path = Path::new(text);
+    match text.contains('/') || is_app_path(path) {
+        true => Ok(AppArg::Path(path.to_path_buf())),
+        false => AppPattern::parse(text)
+            .map(AppArg::Pattern)
+            .map_err(|error| error.to_string()),
+    }
 }
 
 fn parse_enter_links(text: &str) -> Result<EnterLinks, String> {

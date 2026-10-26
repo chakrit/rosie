@@ -10,7 +10,7 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 |-----------------|-----------------------------------------------------------|
 | `tree [<dir>]`  | everything the rules match under `<dir>`                  |
 | `caches`        | tool-wide caches                                          |
-| `app [<X.app>]` | an application and its leftovers ([app.md](app.md))       |
+| `app [<app>]`   | an application and its leftovers ([app.md](app.md))       |
 | `orphans`       | leftovers of apps no longer installed ([app.md](app.md))  |
 
 - **tree** walks `<dir>` applying the folder rules, includes `caches` targets whose fixed

@@ -297,6 +297,131 @@ fn scan_app_with_no_apps_installed_says_so() {
     );
 }
 
+// app name matching (docs/spec/app.md#app-name-matching)
+
+const VS_CODE: &str = "/Applications/Visual Studio Code.app";
+const XCODE: &str = "/Applications/Xcode.app";
+
+fn code_sandbox() -> Sandbox {
+    let sandbox = Sandbox::with_roots(&["/Applications", "/Users/me/Library"]);
+    sandbox.install_app(VS_CODE, "com.microsoft.VSCode", "Code");
+    sandbox.install_app(XCODE, "com.apple.dt.Xcode", "Xcode");
+    sandbox
+}
+
+#[test]
+fn scan_app_finds_an_app_by_its_bundle_name() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run(&["scan", "app", "Code", "--toml"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(ran.asked.is_empty(), "{:?}", ran.asked);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{VS_CODE}\"")),
+        "{}",
+        ran.stdout
+    );
+    assert!(!ran.stdout.contains(XCODE), "{}", ran.stdout);
+}
+
+#[test]
+fn scan_app_matches_a_file_name_pattern_ignoring_case() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run(&["scan", "app", "visual*", "--toml"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{VS_CODE}\"")),
+        "{}",
+        ran.stdout
+    );
+}
+
+#[test]
+fn scan_app_offers_only_the_matches_when_several_match() {
+    let sandbox = code_sandbox();
+    sandbox.install_app(BAR, "com.foo.Bar", "Bar");
+
+    let ran = sandbox.run_with(
+        Script::terminal().pick(1),
+        &["scan", "app", "*code", "--toml"],
+    );
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(ran.asked, [format!("Choose an app: {VS_CODE} | {XCODE}")]);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{XCODE}\"")),
+        "{}",
+        ran.stdout
+    );
+}
+
+#[test]
+fn several_matches_without_a_terminal_are_a_usage_error_naming_each() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run_with(Script::piped(), &["scan", "app", "*code"]);
+
+    ran.assert_status(ExitStatus::Usage);
+    assert!(ran.asked.is_empty(), "{:?}", ran.asked);
+    for line in [
+        "*code matches 2 apps",
+        "rosie scan app '/Applications/Visual Studio Code.app'",
+        "rosie scan app /Applications/Xcode.app",
+    ] {
+        assert!(ran.stderr.contains(line), "{line}\n{}", ran.stderr);
+    }
+}
+
+#[test]
+fn scan_app_matching_nothing_says_so() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run(&["scan", "app", "Nope"]);
+
+    ran.assert_status(ExitStatus::Failed);
+    assert!(
+        ran.stderr.contains("no installed app matches Nope"),
+        "{}",
+        ran.stderr
+    );
+}
+
+#[test]
+fn scan_app_takes_a_path_outside_the_app_folders() {
+    let downloaded = "/Users/me/Downloads/Some.app";
+    let sandbox = Sandbox::with_roots(&["/Users/me/Downloads", "/Users/me/Library"]);
+    sandbox.install_app(downloaded, "com.some.Some", "Some");
+
+    let ran = sandbox.run(&["scan", "app", downloaded, "--toml"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{downloaded}\"")),
+        "{}",
+        ran.stdout
+    );
+}
+
+#[test]
+fn scan_app_outside_the_roots_hints_at_adding_its_folder() {
+    let downloaded = "/Users/me/Downloads/Some.app";
+    let sandbox = Sandbox::with_roots(&["/Applications", "/Users/me/Library"]);
+    sandbox.install_app(downloaded, "com.some.Some", "Some");
+
+    let ran = sandbox.run(&["scan", "app", downloaded]);
+
+    ran.assert_status(ExitStatus::Failed);
+    for line in [
+        "to allow just it:\n    rosie roots add /Users/me/Downloads/Some.app",
+        "or to allow its folder:\n    rosie roots add /Users/me/Downloads",
+    ] {
+        assert!(ran.stderr.contains(line), "{line}\n{}", ran.stderr);
+    }
+}
+
 #[test]
 fn clean_app_deletes_the_app_and_its_leftovers_once_confirmed() {
     let sandbox = Sandbox::with_roots(&["/Applications", "/Users/me/Library"]);

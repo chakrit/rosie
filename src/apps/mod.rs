@@ -14,6 +14,7 @@ mod listing;
 mod locations;
 mod matching;
 mod orphans;
+mod pattern;
 mod search;
 
 use std::path::PathBuf;
@@ -25,6 +26,7 @@ pub use bundle::is_app_path;
 pub use claims::{launch_jobs_argv, system_jobs_argv};
 pub use error::Error;
 pub use orphans::scan_orphans;
+pub use pattern::{AppPattern, apps_matching};
 
 /// The installed apps the `app` picker offers: `.app` bundles in `/Applications` and
 /// `~/Applications` (`docs/spec/cli.md#pickers`), sorted. A folder rosie may not list

@@ -3,13 +3,13 @@
 
 use std::path::{Path, PathBuf};
 
-use super::args::{Format, Mode, Place, PlanSource, ScanArgs, Target, TreeArgs, Verb};
+use super::args::{AppArg, Format, Mode, Place, PlanSource, ScanArgs, Target, TreeArgs, Verb};
 use super::console::{Console, Finish, PromptError};
 use super::findings::{findings_lines, problem_line, stats_lines};
 use super::plan_list::{LeftOut, plan_listing};
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
-use crate::apps::{self, AppScanner};
+use crate::apps::{self, AppPattern, AppScanner};
 use crate::config::Config;
 use crate::fs::{Backend, FsContext, FsOp, UserInput};
 use crate::output::Mark;
@@ -81,7 +81,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let config = self.config()?;
         let mode = args.target.mode();
         let scan = self
-            .find(&config, &mode, "rosie scan app <X.app>")
+            .find(&config, &mode, Verb::Scan)
             .map_err(|error| named_nothing(error, &args.target, Place::Mode(Verb::Scan)))?;
         let plan = answered(&scan.plan, mode.flags().conflicts.conflicts);
 
@@ -120,7 +120,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let config = self.config()?;
         let mode = target.mode();
         let scan = self
-            .find(&config, &mode, "rosie clean app <X.app>")
+            .find(&config, &mode, Verb::Clean)
             .map_err(|error| named_nothing(error, &target, place))?;
         let skips = ScanSkips {
             walk: scan.skip_counts(),
@@ -190,7 +190,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
 
     // scanning
 
-    fn find(&mut self, config: &Config, mode: &Mode, app_usage: &str) -> Result<Scan, Error> {
+    fn find(&mut self, config: &Config, mode: &Mode, verb: Verb) -> Result<Scan, Error> {
         let settings = mode.flags().scan.settings(config.walk);
 
         match mode {
@@ -206,8 +206,9 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Mode::App { app, .. } => {
                 let ctx = self.roots_ctx(config)?;
                 let bundle = match app {
-                    Some(given) => self.absolute(given),
-                    None => self.pick_app(&ctx, app_usage)?,
+                    Some(AppArg::Path(given)) => self.absolute(given),
+                    Some(AppArg::Pattern(pattern)) => self.match_app(&ctx, pattern, verb)?,
+                    None => self.pick_app(&ctx, verb)?,
                 };
                 Ok(self.with_progress(|progress| {
                     AppScanner::new(&ctx).scan(&bundle, &settings, progress)
@@ -220,14 +221,37 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         }
     }
 
-    fn pick_app(&mut self, ctx: &FsContext<&'a B>, usage: &str) -> Result<PathBuf, Error> {
-        let picker = self.picker(usage)?;
+    fn pick_app(&mut self, ctx: &FsContext<&'a B>, verb: Verb) -> Result<PathBuf, Error> {
+        let picker = self.picker(&app_usage(verb))?;
         let apps = apps::picker_apps(ctx)?;
-        let options = apps
-            .into_iter()
-            .map(|app| (app.display().to_string(), app))
-            .collect();
-        self.pick(picker, PickKind::App, options)
+        self.pick(picker, PickKind::App, app_options(apps))
+    }
+
+    /// The one app `pattern` matches, else the one the user picks among its matches
+    /// (`docs/spec/app.md#app-name-matching`).
+    fn match_app(
+        &mut self,
+        ctx: &FsContext<&'a B>,
+        pattern: &AppPattern,
+        verb: Verb,
+    ) -> Result<PathBuf, Error> {
+        let mut apps = apps::apps_matching(ctx, pattern)?;
+
+        match (apps.len(), self.console.terminals().interactive()) {
+            (0, _) => Err(Error::NoAppMatches {
+                pattern: pattern.clone(),
+            }),
+            (1, _) => Ok(apps.remove(0)),
+            (_, true) => {
+                let picker = self.picker(&app_usage(verb))?;
+                self.pick(picker, PickKind::App, app_options(apps))
+            }
+            (_, false) => Err(Error::ManyApps {
+                pattern: pattern.clone(),
+                apps,
+                verb,
+            }),
+        }
     }
 
     // confirming and running
@@ -400,4 +424,16 @@ fn named_nothing(error: Error, target: &Target, place: Place) -> Error {
         },
         (error, _) => error,
     }
+}
+
+/// The usage line a refused app picker shows.
+fn app_usage(verb: Verb) -> String {
+    format!("rosie {} app <app>", verb.label())
+}
+
+/// Apps as picker options, each labelled by its path.
+fn app_options(apps: Vec<PathBuf>) -> Vec<(String, PathBuf)> {
+    apps.into_iter()
+        .map(|app| (app.display().to_string(), app))
+        .collect()
 }

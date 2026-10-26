@@ -83,7 +83,7 @@ impl Bundle {
 }
 
 /// `path`'s file name with a trailing `.app` removed, if it has one.
-fn bundle_stem(path: &Path) -> String {
+pub(super) fn bundle_stem(path: &Path) -> String {
     let file_name = path.file_name().unwrap_or_default().to_string_lossy();
     match file_name.strip_suffix(".app") {
         Some(stem) => stem.to_owned(),
@@ -99,17 +99,31 @@ pub(super) fn read_bundle<B: Backend>(ctx: &FsContext<B>, path: &Path) -> Result
         Err(Error::MissingKey { .. }) => None,
         Err(error) => return Err(error),
     };
-    let name = match extract(ctx, &plist, NAME_KEY) {
-        Ok(name) => BundleName::parse(name),
-        Err(Error::MissingKey { .. }) => None,
-        Err(error) => return Err(error),
-    };
+    let name = read_name_at(ctx, &plist)?;
 
     Ok(Bundle {
         path: path.to_path_buf(),
         id,
         name,
     })
+}
+
+/// The `CFBundleName` of the bundle at `path`, a folder already listed, if it has a
+/// non-empty one.
+pub(super) fn read_name<B: Backend>(
+    ctx: &FsContext<B>,
+    path: &Path,
+) -> Result<Option<BundleName>, Error> {
+    let plist = locate_info_plist(ctx, path)?;
+    read_name_at(ctx, &plist)
+}
+
+fn read_name_at<B: Backend>(ctx: &FsContext<B>, plist: &Path) -> Result<Option<BundleName>, Error> {
+    match extract(ctx, plist, NAME_KEY) {
+        Ok(name) => Ok(BundleName::parse(name)),
+        Err(Error::MissingKey { .. }) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn read_id<B: Backend>(ctx: &FsContext<B>, bundle: &Path) -> Result<BundleId, Error> {

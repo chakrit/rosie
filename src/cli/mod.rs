@@ -220,7 +220,9 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
 
     fn show_error(&mut self, error: &Error) -> ExitStatus {
         let status = match error {
-            Error::Usage(_) | Error::UnknownWord { .. } => ExitStatus::Usage,
+            Error::Usage(_) | Error::UnknownWord { .. } | Error::ManyApps { .. } => {
+                ExitStatus::Usage
+            }
             _ => ExitStatus::Failed,
         };
         let palette = self.console.stderr_palette();

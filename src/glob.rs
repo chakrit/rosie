@@ -26,6 +26,7 @@ impl Glob {
         if let Some(bad) = pattern.chars().find(|c| UNSUPPORTED.contains(c)) {
             return Err(Error::Unsupported(pattern.into(), bad));
         }
+
         Ok(Glob(pattern.into()))
     }
 

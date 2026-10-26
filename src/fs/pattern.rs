@@ -36,6 +36,7 @@ impl<M: NameMatch> PathPattern<M> {
                 path: path.to_path_buf(),
             });
         }
+
         PathPattern::typed_under(Path::new("/"), path)
     }
 

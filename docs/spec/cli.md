@@ -18,6 +18,7 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 - **caches** covers tool-wide caches: cargo registry, DerivedData, Docker, Homebrew,
   `~/Library/Caches`.
 - `<dir>` defaults to the current directory.
+- `<dir>` accepts wildcards. *(intended)*
 - A folder given in place of a mode runs `tree` on it: `rosie scan ../hdiff` is
   `rosie scan tree ../hdiff`.
 - A command or mode name always means the command or mode; `./app` names the folder.

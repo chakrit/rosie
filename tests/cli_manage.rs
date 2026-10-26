@@ -387,6 +387,50 @@ fn scan_app_compares_a_word_ending_in_app_against_the_full_file_name() {
 }
 
 #[test]
+fn a_word_ending_in_app_in_place_of_a_mode_enters_app_mode() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run(&["scan", "visual studio code.app", "--toml"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{VS_CODE}\"")),
+        "{}",
+        ran.stdout
+    );
+}
+
+#[test]
+fn an_app_path_in_place_of_a_mode_enters_app_mode() {
+    let downloaded = "/Users/me/Downloads/Some.app";
+    let sandbox = Sandbox::with_roots(&["/Users/me/Downloads", "/Users/me/Library"]);
+    sandbox.install_app(downloaded, "com.some.Some", "Some");
+
+    let ran = sandbox.run(&["scan", downloaded, "--toml"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{downloaded}\"")),
+        "{}",
+        ran.stdout
+    );
+}
+
+#[test]
+fn app_mode_by_an_app_word_refuses_the_rule_flags() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run(&["scan", "Xcode.app", "--only", "node"]);
+
+    ran.assert_status(ExitStatus::Usage);
+    assert!(
+        ran.stderr.contains("app mode does not take --only"),
+        "{}",
+        ran.stderr
+    );
+}
+
+#[test]
 fn scan_app_offers_only_the_matches_when_several_match() {
     let sandbox = code_sandbox();
     sandbox.install_app(BAR, "com.foo.Bar", "Bar");

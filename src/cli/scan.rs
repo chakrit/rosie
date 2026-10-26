@@ -79,7 +79,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         let format = args.format.or(by_terminal)?;
         let config = self.config()?;
-        let mode = args.target.mode();
+        let mode = args.target.mode(Place::Mode(Verb::Scan))?;
         let scan = self
             .find(&config, &mode, Verb::Scan)
             .map_err(|error| named_nothing(error, &args.target, Place::Mode(Verb::Scan)))?;
@@ -118,7 +118,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             ));
         }
         let config = self.config()?;
-        let mode = target.mode();
+        let mode = target.mode(place)?;
         let scan = self
             .find(&config, &mode, Verb::Clean)
             .map_err(|error| named_nothing(error, &target, place))?;

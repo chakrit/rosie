@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
-use crate::apps::AppPattern;
+use crate::apps::{AppPattern, is_app_path};
 use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::EnterLinks;
@@ -156,8 +156,8 @@ pub struct CleanArgs {
     pub target: Target,
 }
 
-/// What `scan` and `clean` scan: the mode named, or `tree` when a folder, or nothing, is
-/// given in its place (`docs/spec/cli.md#modes`).
+/// What `scan` and `clean` scan: the mode named, `app` for a word ending in `.app` given
+/// in its place, or `tree` when a folder, or nothing, is (`docs/spec/cli.md#modes`).
 #[derive(Debug, Args)]
 pub struct Target {
     #[command(subcommand)]
@@ -173,11 +173,41 @@ impl Target {
         Target { mode: None, tree }
     }
 
-    pub fn mode(&self) -> Mode {
-        match &self.mode {
-            Some(mode) => mode.clone(),
-            None => Mode::Tree(self.tree.clone()),
+    /// The mode this target runs when its words stand at `place`. In place of a command,
+    /// as bare `rosie` takes them, a word is always a folder.
+    pub fn mode(&self, place: Place) -> Result<Mode, Error> {
+        if let Some(mode) = &self.mode {
+            return Ok(mode.clone());
         }
+
+        let app_word = self.tree.dir.as_deref().filter(|dir| is_app_path(dir));
+        match (place, app_word) {
+            (Place::Mode(_), Some(word)) => self.app_mode(word),
+            (Place::Command, _) | (Place::Mode(_), None) => Ok(Mode::Tree(self.tree.clone())),
+        }
+    }
+
+    /// App mode on `word`, which took the place of a mode; the rule flags parsed beside
+    /// it belong to `tree` alone.
+    fn app_mode(&self, word: &Path) -> Result<Mode, Error> {
+        let rules = &self.tree.rules;
+        let rule_flags = [
+            (!rules.only.is_empty(), "--only"),
+            (rules.enter_bundles, "--enter-bundles"),
+            (rules.enter_placeholders, "--enter-placeholders"),
+        ];
+        if let Some((_, flag)) = rule_flags.iter().find(|(given, _)| *given) {
+            return Err(Error::Usage(format!("app mode does not take {flag}")));
+        }
+
+        let text = word
+            .to_str()
+            .ok_or_else(|| Error::Usage(format!("{} is not UTF-8", word.display())))?;
+        let app = parse_app(text).map_err(Error::Usage)?;
+        Ok(Mode::App {
+            app: Some(app),
+            flags: self.tree.flags.clone(),
+        })
     }
 
     /// The folder given in place of a mode name. When no such folder exists, it was

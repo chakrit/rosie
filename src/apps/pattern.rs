@@ -99,6 +99,7 @@ mod tests {
     fn a_word_ending_in_app_is_compared_against_the_full_file_name() {
         assert_eq!(matched("Code.app"), ["Visual Studio Code", "Xcode", "Code"]);
         assert_eq!(matched("*.app").len(), APPS.len());
+        assert_eq!(matched(".app").len(), APPS.len());
         assert!(matched("myapp.app?").is_empty());
     }
 

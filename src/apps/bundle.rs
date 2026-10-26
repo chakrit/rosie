@@ -406,8 +406,9 @@ pub fn is_app_path(path: &Path) -> bool {
 /// Whether a word on the command line names an app: its last part ends in `.app`, case
 /// ignored (`docs/spec/cli.md#modes`).
 pub fn names_an_app(word: &str) -> bool {
-    let extension = Path::new(word).extension();
-    extension.is_some_and(|extension| extension.eq_ignore_ascii_case(APP_EXTENSION))
+    let last = Path::new(word).file_name().and_then(OsStr::to_str);
+    let extension = last.and_then(|name| name.rsplit_once('.'));
+    extension.is_some_and(|(_, extension)| extension.eq_ignore_ascii_case(APP_EXTENSION))
 }
 
 /// An installed app whose `Info.plist` has no bundle-ID key ([`Installed::no_id`]). No

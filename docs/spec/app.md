@@ -48,6 +48,7 @@ is a plan like any other ([plan.md](plan.md)).
   `CFBundleName` it matches whole. *(agent-inferred)*
 - Matching ignores case. *(agent-inferred)*
 - An argument containing `/` or ending in `.app` is a path, not a pattern.
+  *(agent-inferred)*
 - Several matches open the app picker, limited to the matches; with no terminal, they
   are a usage error whose hints give the command for each. *(agent-inferred)*
 - A pattern that matches no app is an error. *(agent-inferred)*

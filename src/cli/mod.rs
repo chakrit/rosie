@@ -34,7 +34,7 @@ use crate::packs::Network;
 use crate::run::RunStats;
 use crate::run::elevated::{self, Invocation};
 
-use args::{Cli, Command, FolderWord, Mode, Place};
+use args::{Cli, Command, Mode, Place};
 use session::Session;
 
 pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals, Width};
@@ -119,10 +119,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
                 self.command(env, typed_args(&argv), |session| session.dispatch(command))
             }
             None => self.command(env, typed_args(&argv), |session| {
-                let folder = cli.tree.dir.clone().map(|word| FolderWord {
-                    word,
-                    place: Place::Command,
-                });
+                let folder = cli.tree.folder_word(Place::Command);
                 session.clean(Mode::Tree(cli.tree), folder)
             }),
         };

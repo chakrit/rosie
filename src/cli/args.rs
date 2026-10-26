@@ -213,10 +213,7 @@ impl Target {
     pub fn folder_word(&self, verb: Verb) -> Option<FolderWord> {
         match (&self.mode, self.app_word()) {
             (Some(_), _) | (None, Some(_)) => None,
-            (None, None) => self.tree.dir.clone().map(|word| FolderWord {
-                word,
-                place: Place::Mode(verb),
-            }),
+            (None, None) => self.tree.folder_word(Place::Mode(verb)),
         }
     }
 }
@@ -420,6 +417,14 @@ pub struct TreeArgs {
 
     #[command(flatten)]
     pub flags: ModeFlags,
+}
+
+impl TreeArgs {
+    /// The folder given, as a word standing at `place`.
+    pub fn folder_word(&self, place: Place) -> Option<FolderWord> {
+        let word = self.dir.clone()?;
+        Some(FolderWord { word, place })
+    }
 }
 
 impl Mode {

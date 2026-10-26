@@ -49,7 +49,7 @@ impl fmt::Display for Pattern {
 }
 
 /// Whether `text` holds a `*` or `?`, which make a pattern a whole-name glob.
-pub fn has_wildcard(text: &str) -> bool {
+fn has_wildcard(text: &str) -> bool {
     text.contains(['*', '?'])
 }
 

@@ -497,6 +497,39 @@ fn scan_app_takes_a_path_outside_the_app_folders() {
 }
 
 #[test]
+fn scan_app_takes_a_path_with_wildcards() {
+    let sandbox = Sandbox::with_roots(&["/Users/me/Downloads", "/Users/me/Library"]);
+    sandbox.install_app("/Users/me/Downloads/Some.app", "com.some.Some", "Some");
+    sandbox.install_app("/Users/me/Downloads/Other.app", "com.other.Other", "Other");
+    sandbox.fake.add_dir("/Users/me/Downloads/Sources");
+
+    let one = sandbox.run(&["scan", "app", "/Users/me/Downloads/s*", "--toml"]);
+    let several = sandbox.run_with(Script::piped(), &["scan", "/Users/me/Downloads/*.app"]);
+    let none = sandbox.run(&["scan", "app", "/Users/me/Downloads/x*.app"]);
+
+    one.assert_status(ExitStatus::Success);
+    assert!(
+        one.stdout
+            .contains("path = \"/Users/me/Downloads/Some.app\""),
+        "{}",
+        one.stdout
+    );
+    several.assert_status(ExitStatus::Usage);
+    assert!(
+        several.stderr.contains("matches 2 apps"),
+        "{}",
+        several.stderr
+    );
+    none.assert_status(ExitStatus::Failed);
+    assert!(
+        none.stderr
+            .contains("no installed app matches /Users/me/Downloads/x*.app"),
+        "{}",
+        none.stderr
+    );
+}
+
+#[test]
 fn scan_app_outside_the_roots_hints_at_adding_its_folder() {
     let downloaded = "/Users/me/Downloads/Some.app";
     let sandbox = Sandbox::with_roots(&["/Applications", "/Users/me/Library"]);

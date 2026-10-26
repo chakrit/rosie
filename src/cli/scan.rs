@@ -9,11 +9,12 @@ use super::findings::{findings_lines, problem_line, stats_lines};
 use super::plan_list::{LeftOut, plan_listing};
 use super::session::{PickKind, Session};
 use super::{Error, ExitStatus};
-use crate::apps::{self, AppPattern, AppScanner};
+use crate::apps::{self, AppScanner};
 use crate::config::Config;
-use crate::fs::{Backend, FsContext, FsOp, UserInput};
+use crate::fs::{Backend, EnterLinks, FileKind, FsContext, FsOp, PathPattern, UserInput};
 use crate::output::Mark;
 use crate::packs::Network;
+use crate::pattern::Pattern;
 use crate::plan::{ItemSize, Plan, PlanStats, Selection, Sides};
 use crate::run::{Elevation, Outcome, Runner, SkipReason};
 use crate::scan::{self, Refused, Scan, WalkSkips};
@@ -206,8 +207,13 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             Mode::App { app, .. } => {
                 let ctx = self.roots_ctx(config)?;
                 let bundle = match app {
-                    Some(AppArg::Path(given)) => self.absolute(given),
-                    Some(AppArg::Pattern(pattern)) => self.match_app(&ctx, pattern, verb)?,
+                    Some(AppArg::Path(given)) => {
+                        self.app_at(&ctx, given, settings.walk.enter_links, verb)?
+                    }
+                    Some(AppArg::Pattern(pattern)) => {
+                        let found = apps::apps_matching(&ctx, pattern)?;
+                        self.one_app(found, pattern.to_string(), verb)?
+                    }
                     None => self.pick_app(&ctx, verb)?,
                 };
                 Ok(self.with_progress(|progress| {
@@ -227,27 +233,48 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         self.pick(picker, PickKind::App, app_options(apps))
     }
 
-    /// The one app `pattern` matches, else the one the user picks among its matches
+    /// The app at `given`, or, when a part of it holds a wildcard, the one app bundle it
+    /// matches, else the one the user picks among them
     /// (`docs/spec/app.md#app-name-matching`).
-    fn match_app(
+    fn app_at(
         &mut self,
         ctx: &FsContext<&'a B>,
-        pattern: &AppPattern,
+        given: &Path,
+        links: EnterLinks,
         verb: Verb,
     ) -> Result<PathBuf, Error> {
-        let mut apps = apps::apps_matching(ctx, pattern)?;
+        let path = self.absolute(given);
+        let pattern = PathPattern::<Pattern>::parse(&path)?;
+        if !pattern.has_wildcard() {
+            return Ok(path);
+        }
 
+        let found = pattern
+            .expand_typed(ctx, links)?
+            .into_iter()
+            .filter(|(app, kind)| *kind == FileKind::Dir && apps::is_app_path(app))
+            .map(|(app, _)| app)
+            .collect();
+        self.one_app(found, given.display().to_string(), verb)
+    }
+
+    /// The one app `pattern` matched, else the one the user picks among its matches
+    /// (`docs/spec/app.md#app-name-matching`).
+    fn one_app(
+        &mut self,
+        mut apps: Vec<PathBuf>,
+        pattern: String,
+        verb: Verb,
+    ) -> Result<PathBuf, Error> {
         match (apps.len(), self.console.terminals().interactive()) {
-            (0, _) => Err(Error::NoAppMatches {
-                pattern: pattern.clone(),
-            }),
+            (0, _) => Err(Error::NoAppMatches { pattern }),
             (1, _) => Ok(apps.remove(0)),
             (_, true) => {
                 let picker = self.picker(&app_usage(verb))?;
                 self.pick(picker, PickKind::App, app_options(apps))
             }
             (_, false) => Err(Error::ManyApps {
-                pattern: pattern.clone(),
+                pattern,
                 apps,
                 verb,
             }),

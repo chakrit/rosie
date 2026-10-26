@@ -8,7 +8,6 @@ use super::args::{Place, Verb};
 use super::console::PromptError;
 use super::root::RootError;
 use super::session::PickKind;
-use crate::apps::AppPattern;
 use crate::{apps, config, fs, packs, plan, rules, run, scan};
 
 #[derive(Debug, Error)]
@@ -29,13 +28,13 @@ pub enum Error {
     NothingToPick { kind: PickKind },
 
     #[error("no installed app matches {pattern}")]
-    NoAppMatches { pattern: AppPattern },
+    NoAppMatches { pattern: String },
 
     /// A pattern matching several apps with no terminal to pick on; rosie exits with the
     /// usage status (`docs/spec/app.md#app-name-matching`).
     #[error("{pattern} matches {} apps", .apps.len())]
     ManyApps {
-        pattern: AppPattern,
+        pattern: String,
         apps: Vec<PathBuf>,
         verb: Verb,
     },

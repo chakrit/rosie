@@ -223,29 +223,18 @@ impl<B: Backend + Sync> Scanner<B> {
         pattern: &PathPattern<Pattern>,
         typed: &Path,
     ) -> Result<Vec<PathBuf>, Error> {
-        let no_match = || Error::NoFolderMatches {
-            pattern: typed.to_path_buf(),
-        };
         let links = self.settings.walk.enter_links;
-        let base = match UserInput::path(pattern.base(), links).perform(&self.ctx) {
-            Ok(base) => base,
-            Err(error) if error.has_vanished() => return Err(no_match()),
-            Err(error) => return Err(error.into()),
-        };
-        let base_meta = match Cleanup::lstat(&base).perform(&self.ctx) {
-            Ok(meta) => meta,
-            Err(error) if error.has_vanished() => return Err(no_match()),
-            Err(error) => return Err(error.into()),
-        };
 
         let folders: Vec<PathBuf> = pattern
-            .expand(&self.ctx, &base, base_meta.kind)?
+            .expand_typed(&self.ctx, links)?
             .into_iter()
             .filter(|&(_, kind)| kind == FileKind::Dir)
             .map(|(folder, _)| folder)
             .collect();
         match folders.is_empty() {
-            true => Err(no_match()),
+            true => Err(Error::NoFolderMatches {
+                pattern: typed.to_path_buf(),
+            }),
             false => Ok(folders),
         }
     }

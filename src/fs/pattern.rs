@@ -9,7 +9,8 @@ use std::path::{Component, Path, PathBuf};
 use super::backend::{Backend, FileKind};
 use super::context::{FsContext, resolve_dots};
 use super::error::Error;
-use super::ops::{Cleanup, FsOp};
+use super::links::EnterLinks;
+use super::ops::{Cleanup, FsOp, UserInput};
 use crate::glob::NameMatch;
 
 /// A path pattern split at its first wildcard component: the literal folder above it,
@@ -59,6 +60,28 @@ impl<M: NameMatch> PathPattern<M> {
     /// Whether any component holds a wildcard.
     pub fn has_wildcard(&self) -> bool {
         !self.below.is_empty()
+    }
+
+    /// The entries a pattern the user typed names, sorted by path. The literal folder
+    /// above its first wildcard passes the typed-path checks under `links`; when it does
+    /// not exist, nothing matches.
+    pub fn expand_typed<B: Backend>(
+        &self,
+        ctx: &FsContext<B>,
+        links: EnterLinks,
+    ) -> Result<Vec<(PathBuf, FileKind)>, Error> {
+        let base = match UserInput::path(&self.base, links).perform(ctx) {
+            Ok(base) => base,
+            Err(error) if error.has_vanished() => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+        let base_meta = match Cleanup::lstat(&base).perform(ctx) {
+            Ok(meta) => meta,
+            Err(error) if error.has_vanished() => return Ok(Vec::new()),
+            Err(error) => return Err(error),
+        };
+
+        self.expand(ctx, &base, base_meta.kind)
     }
 
     /// The entries the pattern names, sorted by path, below `base`: where the caller

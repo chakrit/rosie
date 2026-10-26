@@ -46,8 +46,7 @@ is a plan like any other ([plan.md](plan.md)).
 - The folders searched are `/Applications` and `~/Applications`, and one level of plain
   subfolders in them.
 - `rosie scan app Foo.app` searches the applications folders for that app.
-- A pattern matches an app whose `.app` file name, without `.app`, or whose
-  `CFBundleName` it matches whole. *(agent-inferred)*
+- A pattern matches against the app's `.app` file name.
 - Matching ignores case. *(agent-inferred)*
 - An argument containing `/` is a path, not a pattern. *(agent-inferred)*
 - Several matches open the app picker, limited to the matches; with no terminal, they

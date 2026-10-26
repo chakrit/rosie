@@ -52,6 +52,15 @@ impl<M: NameMatch> PathPattern<M> {
         Ok(PathPattern { base, below })
     }
 
+    /// Checks every wildcard component of `path`, relative or not, as
+    /// [`PathPattern::parse`] parses it, so a path the user typed is refused where it
+    /// enters.
+    pub fn check(path: &Path) -> Result<(), Error> {
+        path.iter()
+            .filter(|name| has_wildcard(name.as_bytes()))
+            .try_for_each(|name| Part::<M>::parse(name).map(drop))
+    }
+
     /// The literal folder above the first wildcard, or the whole path when it has none.
     pub fn base(&self) -> &Path {
         &self.base

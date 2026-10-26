@@ -1,15 +1,18 @@
 //! The command line, exactly as `docs/spec/cli.md` lays it out. Flags parse into the
 //! plain values clap needs; `super` turns them into typed settings once.
 
+use std::ffi::OsString;
 use std::fmt;
 use std::path::PathBuf;
 
+use clap::builder::{OsStringValueParser, TypedValueParser};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
 use crate::apps::{AppPattern, names_an_app};
 use crate::config::Walk;
 use crate::config::WalkSetting;
-use crate::fs::EnterLinks;
+use crate::fs::{EnterLinks, PathPattern};
+use crate::pattern::Pattern;
 use crate::plan::{AggressiveItems, Selection};
 use crate::rules::RulePattern;
 use crate::run::elevated;
@@ -409,6 +412,7 @@ pub enum AppArg {
 pub struct TreeArgs {
     /// The folder to clean up, the current folder by default; `*` and `?` in a part match
     /// folders ignoring case.
+    #[arg(value_parser = OsStringValueParser::new().try_map(parse_path))]
     pub dir: Option<PathBuf>,
 
     #[command(flatten)]
@@ -559,11 +563,18 @@ fn parse_pattern(text: &str) -> Result<RulePattern, String> {
 
 fn parse_app(text: &str) -> Result<AppArg, String> {
     match text.contains('/') {
-        true => Ok(AppArg::Path(PathBuf::from(text))),
+        true => parse_path(text.into()).map(AppArg::Path),
         false => AppPattern::parse(text)
             .map(AppArg::Pattern)
             .map_err(|error| error.to_string()),
     }
+}
+
+/// A typed path whose wildcard parts each parse as a pattern (`docs/spec/cli.md#patterns`).
+fn parse_path(text: OsString) -> Result<PathBuf, String> {
+    let path = PathBuf::from(text);
+    PathPattern::<Pattern>::check(&path).map_err(|error| error.to_string())?;
+    Ok(path)
 }
 
 fn parse_enter_links(text: &str) -> Result<EnterLinks, String> {

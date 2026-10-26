@@ -514,6 +514,20 @@ fn tree_takes_a_wildcard_folder_and_refuses_one_matching_nothing() {
 }
 
 #[test]
+fn a_malformed_path_pattern_is_a_usage_error() {
+    let sandbox = Sandbox::new();
+
+    for args in [
+        &["scan", "tree", "web[1]*"][..],
+        &["scan", "app", "/Applications/X{a,b}*.app"],
+    ] {
+        let ran = sandbox.run(args);
+        ran.assert_status(ExitStatus::Usage);
+        assert!(ran.stderr.contains("only `*` and `?`"), "{}", ran.stderr);
+    }
+}
+
+#[test]
 fn only_limits_the_scan_to_the_named_rules() {
     let sandbox = Sandbox::new();
     sandbox.add_rules("cargo.toml", CARGO_RULE);

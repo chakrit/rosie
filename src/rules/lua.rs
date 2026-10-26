@@ -13,7 +13,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ffi::OsStr;
 use std::os::unix::ffi::OsStrExt;
-use std::path::{Component, Path, PathBuf};
+use std::path::{Path, PathBuf};
 
 use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, LuaOptions, LuaString, Scope, StdLib, Table, Value};
@@ -21,7 +21,7 @@ use mlua::{Function, Lua, LuaOptions, LuaString, Scope, StdLib, Table, Value};
 use super::error::Error;
 use super::name::RuleId;
 use super::rule::LuaCode;
-use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, resolve_dots};
+use crate::fs::{self, Backend, Cleanup, FsContext, FsOp, PathPattern};
 use crate::glob::Glob;
 
 /// Standard functions a check may call: pure, with no access to code loading,
@@ -262,107 +262,17 @@ fn exists<B: Backend>(ctx: &FsContext<B>, path: &Path) -> mlua::Result<bool> {
 /// Expands an absolute pattern whose components may hold `*` and `?`, sorted. Symlinks
 /// are never matched or descended.
 fn glob<B: Backend>(ctx: &FsContext<B>, pattern: &Path) -> mlua::Result<Vec<PathBuf>> {
-    let pattern = resolve_dots(pattern).map_err(mlua::Error::runtime)?;
-    let parts = pattern
-        .components()
-        .filter_map(|component| match component {
-            Component::Normal(name) => Some(Part::parse(name)),
-            _ => None,
-        })
-        .collect::<mlua::Result<Vec<_>>>()?;
-    let literal_len = parts
-        .iter()
-        .position(|part| matches!(part, Part::Wildcard(_)))
-        .unwrap_or(parts.len());
-
-    let base: PathBuf = std::iter::once(OsStr::new("/"))
-        .chain(parts[..literal_len].iter().filter_map(Part::literal))
-        .collect();
-    let base_kind = match Cleanup::lstat_link_free(&base).perform(ctx) {
+    let pattern = PathPattern::<Glob>::parse(pattern).map_err(mlua::Error::runtime)?;
+    let base_kind = match Cleanup::lstat_link_free(pattern.base()).perform(ctx) {
         Ok(meta) => meta.kind,
         Err(error) if error.has_vanished() => return Ok(Vec::new()),
         Err(error) => return Err(mlua::Error::runtime(error)),
     };
 
-    let mut found = vec![(base, base_kind)];
-    for part in &parts[literal_len..] {
-        let folders = found
-            .into_iter()
-            .filter(|&(_, kind)| kind == FileKind::Dir)
-            .map(|(folder, _)| folder);
-        found = folders
-            .map(|folder| children_matching(ctx, &folder, part))
-            .collect::<mlua::Result<Vec<_>>>()?
-            .concat();
-    }
-
-    let mut paths: Vec<PathBuf> = found.into_iter().map(|(path, _)| path).collect();
-    paths.sort();
-    Ok(paths)
-}
-
-/// One component of a glob pattern.
-enum Part<'a> {
-    Literal(&'a OsStr),
-    Wildcard(Glob),
-}
-
-impl<'a> Part<'a> {
-    fn parse(name: &'a OsStr) -> mlua::Result<Part<'a>> {
-        let has_wildcard = name
-            .as_bytes()
-            .iter()
-            .any(|byte| matches!(byte, b'*' | b'?'));
-        if !has_wildcard {
-            return Ok(Part::Literal(name));
-        }
-
-        let Some(text) = name.to_str() else {
-            return Err(mlua::Error::runtime("a glob pattern must be UTF-8"));
-        };
-        let glob = Glob::parse(text).map_err(mlua::Error::runtime)?;
-        Ok(Part::Wildcard(glob))
-    }
-
-    fn literal(&self) -> Option<&'a OsStr> {
-        match self {
-            Part::Literal(name) => Some(name),
-            Part::Wildcard(_) => None,
-        }
-    }
-}
-
-/// The entries of a link-free folder that one pattern component names, without
-/// symlinks.
-fn children_matching<B: Backend>(
-    ctx: &FsContext<B>,
-    folder: &Path,
-    part: &Part,
-) -> mlua::Result<Vec<(PathBuf, FileKind)>> {
-    let candidates = match part {
-        Part::Literal(name) => vec![folder.join(name)],
-        Part::Wildcard(glob) => {
-            let listing = Cleanup::read_dir(folder)
-                .perform(ctx)
-                .map_err(mlua::Error::runtime)?;
-            listing
-                .into_iter()
-                .filter(|entry| entry.name.to_str().is_some_and(|name| glob.matches(name)))
-                .map(|entry| folder.join(entry.name))
-                .collect()
-        }
-    };
-
-    let mut children = Vec::new();
-    for child in candidates {
-        match Cleanup::lstat(&child).perform(ctx) {
-            Ok(meta) if meta.kind == FileKind::Symlink => {}
-            Ok(meta) => children.push((child, meta.kind)),
-            Err(error) if error.has_vanished() => {}
-            Err(error) => return Err(mlua::Error::runtime(error)),
-        }
-    }
-    Ok(children)
+    let found = pattern
+        .expand(ctx, base_kind)
+        .map_err(mlua::Error::runtime)?;
+    Ok(found.into_iter().map(|(path, _)| path).collect())
 }
 
 fn read<B: Backend>(ctx: &FsContext<B>, path: &Path) -> mlua::Result<Vec<u8>> {

@@ -175,6 +175,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             | fs::Error::Running { .. }
             | fs::Error::RunningUnknown { .. }
             | fs::Error::NotAFolder { .. }
+            | fs::Error::Glob(_)
+            | fs::Error::PatternNotUtf8 { .. }
             | fs::Error::OutsideOwnData { .. }
             | fs::Error::OwnFolderItself { .. } => error.to_string(),
         }

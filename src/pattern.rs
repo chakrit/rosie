@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use crate::glob::{Glob, GlobError};
+use crate::glob::{Glob, GlobError, NameMatch};
 
 /// A name pattern as the user types one. A word without `*` or `?` matches anywhere in
 /// the name; a word with them is a glob over the whole name. Case is ignored.
@@ -29,6 +29,16 @@ impl Pattern {
 
     pub fn matches(&self, name: &str) -> bool {
         self.glob.matches(&name.to_lowercase())
+    }
+}
+
+impl NameMatch for Pattern {
+    fn parse(text: &str) -> Result<Pattern, GlobError> {
+        Pattern::parse(text)
+    }
+
+    fn matches(&self, name: &str) -> bool {
+        Pattern::matches(self, name)
     }
 }
 

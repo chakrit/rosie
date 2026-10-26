@@ -4,6 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::backend::{Argv, Exit};
+use crate::glob::GlobError;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -91,6 +92,12 @@ pub enum Error {
 
     #[error("{path} is a {found}, not a folder", path = path.display())]
     NotAFolder { path: PathBuf, found: &'static str },
+
+    #[error(transparent)]
+    Glob(#[from] GlobError),
+
+    #[error("glob pattern component {part:?} is not UTF-8")]
+    PatternNotUtf8 { part: std::ffi::OsString },
 
     #[error("{path} is outside rosie's own folders", path = path.display())]
     OutsideOwnData { path: PathBuf },

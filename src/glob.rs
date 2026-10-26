@@ -40,6 +40,25 @@ impl Glob {
     }
 }
 
+/// How one wildcard component of a path pattern matches the names in a folder: exactly,
+/// as [`Glob`] does for rule files, or folded, as [`crate::pattern::Pattern`] does for the
+/// command line.
+pub trait NameMatch: Sized {
+    fn parse(text: &str) -> Result<Self, GlobError>;
+
+    fn matches(&self, name: &str) -> bool;
+}
+
+impl NameMatch for Glob {
+    fn parse(text: &str) -> Result<Glob, GlobError> {
+        Glob::parse(text)
+    }
+
+    fn matches(&self, name: &str) -> bool {
+        Glob::matches(self, name)
+    }
+}
+
 /// Iterative wildcard matching: on a mismatch, retry from the most recent `*` with it
 /// swallowing one more character. Linear in practice, never exponential.
 fn wildcard_match(pattern: &[char], name: &[char]) -> bool {

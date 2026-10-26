@@ -205,6 +205,8 @@ fn fs_hints(error: &fs::Error) -> Vec<Hint> {
         | fs::Error::LinkLoop { .. }
         | fs::Error::RunningUnknown { .. }
         | fs::Error::NotAFolder { .. }
+        | fs::Error::Glob(_)
+        | fs::Error::PatternNotUtf8 { .. }
         | fs::Error::OutsideOwnData { .. }
         | fs::Error::OwnFolderItself { .. } => Vec::new(),
     }

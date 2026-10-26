@@ -5,30 +5,45 @@ use std::fmt;
 
 use crate::glob::{self, Glob, NameMatch, has_wildcard};
 
-/// A name pattern as the user types one. A word without `*` or `?` matches anywhere in
-/// the name; a word with them is a glob over the whole name. Case is ignored.
+/// A name pattern as the user types one. Case is ignored.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pattern {
     text: Box<str>,
-    glob: Glob,
+    matcher: Matcher,
+}
+
+/// How a pattern matches, each holding its text case-folded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Matcher {
+    /// A word without `*` or `?`: its characters, anywhere in the name.
+    Anywhere(Box<str>),
+    /// A word with `*` or `?`: a glob over the whole name.
+    Whole(Glob),
 }
 
 impl Pattern {
     pub fn parse(text: &str) -> Result<Pattern, glob::Error> {
-        let typed = Glob::parse(&text.to_lowercase())?;
-        let glob = match has_wildcard(text.as_bytes()) {
-            true => typed,
-            false => typed.anywhere(),
-        };
+        if text.is_empty() {
+            return Err(glob::Error::Empty);
+        }
 
+        let folded = text.to_lowercase();
+        let matcher = match has_wildcard(text.as_bytes()) {
+            true => Matcher::Whole(Glob::parse(&folded)?),
+            false => Matcher::Anywhere(folded.into()),
+        };
         Ok(Pattern {
             text: text.into(),
-            glob,
+            matcher,
         })
     }
 
     pub fn matches(&self, name: &str) -> bool {
-        self.glob.matches(&name.to_lowercase())
+        let name = name.to_lowercase();
+        match &self.matcher {
+            Matcher::Anywhere(word) => name.contains(&**word),
+            Matcher::Whole(glob) => glob.matches(&name),
+        }
     }
 }
 
@@ -66,6 +81,13 @@ mod tests {
     }
 
     #[test]
+    fn a_plain_word_matches_its_characters_literally() {
+        assert!(pattern("Foo [Beta]").matches("Foo [Beta] Pro"));
+        assert!(pattern("a{b}").matches("xa{b}x"));
+        assert!(!pattern("Foo [Beta]").matches("Foo B"));
+    }
+
+    #[test]
     fn a_wildcard_word_is_a_glob_over_the_whole_name() {
         assert!(pattern("code*").matches("CodeWrangler"));
         assert!(!pattern("code*").matches("Xcode"));
@@ -91,7 +113,7 @@ mod tests {
     fn refuses_what_a_glob_refuses() {
         assert_eq!(Pattern::parse(""), Err(glob::Error::Empty));
         assert!(matches!(
-            Pattern::parse("[ab]"),
+            Pattern::parse("[ab]*"),
             Err(glob::Error::Unsupported(_, '['))
         ));
     }

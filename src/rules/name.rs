@@ -335,7 +335,7 @@ mod tests {
             Err(NameError::Pattern(glob::Error::Empty))
         );
         assert!(matches!(
-            RulePattern::parse("py[c]"),
+            RulePattern::parse("py[c]*"),
             Err(NameError::Pattern(glob::Error::Unsupported(..)))
         ));
     }

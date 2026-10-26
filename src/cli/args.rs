@@ -176,10 +176,10 @@ impl Target {
             return Ok(mode.clone());
         }
 
-        match self.app_word() {
-            Some(word) => self.app_mode(word),
-            None => Ok(Mode::Tree(self.tree.clone())),
-        }
+        self.app_word().map_or_else(
+            || Ok(Mode::Tree(self.tree.clone())),
+            |word| self.app_mode(word),
+        )
     }
 
     /// The folder given in place of a mode name after `verb`. When no such folder

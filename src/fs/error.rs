@@ -1,3 +1,4 @@
+use std::ffi::OsString;
 use std::io;
 use std::path::PathBuf;
 
@@ -35,7 +36,7 @@ pub enum Error {
     ToolNotUtf8 { argv: Argv },
 
     #[error("{name:?} is not the name of one entry in a folder")]
-    NotAnEntryName { name: std::ffi::OsString },
+    NotAnEntryName { name: OsString },
 
     #[error("{path} is not an absolute path", path = path.display())]
     Relative { path: PathBuf },
@@ -97,7 +98,7 @@ pub enum Error {
     Glob(#[from] glob::Error),
 
     #[error("glob pattern component {part:?} is not UTF-8")]
-    PatternNotUtf8 { part: std::ffi::OsString },
+    PatternNotUtf8 { part: OsString },
 
     #[error("{path} is outside rosie's own folders", path = path.display())]
     OutsideOwnData { path: PathBuf },

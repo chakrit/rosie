@@ -402,7 +402,8 @@ pub enum AppArg {
 /// `tree` and its folder.
 #[derive(Debug, Clone, Default, Args)]
 pub struct TreeArgs {
-    /// The folder to clean up; the current folder by default.
+    /// The folder to clean up, the current folder by default; `*` and `?` in a part match
+    /// folders ignoring case.
     pub dir: Option<PathBuf>,
 
     #[command(flatten)]

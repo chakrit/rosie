@@ -270,7 +270,7 @@ fn glob<B: Backend>(ctx: &FsContext<B>, pattern: &Path) -> mlua::Result<Vec<Path
     };
 
     let found = pattern
-        .expand(ctx, base_kind)
+        .expand(ctx, pattern.base(), base_kind)
         .map_err(mlua::Error::runtime)?;
     Ok(found.into_iter().map(|(path, _)| path).collect())
 }

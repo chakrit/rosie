@@ -74,10 +74,10 @@ pub(super) enum Walked {
 }
 
 impl Walked {
-    /// Tracking for a walk under `links`, with the start folder already entered.
-    pub fn starting_at(root: &Path, links: EnterLinks) -> Walked {
+    /// Tracking for a walk under `links`, with the start folders already entered.
+    pub fn starting_at<'p>(roots: impl Iterator<Item = &'p Path>, links: EnterLinks) -> Walked {
         match links.follows_in_walk() {
-            true => Walked::Tracked(Mutex::new(HashSet::from([root.to_path_buf()]))),
+            true => Walked::Tracked(Mutex::new(roots.map(Path::to_path_buf).collect())),
             false => Walked::Untracked,
         }
     }

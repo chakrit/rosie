@@ -13,6 +13,7 @@ use std::path::{Path, PathBuf};
 use rayon::Scope;
 
 use super::RuleMatch;
+use super::Way;
 use super::entry::{Entry, Mounts, NotAnEntry};
 use super::log::{Log, Problem};
 use super::progress::Progress;
@@ -51,35 +52,19 @@ impl FixedTargets {
         FixedTargets { located, refused }
     }
 
-    /// Only the paths at or below `root`: located ones by where they are, refused ones
-    /// as written.
-    pub fn under(self, root: &Path) -> Self {
+    /// Only the paths some way meets: located ones by where they are, refused ones as
+    /// written.
+    pub fn met_on(self, ways: &[Way]) -> Self {
+        let met = |fixed: &Path| ways.iter().any(|way| way.meets(fixed));
         let located = self
             .located
             .into_iter()
-            .filter(|(path, _)| path.starts_with(root))
+            .filter(|(fixed, _)| met(fixed))
             .collect();
         let refused = self
             .refused
             .into_iter()
-            .filter(|(path, _)| path.starts_with(root))
-            .collect();
-        FixedTargets { located, refused }
-    }
-
-    /// Only the paths on the way down to `path` and those at or below it: located ones
-    /// by where they are, refused ones as written.
-    pub fn along(self, path: &Path) -> Self {
-        let on_the_way = |fixed: &Path| path.starts_with(fixed) || fixed.starts_with(path);
-        let located = self
-            .located
-            .into_iter()
-            .filter(|(fixed, _)| on_the_way(fixed))
-            .collect();
-        let refused = self
-            .refused
-            .into_iter()
-            .filter(|(fixed, _)| on_the_way(fixed))
+            .filter(|(fixed, _)| met(fixed))
             .collect();
         FixedTargets { located, refused }
     }

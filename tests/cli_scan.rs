@@ -488,6 +488,32 @@ fn sh_prints_the_plan_as_a_shell_script() {
 }
 
 #[test]
+fn tree_takes_a_wildcard_folder_and_refuses_one_matching_nothing() {
+    let sandbox = Sandbox::new();
+    sandbox.node_project(&format!("{CWD}/web-a"));
+    sandbox.node_project(&format!("{CWD}/lib"));
+
+    let matched = sandbox.run(&["scan", "tree", "WEB-*", "--toml"]);
+    let nothing = sandbox.run(&["scan", "nope-*"]);
+
+    matched.assert_status(ExitStatus::Success);
+    assert!(
+        matched
+            .stdout
+            .contains(&format!("{CWD}/web-a/node_modules")),
+        "{}",
+        matched.stdout
+    );
+    assert!(!matched.stdout.contains("lib"), "{}", matched.stdout);
+    nothing.assert_status(ExitStatus::Usage);
+    assert!(
+        nothing.stderr.contains("no folder matches"),
+        "{}",
+        nothing.stderr
+    );
+}
+
+#[test]
 fn only_limits_the_scan_to_the_named_rules() {
     let sandbox = Sandbox::new();
     sandbox.add_rules("cargo.toml", CARGO_RULE);

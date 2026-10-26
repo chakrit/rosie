@@ -206,6 +206,77 @@ fn a_start_folder_that_is_a_placeholder_is_not_opened_unless_enter_placeholders(
     assert_eq!(paths(&opened), ["/Users/me/code/app/node_modules"]);
 }
 
+// wildcard start folders (docs/spec/cli.md#patterns)
+
+#[test]
+fn a_wildcard_start_scans_every_folder_it_matches_into_one_plan() {
+    let fake = node_home();
+    node_project(&fake, "/Users/me/code/web-a");
+    node_project(&fake, "/Users/me/code/Web-b");
+    node_project(&fake, "/Users/me/code/lib");
+    fake.add_file("/Users/me/code/web-notes.txt", "x");
+
+    let scan = tree(&fake, "/Users/me/code/WEB-*");
+
+    assert_eq!(
+        paths(&scan),
+        [
+            "/Users/me/code/Web-b/node_modules",
+            "/Users/me/code/web-a/node_modules"
+        ]
+    );
+    assert!(scan.problems.is_empty(), "{:?}", problems(&scan));
+}
+
+#[test]
+fn a_wildcard_start_neither_matches_nor_follows_a_symlink() {
+    let fake = node_home();
+    node_project(&fake, "/Users/me/code/web-a");
+    node_project(&fake, "/Users/me/elsewhere/web");
+    fake.add_symlink("/Users/me/code/web-link", "/Users/me/elsewhere/web");
+
+    let scan = tree(&fake, "/Users/me/code/web-*");
+
+    assert_eq!(paths(&scan), ["/Users/me/code/web-a/node_modules"]);
+}
+
+#[test]
+fn a_wildcard_start_matching_no_folder_is_refused() {
+    let fake = node_home();
+    fake.add_file("/Users/me/code/web-notes.txt", "x");
+    let scanner = scanner(&fake, Options::default());
+
+    let none = scanner.tree(Path::new("/Users/me/code/web-*"), &NoProgress);
+    let no_base = scanner.tree(Path::new("/Users/me/nowhere/*"), &NoProgress);
+
+    for result in [none, no_base] {
+        assert!(
+            matches!(&result, Err(Error::NoFolderMatches { .. })),
+            "{result:?}"
+        );
+    }
+}
+
+#[test]
+fn the_literal_folder_above_a_wildcard_is_checked_as_typed() {
+    let fake = node_home();
+    node_project(&fake, "/Users/me/code/app");
+    fake.add_symlink("/Users/me/src", "/Users/me/code");
+    let scanner = scanner(&fake, Options::default());
+
+    let through_link = scanner.tree(Path::new("/Users/me/src/*"), &NoProgress);
+    let misspelled = scanner.tree(Path::new("/Users/me/Code/*"), &NoProgress);
+
+    assert!(
+        matches!(&through_link, Err(Error::Fs(fs::Error::Symlink { .. }))),
+        "{through_link:?}"
+    );
+    assert!(
+        matches!(&misspelled, Err(Error::Fs(fs::Error::Misspelled { .. }))),
+        "{misspelled:?}"
+    );
+}
+
 // walk skips
 
 #[test]

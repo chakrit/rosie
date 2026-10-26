@@ -310,7 +310,9 @@ fn rules_hints(error: &rules::Error) -> Vec<Hint> {
 fn scan_hints(error: &scan::Error) -> Vec<Hint> {
     match error {
         scan::Error::Fs(error) | scan::Error::PathRefused(error) => fs_hints(error),
-        scan::Error::NotAFolder { .. } | scan::Error::Missing { .. } => Vec::new(),
+        scan::Error::NotAFolder { .. }
+        | scan::Error::Missing { .. }
+        | scan::Error::NoFolderMatches { .. } => Vec::new(),
     }
 }
 

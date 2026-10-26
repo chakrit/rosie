@@ -27,7 +27,10 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 
 use crate::config::Walk;
-use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, UserInput};
+use crate::fs::{
+    self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, PathPattern, UserInput,
+};
+use crate::pattern::Pattern;
 use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder};
 use crate::rules::{RuleId, RuleSet, Shape};
 use crate::tier::Tier;
@@ -60,6 +63,10 @@ pub enum Error {
 
     #[error("{path} does not exist", path = path.display())]
     Missing { path: PathBuf },
+
+    /// A `tree <dir>` pattern that names no folder (`docs/spec/cli.md#patterns`).
+    #[error("no folder matches {pattern}", pattern = pattern.display())]
+    NoFolderMatches { pattern: PathBuf },
 }
 
 /// What a scan is told beyond the rules and its context: the walk flags (config `[walk]`
@@ -119,6 +126,34 @@ impl Scan {
     }
 }
 
+/// One way a walk goes: from `start`, whose own `lstat` gave `start_meta`, down toward
+/// `target`, at or below it, judging each folder on the way as a `tree` walk would, and
+/// taking `target` as any other entry; unless `target` is `start`: then the walk starts
+/// there as a `tree` walk does, and `start` itself is never a target.
+pub(super) struct Way {
+    start: PathBuf,
+    start_meta: Metadata,
+    target: PathBuf,
+}
+
+impl Way {
+    /// A `tree` walk of `root`.
+    fn whole(root: PathBuf, root_meta: Metadata) -> Way {
+        Way {
+            target: root.clone(),
+            start: root,
+            start_meta: root_meta,
+        }
+    }
+
+    /// Whether the walk can meet the fixed rule path `fixed`: under the start, and on
+    /// the way down to the target or at or below it.
+    fn meets(&self, fixed: &Path) -> bool {
+        let on_the_way = self.target.starts_with(fixed) || fixed.starts_with(&self.target);
+        fixed.starts_with(&self.start) && on_the_way
+    }
+}
+
 /// One rule accepting a target, under the tier its field came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuleMatch {
@@ -147,11 +182,28 @@ impl<B: Backend + Sync> Scanner<B> {
         &self.ctx
     }
 
-    /// Scans `dir`, a path the user typed: refused when it passes through a symlink or
-    /// is spelled differently from the disk. The folder itself is never a target; the
-    /// walk looks at everything below it. A folder that is a dataless placeholder is
-    /// not opened unless the walk may enter placeholders.
+    /// Scans `dir`, a path the user typed, or every folder it matches when a component
+    /// holds a wildcard, into one plan (`docs/spec/cli.md#patterns`). Each folder is
+    /// refused when it passes through a symlink or is spelled differently from the disk.
+    /// A folder itself is never a target; the walk looks at everything below it. A
+    /// folder that is a dataless placeholder is not opened unless the walk may enter
+    /// placeholders.
     pub fn tree<P: Progress>(&self, dir: &Path, progress: &P) -> Result<Scan, Error> {
+        let pattern = PathPattern::<Pattern>::parse(dir)?;
+        let folders = match pattern.has_wildcard() {
+            true => self.matching_folders(&pattern, dir)?,
+            false => vec![dir.to_path_buf()],
+        };
+        let ways = folders
+            .iter()
+            .map(|folder| self.tree_way(folder))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        self.beside_snapshot(|| self.walk(&ways, progress))
+    }
+
+    /// A `tree` walk of `dir`, checked as typed.
+    fn tree_way(&self, dir: &Path) -> Result<Way, Error> {
         let root = UserInput::path(dir, self.settings.walk.enter_links).perform(&self.ctx)?;
         let root_meta = match Cleanup::lstat(&root).perform(&self.ctx) {
             Ok(meta) => meta,
@@ -161,7 +213,41 @@ impl<B: Backend + Sync> Scanner<B> {
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }
-        self.beside_snapshot(|| self.walk_toward(&root, root_meta, &root, progress))
+        Ok(Way::whole(root, root_meta))
+    }
+
+    /// The folders `pattern`, typed as `typed`, matches: the literal folder above its
+    /// first wildcard is checked as typed, and the components below match ignoring case.
+    fn matching_folders(
+        &self,
+        pattern: &PathPattern<Pattern>,
+        typed: &Path,
+    ) -> Result<Vec<PathBuf>, Error> {
+        let no_match = || Error::NoFolderMatches {
+            pattern: typed.to_path_buf(),
+        };
+        let links = self.settings.walk.enter_links;
+        let base = match UserInput::path(pattern.base(), links).perform(&self.ctx) {
+            Ok(base) => base,
+            Err(error) if error.has_vanished() => return Err(no_match()),
+            Err(error) => return Err(error.into()),
+        };
+        let base_meta = match Cleanup::lstat(&base).perform(&self.ctx) {
+            Ok(meta) => meta,
+            Err(error) if error.has_vanished() => return Err(no_match()),
+            Err(error) => return Err(error.into()),
+        };
+
+        let folders: Vec<PathBuf> = pattern
+            .expand(&self.ctx, &base, base_meta.kind)?
+            .into_iter()
+            .filter(|&(_, kind)| kind == FileKind::Dir)
+            .map(|(folder, _)| folder)
+            .collect();
+        match folders.is_empty() {
+            true => Err(no_match()),
+            false => Ok(folders),
+        }
     }
 
     /// Scans what a plan would hold at, above, and below `path`, a path the user typed,
@@ -185,8 +271,12 @@ impl<B: Backend + Sync> Scanner<B> {
         let anchor = entry::anchor(&real, self.ctx.paths()).to_path_buf();
         let anchor_meta = Cleanup::lstat(&anchor).perform(&self.ctx)?;
 
-        let scan =
-            self.beside_snapshot(|| self.walk_toward(&anchor, anchor_meta, &real, progress))?;
+        let way = Way {
+            start: anchor,
+            start_meta: anchor_meta,
+            target: real.clone(),
+        };
+        let scan = self.beside_snapshot(|| self.walk(&[way], progress))?;
         Ok(PathScan { path: real, scan })
     }
 
@@ -231,24 +321,13 @@ impl<B: Backend + Sync> Scanner<B> {
         Ok(scanned)
     }
 
-    /// Walks from `start`, whose own `lstat` gave `start_meta`, down toward `target`, at
-    /// or below it, judging each folder on the way as a `tree` walk would, and takes
-    /// `target` as any other entry, unless `target` is `start`: then the walk starts
-    /// there as a `tree` walk does, and `start` itself is never a target.
-    /// Only the fixed rule paths under `start`, on the way to `target` or at or below it,
-    /// are looked at.
-    fn walk_toward<P: Progress>(
-        &self,
-        start: &Path,
-        start_meta: Metadata,
-        target: &Path,
-        progress: &P,
-    ) -> Scan {
+    /// Walks every way into one scan. Only the fixed rule paths some way meets are
+    /// looked at.
+    fn walk<P: Progress>(&self, ways: &[Way], progress: &P) -> Scan {
         let log = Log::default();
         let links = self.settings.walk.enter_links;
         let fixed = FixedTargets::of(&self.rules, &self.ctx, links);
-        let fixed = fixed.under(start).along(target);
-        let fixed = FixedPaths::of(fixed.report_refused(&log));
+        let fixed = FixedPaths::of(fixed.met_on(ways).report_refused(&log));
 
         let targets = Targets::new(&self.ctx, &log, progress);
         let walk = TreeWalk {
@@ -258,13 +337,17 @@ impl<B: Backend + Sync> Scanner<B> {
             flags: self.settings.walk,
             targets: &targets,
             log: &log,
-            walked: Walked::starting_at(start, links),
+            walked: Walked::starting_at(ways.iter().map(|way| way.start.as_path()), links),
         };
 
-        let start = start.to_path_buf();
-        rayon::scope(|scope| match start == target {
-            true => walk.start(scope, start, start_meta),
-            false => walk.visit_toward(scope, start, start_meta, target),
+        rayon::scope(|scope| {
+            for way in ways {
+                let start = way.start.clone();
+                match way.start == way.target {
+                    true => walk.start(scope, start, way.start_meta),
+                    false => walk.visit_toward(scope, start, way.start_meta, &way.target),
+                }
+            }
         });
 
         let found = targets.finish();

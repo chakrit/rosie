@@ -61,14 +61,16 @@ impl<M: NameMatch> PathPattern<M> {
         !self.below.is_empty()
     }
 
-    /// The entries the pattern names, sorted by path, given the base's own kind.
-    /// Symlinks below the base are neither matched nor descended.
+    /// The entries the pattern names, sorted by path, below `base`: where the caller
+    /// found [`PathPattern::base`] on disk, of kind `base_kind`. Symlinks below it are
+    /// neither matched nor descended.
     pub fn expand<B: Backend>(
         &self,
         ctx: &FsContext<B>,
+        base: &Path,
         base_kind: FileKind,
     ) -> Result<Vec<(PathBuf, FileKind)>, Error> {
-        let mut found = vec![(self.base.clone(), base_kind)];
+        let mut found = vec![(base.to_path_buf(), base_kind)];
         for part in &self.below {
             let folders = found
                 .into_iter()

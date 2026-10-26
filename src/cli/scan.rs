@@ -82,6 +82,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         let config = self.config()?;
         let mode = args.target.mode()?;
         let folder = args.target.folder_word(Verb::Scan);
+
         let scan = self
             .find(&config, &mode, Verb::Scan)
             .map_err(|error| named_nothing(error, folder))?;
@@ -120,6 +121,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     .to_owned(),
             ));
         }
+
         let config = self.config()?;
         let scan = self
             .find(&config, &mode, Verb::Clean)

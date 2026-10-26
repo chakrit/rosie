@@ -219,6 +219,7 @@ impl<B: Backend + Sync> Scanner<B> {
         if root_meta.kind != FileKind::Dir {
             return Err(Error::NotAFolder { path: root });
         }
+
         Ok(Way::Whole { root, root_meta })
     }
 

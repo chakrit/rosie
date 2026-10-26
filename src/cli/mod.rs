@@ -224,6 +224,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             true => ExitStatus::Usage,
             false => ExitStatus::Failed,
         };
+
         let palette = self.console.stderr_palette();
         let written = failure::failures(error).iter().try_for_each(|failure| {
             let text = std::iter::once(failure.problem.clone())
@@ -233,6 +234,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             let line = palette.line(&Line::new(Mark::Error, text));
             writeln!(self.console.stderr(), "{line}")
         });
+
         match written {
             Ok(()) => status,
             Err(_) => ExitStatus::Failed,

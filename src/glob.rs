@@ -33,6 +33,11 @@ impl Glob {
         &self.0
     }
 
+    /// This glob with a `*` either side, so it matches anywhere in a name.
+    pub fn anywhere(self) -> Glob {
+        Glob(format!("*{}*", self.0).into())
+    }
+
     pub fn matches(&self, name: &str) -> bool {
         let pattern: Vec<char> = self.0.chars().collect();
         let name: Vec<char> = name.chars().collect();

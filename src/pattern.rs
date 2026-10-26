@@ -18,7 +18,7 @@ impl Pattern {
         let typed = Glob::parse(&text.to_lowercase())?;
         let glob = match has_wildcard(text.as_bytes()) {
             true => typed,
-            false => Glob::parse(&format!("*{}*", typed.as_str()))?,
+            false => typed.anywhere(),
         };
 
         Ok(Pattern {

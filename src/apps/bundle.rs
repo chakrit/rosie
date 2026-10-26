@@ -14,6 +14,9 @@ use crate::plan::Report;
 const ID_KEY: &str = "CFBundleIdentifier";
 const NAME_KEY: &str = "CFBundleName";
 
+/// The extension of a Mac app bundle's name.
+const APP_EXTENSION: &str = "app";
+
 /// What `plutil -extract` prints on stderr for a key the plist does not hold.
 const NO_VALUE: &str = "No value at that key path";
 
@@ -84,11 +87,11 @@ impl Bundle {
 
 /// `path`'s file name with a trailing `.app` removed, if it has one.
 pub(super) fn bundle_stem(path: &Path) -> String {
-    let file_name = path.file_name().unwrap_or_default().to_string_lossy();
-    match file_name.strip_suffix(".app") {
-        Some(stem) => stem.to_owned(),
-        None => file_name.into_owned(),
-    }
+    let name = match is_app_path(path) {
+        true => path.file_stem(),
+        false => path.file_name(),
+    };
+    name.unwrap_or_default().to_string_lossy().into_owned()
 }
 
 /// Reads the identity of the bundle at `path`, a folder already checked.
@@ -397,7 +400,14 @@ impl Found {
 
 /// Whether `path` is named as an app bundle, `<name>.app`.
 pub fn is_app_path(path: &Path) -> bool {
-    path.extension() == Some(OsStr::new("app"))
+    path.extension() == Some(OsStr::new(APP_EXTENSION))
+}
+
+/// Whether a word on the command line names an app: its last part ends in `.app`, case
+/// ignored (`docs/spec/cli.md#modes`).
+pub fn names_an_app(word: &str) -> bool {
+    let extension = Path::new(word).extension();
+    extension.is_some_and(|extension| extension.eq_ignore_ascii_case(APP_EXTENSION))
 }
 
 /// An installed app whose `Info.plist` has no bundle-ID key ([`Installed::no_id`]). No

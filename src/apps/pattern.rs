@@ -4,7 +4,7 @@ use std::fmt;
 use std::path::{Path, PathBuf};
 
 use super::Error;
-use super::bundle::bundle_stem;
+use super::bundle::{bundle_stem, names_an_app};
 use crate::fs::{Backend, FsContext};
 use crate::glob;
 use crate::pattern::Pattern;
@@ -52,12 +52,6 @@ impl fmt::Display for AppPattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.pattern.fmt(f)
     }
-}
-
-/// Whether a word on the command line names an app: it ends in `.app`, case ignored
-/// (`docs/spec/cli.md#modes`).
-pub fn names_an_app(word: &str) -> bool {
-    word.to_lowercase().ends_with(".app")
 }
 
 /// The apps the picker offers that `pattern` matches, sorted.

@@ -418,6 +418,20 @@ fn an_app_word_in_place_of_a_mode_ignores_case() {
 }
 
 #[test]
+fn an_app_path_with_a_trailing_slash_enters_app_mode() {
+    let sandbox = code_sandbox();
+
+    let ran = sandbox.run(&["scan", "/Applications/Xcode.app/", "--toml"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(
+        ran.stdout.contains(&format!("path = \"{XCODE}\"")),
+        "{}",
+        ran.stdout
+    );
+}
+
+#[test]
 fn an_app_path_in_place_of_a_mode_enters_app_mode() {
     let downloaded = "/Users/me/Downloads/Some.app";
     let sandbox = Sandbox::with_roots(&["/Users/me/Downloads", "/Users/me/Library"]);

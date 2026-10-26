@@ -22,11 +22,11 @@ use std::path::PathBuf;
 use crate::fs::{Backend, FsContext};
 
 pub use app::AppScanner;
-pub use bundle::is_app_path;
+pub use bundle::{is_app_path, names_an_app};
 pub use claims::{launch_jobs_argv, system_jobs_argv};
 pub use error::Error;
 pub use orphans::scan_orphans;
-pub use pattern::{AppPattern, find, names_an_app};
+pub use pattern::{AppPattern, find};
 
 /// The installed apps the `app` picker offers: `.app` bundles in `/Applications` and
 /// `~/Applications` (`docs/spec/cli.md#pickers`), sorted. A folder rosie may not list

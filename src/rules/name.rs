@@ -1,5 +1,5 @@
 //! Pack and rule names, the `pack/rule` identity (`docs/spec/rules.md#names`), and the
-//! patterns `--only` selects rules by (`docs/spec/cli.md#flags`).
+//! patterns `--only` selects rules by (`docs/spec/cli.md#patterns`).
 
 use std::cmp::Ordering;
 use std::fmt;
@@ -7,7 +7,8 @@ use std::hash::{Hash, Hasher};
 
 use thiserror::Error;
 
-use super::glob::{Glob, GlobError};
+use crate::glob::GlobError;
+use crate::pattern::Pattern;
 
 /// The longest pack or rule name, in characters.
 const MAX_CHARS: usize = 64;
@@ -144,20 +145,20 @@ impl fmt::Display for RuleId {
     }
 }
 
-/// A `rule` or `pack/rule` pattern with `*` and `?` wildcards. A bare rule pattern
-/// matches in any pack; the pack side matches ignoring ASCII case, as pack names compare.
+/// A `rule` or `pack/rule` pattern, each side a command-line [`Pattern`]. A bare rule
+/// pattern matches in any pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct RulePattern {
     text: Box<str>,
-    pack: Glob,
-    rule: Glob,
+    pack: Pattern,
+    rule: Pattern,
 }
 
 impl RulePattern {
     pub fn parse(text: &str) -> Result<RulePattern, NameError> {
         let (pack, rule) = match text.split_once('/') {
-            Some((pack, rule)) => (pack.to_ascii_lowercase(), rule),
-            None => ("*".to_string(), text),
+            Some((pack, rule)) => (pack, rule),
+            None => ("*", text),
         };
         if rule.contains('/') {
             return Err(NameError::PatternShape);
@@ -165,14 +166,13 @@ impl RulePattern {
 
         Ok(RulePattern {
             text: text.into(),
-            pack: Glob::parse(&pack)?,
-            rule: Glob::parse(rule)?,
+            pack: Pattern::parse(pack)?,
+            rule: Pattern::parse(rule)?,
         })
     }
 
     pub fn matches(&self, id: &RuleId) -> bool {
-        let pack = id.pack.as_str().to_ascii_lowercase();
-        self.rule.matches(id.rule.as_str()) && self.pack.matches(&pack)
+        self.rule.matches(id.rule.as_str()) && self.pack.matches(id.pack.as_str())
     }
 }
 
@@ -295,8 +295,16 @@ mod tests {
         assert!(pattern("pycache").matches(&id("extra/pycache")));
         assert!(pattern("py*").matches(&id("extra/pycache")));
         assert!(pattern("go-buil?").matches(&id("rosie/go-build")));
-        assert!(!pattern("pycache").matches(&id("rosie/pycache-alt")));
         assert!(!pattern("py*").matches(&id("python/cache")));
+    }
+
+    #[test]
+    fn a_plain_word_matches_anywhere_in_the_name() {
+        assert!(pattern("node").matches(&id("rosie/node-modules")));
+        assert!(pattern("cache").matches(&id("rosie/pycache")));
+        assert!(pattern("ros/cache").matches(&id("rosie/pycache")));
+        assert!(!pattern("node").matches(&id("rosie/pycache")));
+        assert!(!pattern("node/cache").matches(&id("rosie/pycache")));
     }
 
     #[test]
@@ -311,10 +319,11 @@ mod tests {
     }
 
     #[test]
-    fn the_pack_side_ignores_ascii_case_and_the_rule_side_does_not() {
+    fn both_sides_ignore_case() {
         assert!(pattern("Rosie/pycache").matches(&id("rosie/pycache")));
         assert!(pattern("ro*/pycache").matches(&id("Rosie/pycache")));
-        assert!(!pattern("PyCache").matches(&id("rosie/pycache")));
+        assert!(pattern("PyCache").matches(&id("rosie/pycache")));
+        assert!(pattern("rosie/Py*").matches(&id("rosie/pycache")));
     }
 
     #[test]

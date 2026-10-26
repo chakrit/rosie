@@ -8,7 +8,7 @@ use rayon::prelude::*;
 use super::Error;
 use super::bundle::{bundle_stem, read_name};
 use crate::fs::{Backend, FsContext};
-use crate::rules::{Glob, GlobError};
+use crate::glob::{Glob, GlobError};
 
 /// An app name with `*` and `?` wildcards, as `--only` takes, matched whole and ignoring
 /// case.

@@ -1,5 +1,6 @@
-//! Glob patterns for one path component: rule markers (`docs/spec/rules.md#folder-strategies`)
-//! and the components of a Lua `glob` pattern.
+//! Glob patterns for one path component: rule markers (`docs/spec/rules.md#folder-strategies`),
+//! the components of a Lua `glob` pattern, and, folded, command-line patterns
+//! ([`crate::pattern`]).
 //!
 //! `*` matches any run of characters and `?` exactly one; everything else matches itself,
 //! case-sensitively. Brackets, braces, and backslashes are refused rather than taken

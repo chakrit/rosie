@@ -8,12 +8,12 @@ use mlua::Lua;
 use serde::Deserialize;
 
 use super::error::{Error, Problem};
-use super::glob::Glob;
 use super::lua::compile;
 use super::rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape,
 };
 use crate::fs::ShellCommand;
+use crate::glob::Glob;
 use crate::tier::Twin;
 
 /// One rule table from a file, keyed as written: a plain name or a qualified override.

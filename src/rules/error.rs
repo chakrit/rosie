@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::glob::GlobError;
 use super::name::{NameError, RuleId, RulePattern};
 use crate::fs::{self, InvalidCommand};
+use crate::glob::GlobError;
 
 #[derive(Debug, Error)]
 pub enum Error {

@@ -5,9 +5,9 @@ use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
-use super::glob::Glob;
 use super::name::RuleId;
 use crate::fs::{Paths, ShellCommand};
+use crate::glob::Glob;
 use crate::tier::Twin;
 
 #[derive(Debug, Clone, PartialEq, Eq)]

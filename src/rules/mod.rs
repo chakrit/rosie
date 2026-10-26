@@ -2,7 +2,6 @@
 //! strategy (`docs/spec/rules.md`).
 
 mod error;
-mod glob;
 mod layers;
 mod lua;
 mod name;
@@ -12,7 +11,6 @@ mod rule;
 mod set;
 
 pub use error::{Error, Problem};
-pub use glob::{Glob, GlobError};
 pub use layers::{PackFolder, RuleLayers};
 pub use lua::LuaSandbox;
 pub use name::{Name, NameError, PackName, RuleId, RulePattern};

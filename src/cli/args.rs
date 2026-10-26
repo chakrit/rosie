@@ -439,8 +439,9 @@ fn verb(setting: WalkSetting) -> &'static str {
 /// rules and take only the mounts setting of `[walk]`, so they do not accept these.
 #[derive(Debug, Clone, Default, Args)]
 pub struct RuleFlags {
-    /// Limit the run to rules matching `rule` or `pack/rule`, with `*` and `?`
-    /// wildcards; repeatable. See `rosie rules`.
+    /// Limit the run to rules matching `rule` or `pack/rule`: a word matches anywhere in
+    /// the name, `*` and `?` match the whole name, case ignored; repeatable. See
+    /// `rosie rules`.
     #[arg(long = "only", value_name = "RULE", value_parser = parse_pattern)]
     pub only: Vec<RulePattern>,
 

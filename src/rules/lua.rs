@@ -19,10 +19,10 @@ use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, LuaOptions, LuaString, Scope, StdLib, Table, Value};
 
 use super::error::Error;
-use super::glob::Glob;
 use super::name::RuleId;
 use super::rule::LuaCode;
 use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, resolve_dots};
+use crate::glob::Glob;
 
 /// Standard functions a check may call: pure, with no access to code loading,
 /// metatables, the garbage collector, or output.

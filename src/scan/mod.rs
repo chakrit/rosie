@@ -126,40 +126,6 @@ impl Scan {
     }
 }
 
-/// One way a walk goes. Each start's own `lstat` rides along.
-pub(super) enum Way {
-    /// A `tree` walk of `root`: everything below it, never `root` itself.
-    Whole { root: PathBuf, root_meta: Metadata },
-    /// From `start` down toward `target`, below it, judging each folder on the way as a
-    /// `tree` walk would, and taking `target` as any other entry.
-    Toward {
-        start: PathBuf,
-        start_meta: Metadata,
-        target: PathBuf,
-    },
-}
-
-impl Way {
-    fn start(&self) -> &Path {
-        match self {
-            Way::Whole { root, .. } => root,
-            Way::Toward { start, .. } => start,
-        }
-    }
-
-    /// Whether the walk can meet the fixed rule path `fixed`: under the start, and for
-    /// a way toward a target, on the way down to it or at or below it.
-    fn meets(&self, fixed: &Path) -> bool {
-        match self {
-            Way::Whole { root, .. } => fixed.starts_with(root),
-            Way::Toward { start, target, .. } => {
-                let on_the_way = target.starts_with(fixed) || fixed.starts_with(target);
-                fixed.starts_with(start) && on_the_way
-            }
-        }
-    }
-}
-
 /// One rule accepting a target, under the tier its field came from.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct RuleMatch {
@@ -382,5 +348,39 @@ impl<B: Backend + Sync> Scanner<B> {
 
         let (skipped, problems) = log.into_parts();
         Scan::new(builder, found.refused, skipped, problems)
+    }
+}
+
+/// One way a walk goes. Each start's own `lstat` rides along.
+pub(super) enum Way {
+    /// A `tree` walk of `root`: everything below it, never `root` itself.
+    Whole { root: PathBuf, root_meta: Metadata },
+    /// From `start` down toward `target`, below it, judging each folder on the way as a
+    /// `tree` walk would, and taking `target` as any other entry.
+    Toward {
+        start: PathBuf,
+        start_meta: Metadata,
+        target: PathBuf,
+    },
+}
+
+impl Way {
+    fn start(&self) -> &Path {
+        match self {
+            Way::Whole { root, .. } => root,
+            Way::Toward { start, .. } => start,
+        }
+    }
+
+    /// Whether the walk can meet the fixed rule path `fixed`: under the start, and for
+    /// a way toward a target, on the way down to it or at or below it.
+    fn meets(&self, fixed: &Path) -> bool {
+        match self {
+            Way::Whole { root, .. } => fixed.starts_with(root),
+            Way::Toward { start, target, .. } => {
+                let on_the_way = target.starts_with(fixed) || fixed.starts_with(target);
+                fixed.starts_with(start) && on_the_way
+            }
+        }
     }
 }

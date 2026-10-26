@@ -213,7 +213,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                         self.app_at(&ctx, given, settings.walk.enter_links, verb)?
                     }
                     Some(AppArg::Pattern(pattern)) => {
-                        let found = apps::apps_matching(&ctx, pattern)?;
+                        let found = apps::find(&ctx, pattern)?;
                         self.one_app(found, pattern.to_string(), verb)?
                     }
                     None => self.pick_app(&ctx, verb)?,

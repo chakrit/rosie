@@ -26,7 +26,7 @@ pub use bundle::is_app_path;
 pub use claims::{launch_jobs_argv, system_jobs_argv};
 pub use error::Error;
 pub use orphans::scan_orphans;
-pub use pattern::{AppPattern, apps_matching, names_an_app};
+pub use pattern::{AppPattern, find, names_an_app};
 
 /// The installed apps the `app` picker offers: `.app` bundles in `/Applications` and
 /// `~/Applications` (`docs/spec/cli.md#pickers`), sorted. A folder rosie may not list

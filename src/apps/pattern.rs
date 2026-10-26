@@ -61,10 +61,7 @@ pub fn names_an_app(word: &str) -> bool {
 }
 
 /// The apps the picker offers that `pattern` matches, sorted.
-pub fn apps_matching<B: Backend>(
-    ctx: &FsContext<B>,
-    pattern: &AppPattern,
-) -> Result<Vec<PathBuf>, Error> {
+pub fn find<B: Backend>(ctx: &FsContext<B>, pattern: &AppPattern) -> Result<Vec<PathBuf>, Error> {
     let apps = super::picker_apps(ctx)?;
     Ok(apps
         .into_iter()

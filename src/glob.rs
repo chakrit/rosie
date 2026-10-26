@@ -45,12 +45,6 @@ impl Glob {
     }
 }
 
-/// Whether `text` holds a `*` or `?`, which make a pattern a glob rather than a literal
-/// name.
-pub fn has_wildcard(text: &[u8]) -> bool {
-    text.iter().any(|byte| matches!(byte, b'*' | b'?'))
-}
-
 /// How one wildcard component of a path pattern matches the names in a folder: exactly,
 /// as [`Glob`] does for rule files, or folded, as [`crate::pattern::Pattern`] does for the
 /// command line.
@@ -68,6 +62,24 @@ impl NameMatch for Glob {
     fn matches(&self, name: &str) -> bool {
         Glob::matches(self, name)
     }
+}
+
+/// Whether `text` holds a `*` or `?`, which make a pattern a glob rather than a literal
+/// name.
+pub fn has_wildcard(text: &[u8]) -> bool {
+    text.iter().any(|byte| matches!(byte, b'*' | b'?'))
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Error)]
+pub enum Error {
+    #[error("a glob pattern cannot be empty")]
+    Empty,
+
+    #[error("glob pattern {0:?} names one file or folder and cannot contain `/`")]
+    Separator(Box<str>),
+
+    #[error("glob pattern {0:?} uses {1:?}; only `*` and `?` are supported")]
+    Unsupported(Box<str>, char),
 }
 
 /// Iterative wildcard matching: on a mismatch, retry from the most recent `*` with it
@@ -98,18 +110,6 @@ fn wildcard_match(pattern: &[char], name: &[char]) -> bool {
     }
 
     pattern[p..].iter().all(|&c| c == '*')
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum Error {
-    #[error("a glob pattern cannot be empty")]
-    Empty,
-
-    #[error("glob pattern {0:?} names one file or folder and cannot contain `/`")]
-    Separator(Box<str>),
-
-    #[error("glob pattern {0:?} uses {1:?}; only `*` and `?` are supported")]
-    Unsupported(Box<str>, char),
 }
 
 #[cfg(test)]

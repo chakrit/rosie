@@ -82,8 +82,8 @@ Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 
 ### Bare `rosie`
 
-Bare `rosie [<dir>]` is `rosie clean tree [<dir>]`, flags included; an app word in place of
-`<dir>` enters app mode ([modes](#modes)).
+Bare `rosie [<dir>]` is `rosie clean tree [<dir>]`, flags included; an app word in place
+of `<dir>` enters app mode ([modes](#modes)).
 
 ## Check
 

@@ -14,7 +14,7 @@ use super::ops::{Cleanup, FsOp, UserInput};
 use crate::wildcard::{NameMatch, is_glob};
 
 /// A path pattern split at its first wildcard component: the literal folder above it,
-/// which the caller checks under its own policy, and the components from there down.
+/// which the caller checks under its own policy, and the components after it.
 pub struct PathPattern<M> {
     /// The path as given, made absolute.
     path: PathBuf,
@@ -22,7 +22,7 @@ pub struct PathPattern<M> {
     below: Vec<Part<M>>,
 }
 
-/// One component below the base.
+/// One component after the base.
 enum Part<M> {
     Literal(OsString),
     Wildcard(M),
@@ -130,9 +130,10 @@ impl<M: NameMatch> PathPattern<M> {
         self.expand(ctx, &base, base_meta.kind)
     }
 
-    /// The entries the pattern names, sorted by path, from `base`: where the caller found
-    /// [`PathPattern::base`] on disk, of kind `base_kind`. A `..` after a wildcard may name
-    /// `base` or a folder above it. Symlinks below it are neither matched nor descended.
+    /// The entries the pattern names, sorted by path, from `base`: where the caller
+    /// found [`PathPattern::base`] on disk, of kind `base_kind`. A `..` after a wildcard
+    /// may name `base` or a folder above it. Symlinks below it are neither matched nor
+    /// descended.
     pub fn expand<B: Backend>(
         &self,
         ctx: &FsContext<B>,

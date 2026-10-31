@@ -8,8 +8,9 @@ use super::bundle::{bundle_stem, names_an_app};
 use crate::fs::{Backend, FsContext};
 use crate::wildcard;
 
-/// A command-line [`wildcard::Pattern`] over app file names. One ending in `.app` is compared
-/// against the full file name; any other against the file name without its final `.app`.
+/// A command-line [`wildcard::Pattern`] over app file names. One ending in `.app` is
+/// compared against the full file name; any other against the file name without its
+/// final `.app`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pattern {
     name: wildcard::Pattern,

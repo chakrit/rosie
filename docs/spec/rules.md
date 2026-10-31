@@ -39,8 +39,8 @@ strategy has its own fields:
   `/private/var/...`.
 - A bare `~` is accepted as a fixed path. *(agent-inferred)*
 - A fixed path is expanded by text at load and checked against the disk when a scan uses
-  it. One that cannot be located (denied, misspelled, through a link) is logged as a
-  skip. *(agent-inferred)*
+  it. A denied one is a walk skip, an absent one is not planned, and any other refusal
+  (misspelled, through a link) is reported like a refused path. *(agent-inferred)*
 
 ### Tool strategy
 

@@ -33,9 +33,10 @@ rebuilding rosie. See `docs/spec/` for the design.
 ## Git checkpoints
 
 Commit coherent, completed slices autonomously after completing the checks required for
-that work. Do not ask for permission to make a local commit. A local commit does not
-authorize pushing, publishing, merging, releasing, deploying, or any other change to
-shared or external state; each requires separate user authorization.
+that work. Do not ask for permission to make a local commit. Push committed work on the
+current branch to `gh` autonomously at opportune points, the same way; never
+force-push. Neither authorizes publishing, merging, releasing, deploying, or any other
+change to shared or external state; each requires separate user authorization.
 
 ## Durable artifacts
 

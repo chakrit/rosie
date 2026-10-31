@@ -104,7 +104,6 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 - Unknown keys are refused.
 
 - A plan carries a format version.
-- A plan is a TOML file with one entry per item: target, path, size, action.
 - Path entries are keyed by path and list every rule that matched that path.
 - Each `[[tool]]` entry is one rule's action, keyed by that rule, carrying `shell`,
   `cmd`, and `env` as the rule gave them.
@@ -133,6 +132,8 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 
 - An entry is `conflict` when two or more rules' scan matches overlap (the same path, or
   one nested in another) and the rules disagree on tier. No rule's tier wins.
+- An overlap outside the roots is `skip (outside the roots)`, never `conflict`.
+  *(agent-inferred)*
 - The plan file lists conflicts first. Its header counts them; each one's comment names
   the rules and their tiers, and its `status` line says to set it to `clean` or `skip`.
 - `--conflicts=clean|skip` on `scan`, `clean`, and `run` answers every conflict; there is
@@ -242,8 +243,9 @@ Users may delete entries from a plan before `rosie run`. Run never adds anything
 `rosie clean` shows the plan listing, then the scan stats, then the prompt.
 
 The interactive prompt is `[y/N/e]`. `e` first asks, for each `conflict` entry, whether
-to clean or skip it; the user must choose one. It then opens a checklist with every
-entry checked; after the user edits it, rosie re-shows the trimmed plan and re-prompts.
+to clean or skip it; the user must choose one. It then opens a checklist with
+every `clean` entry checked; after the user edits it, rosie re-shows the trimmed plan
+and re-prompts.
 
 - A conflict pick has no default; cancelling any pick cancels the whole edit.
   *(agent-inferred)*

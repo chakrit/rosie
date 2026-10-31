@@ -14,7 +14,7 @@ forced through it; there are no exceptions.
   reports), metadata via `lstat` (allocated size, dev and inode, file type, owner,
   `st_flags`), file reads for Lua, remove, commands, sudo, and the metadata methods
   below.
-- An interrupted system call (EINTR) is not retried; it fails like any other error.
+- An interrupted folder listing (EINTR) is not retried; it fails like any other error.
 - `RealBackend` implements it for the machine; tests inject an in-memory fake
   ([testing.md](testing.md)).
 - The layer's one concrete wrapper is `FsContext<B: Backend>`, mostly for security
@@ -32,7 +32,7 @@ forced through it; there are no exceptions.
 - System tools are a type holding only absolute paths (`/bin/ps`, `/usr/bin/sudo`, …).
 - Commands (`run`, `sudo`) are context methods, not typed ops. *(agent-inferred)*
 - Static generics, no `dyn`: `FsContext<B>`, `Scanner<B>`, `Runner<B>`, `App<B>`.
-- The trait carries no `Send` or `Sync` bound. Only parallel functions add
+- The trait carries no `Send` or `Sync` bound. Code that runs a backend in parallel adds
   `where B: Sync`, using scoped threads; no `Send`, no `'static`.
 - Roots (home, `/Library`, scan root, rosie's own folders) are injected, never read from
   `$HOME`.

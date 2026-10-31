@@ -54,6 +54,7 @@ is a plan like any other ([plan.md](plan.md)).
   are a usage error whose hints give the command for each.
 - An argument containing `/` is a path; its parts may hold wildcards, as in `tree <dir>`.
   *(agent-inferred)*
+- A path with wildcards keeps only the `.app` folders it matches. *(agent-inferred)*
 - A pattern that matches no app is an error. *(agent-inferred)*
 
 ## `rosie clean orphans`

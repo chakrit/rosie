@@ -54,6 +54,22 @@ fn rules_pull_installs_a_named_source_and_rules_remove_takes_it_away() {
 }
 
 #[test]
+fn rules_pull_of_a_bad_or_reserved_source_shows_the_form_to_give() {
+    let sandbox = Sandbox::new();
+
+    let bad = sandbox.run(&["rules", "pull", "no-slash"]);
+    let reserved = sandbox.run(&["rules", "pull", "someone/user"]);
+
+    for ran in [bad, reserved] {
+        assert!(
+            ran.stderr.contains("rosie rules pull <owner/repo>"),
+            "{}",
+            ran.stderr
+        );
+    }
+}
+
+#[test]
 fn rules_remove_without_a_pack_offers_the_pulled_packs() {
     let sandbox = Sandbox::new();
 
@@ -469,6 +485,7 @@ fn app_mode_by_an_app_word_refuses_the_rule_flags() {
         "{}",
         ran.stderr
     );
+    assert!(ran.stderr.contains("  drop --only"), "{}", ran.stderr);
 }
 
 #[test]

@@ -72,6 +72,9 @@ Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
 - `rosie run` does not ask for confirmation; the plan is the confirmation. It asks only
   about conflicts ([plan.md](plan.md#rule-conflicts)).
 - `rosie clean` with no terminal fails with a usage error.
+- Hints *(agent-inferred)*: `rosie clean needs a terminal` → `save a plan with rosie scan …
+  > plan.toml, then rosie run plan.toml`; `app mode does not take --only` → `drop --only`;
+  a bad or reserved pack source → `rosie rules pull <owner/repo>`.
 
 ### Bare `rosie`
 

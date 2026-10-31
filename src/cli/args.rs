@@ -422,8 +422,8 @@ impl TreeArgs {
             (self.rules.enter_bundles, "--enter-bundles"),
             (self.rules.enter_placeholders, "--enter-placeholders"),
         ];
-        if let Some((_, flag)) = rule_flags.iter().find(|(given, _)| *given) {
-            return Err(Error::Usage(format!("app mode does not take {flag}")));
+        if let Some(&(_, flag)) = rule_flags.iter().find(|(given, _)| *given) {
+            return Err(Error::AppModeFlag { flag });
         }
 
         let app = parse_app(word).map_err(Error::Usage)?;

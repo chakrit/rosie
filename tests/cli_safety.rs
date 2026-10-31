@@ -325,7 +325,12 @@ fn clean_without_a_terminal_is_a_usage_error_before_any_scan() {
     ran.assert_status(ExitStatus::Usage);
     // Every stderr line starts with a marker (docs/spec/cli.md#output).
     assert!(ran.stderr.starts_with("✗ "), "{}", ran.stderr);
-    assert!(ran.stderr.contains("needs a terminal"), "{}", ran.stderr);
+    assert!(
+        ran.stderr
+            .starts_with("✗ rosie clean needs a terminal\n  save a plan with rosie scan"),
+        "{}",
+        ran.stderr
+    );
     let walked = sandbox
         .fake
         .calls()

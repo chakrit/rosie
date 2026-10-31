@@ -114,11 +114,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// first. `folder` is the folder given in place of a command or mode, if any.
     pub fn clean(&mut self, mode: Mode, folder: Option<FolderWord>) -> Result<ExitStatus, Error> {
         if !self.console.terminals().interactive() {
-            return Err(Error::Usage(
-                "rosie clean asks for confirmation and needs a terminal; save a plan with \
-                 rosie scan … > plan.toml, then rosie run plan.toml"
-                    .to_owned(),
-            ));
+            return Err(Error::NeedsTerminal);
         }
 
         let config = self.config()?;

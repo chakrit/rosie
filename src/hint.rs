@@ -108,6 +108,8 @@ pub enum Command {
     ConfigSetLinks(EnterLinks),
     Rules,
     RulesPull,
+    /// `rosie rules pull <owner/repo>`, for the user to fill in.
+    RulesPullAny,
     RulesRemove(String),
     ScanTree(PathBuf),
     /// A command or mode by its words, as the parser names them.
@@ -133,7 +135,7 @@ impl Command {
             Command::Config => &["config"],
             Command::ConfigSetLinks(_) => &["config", "set", WalkKey::EnterLinks.name()],
             Command::Rules => &["rules"],
-            Command::RulesPull => &["rules", "pull"],
+            Command::RulesPull | Command::RulesPullAny => &["rules", "pull"],
             Command::RulesRemove(_) => &["rules", "remove"],
             Command::ScanTree(_) => &["scan", "tree"],
             Command::Rerun(_) | Command::Named(_) | Command::Folder(_) => &[],
@@ -143,6 +145,7 @@ impl Command {
                 vec![Word::Given(path.to_string_lossy().into_owned())]
             }
             Command::RootsAddAny => vec![Word::Placeholder("path")],
+            Command::RulesPullAny => vec![Word::Placeholder("owner/repo")],
             Command::ConfigSetLinks(level) => vec![Word::Given(level.label().to_owned())],
             Command::RulesRemove(pack) => vec![Word::Given(pack.clone())],
             Command::Rerun(args) => args.iter().cloned().map(Word::Literal).collect(),

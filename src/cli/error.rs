@@ -21,6 +21,16 @@ pub enum Error {
     #[error("no command or folder named {}", .word.display())]
     UnknownWord { word: PathBuf, place: Place },
 
+    /// `rosie clean` with no terminal to confirm on
+    /// (`docs/spec/plan.md#interactive-confirmation`).
+    #[error("rosie clean needs a terminal")]
+    NeedsTerminal,
+
+    /// A rule flag given beside an app word, which app mode does not take
+    /// (`docs/spec/cli.md#modes`).
+    #[error("app mode does not take {flag}")]
+    AppModeFlag { flag: &'static str },
+
     #[error("cancelled")]
     Cancelled,
 
@@ -95,6 +105,8 @@ impl Error {
         matches!(
             self,
             Error::Usage(_)
+                | Error::NeedsTerminal
+                | Error::AppModeFlag { .. }
                 | Error::UnknownWord { .. }
                 | Error::ManyApps { .. }
                 | Error::Scan(scan::Error::NoFolderMatches { .. })

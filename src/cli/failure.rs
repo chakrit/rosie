@@ -68,6 +68,10 @@ fn hints(error: &Error) -> Vec<Hint> {
             "run it again without sudo",
             [Command::Rerun(refusal.args().to_vec())],
         )],
+        Error::NeedsTerminal => vec![Hint::by_hand(
+            "save a plan with rosie scan … > plan.toml, then rosie run plan.toml",
+        )],
+        Error::AppModeFlag { flag } => vec![Hint::by_hand(format!("drop {flag}"))],
         Error::Root(RootError::Process(_))
         | Error::Usage(_)
         | Error::NoAppMatches { .. }
@@ -270,9 +274,10 @@ fn packs_hints(error: &packs::Error) -> Vec<Hint> {
             "move {} out of the packs folder",
             path.display()
         ))],
-        packs::Error::BadSource { .. }
-        | packs::Error::ReservedPack { .. }
-        | packs::Error::Download { .. }
+        packs::Error::BadSource { .. } | packs::Error::ReservedPack { .. } => {
+            vec![Hint::run("pull a pack", [Command::RulesPullAny])]
+        }
+        packs::Error::Download { .. }
         | packs::Error::Archive(_)
         | packs::Error::Unsafe { .. }
         | packs::Error::OutsideTopFolder { .. }

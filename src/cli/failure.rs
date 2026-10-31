@@ -227,18 +227,15 @@ fn full_disk_access() -> Hint {
     )
 }
 
-/// What to quit to stop `program`: the outermost app bundle holding it, so a helper inside
-/// an app names the app, else the program itself. `Slack` for
+/// What to quit to stop `program`: the outermost app bundle holding it, so a helper
+/// inside an app names the app, else the program itself. `Slack` for
 /// `/Applications/Slack.app/Contents/MacOS/Slack`.
 fn app_to_quit(program: &Path) -> String {
     let outermost_app = program
         .ancestors()
         .filter(|path| apps::is_app_path(path))
         .last();
-    let name = outermost_app.map_or_else(|| program.file_name(), Path::file_stem);
-    name.unwrap_or(program.as_os_str())
-        .to_string_lossy()
-        .into_owned()
+    apps::bundle_stem(outermost_app.unwrap_or(program))
 }
 
 fn config_hints(error: &config::Error) -> Vec<Hint> {

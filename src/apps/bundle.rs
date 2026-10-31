@@ -86,7 +86,7 @@ impl Bundle {
 }
 
 /// `path`'s file name with a trailing `.app` removed, if it has one.
-pub(super) fn bundle_stem(path: &Path) -> String {
+pub fn bundle_stem(path: &Path) -> String {
     let name = match is_app_path(path) {
         true => path.file_stem(),
         false => path.file_name(),

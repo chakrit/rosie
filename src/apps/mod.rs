@@ -22,7 +22,7 @@ use std::path::PathBuf;
 use crate::fs::{Backend, FsContext};
 
 pub use app::AppScanner;
-pub use bundle::{is_app_path, names_an_app};
+pub use bundle::{bundle_stem, is_app_path, names_an_app};
 pub use claims::{launch_jobs_argv, system_jobs_argv};
 pub use error::Error;
 pub use orphans::scan_orphans;

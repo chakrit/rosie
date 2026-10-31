@@ -12,11 +12,11 @@ use crate::apps::{AppPattern, names_an_app};
 use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::{EnterLinks, PathPattern};
-use crate::pattern::Pattern;
 use crate::plan::{AggressiveItems, Selection};
 use crate::rules::RulePattern;
 use crate::run::elevated;
 use crate::scan::{Needs, Settings, WalkSkip};
+use crate::wildcard::Pattern;
 
 use super::Error;
 use crate::hint::{Flag, Hint, Step};

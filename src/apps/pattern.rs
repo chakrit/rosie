@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 use super::Error;
 use super::bundle::{bundle_stem, names_an_app};
 use crate::fs::{Backend, FsContext};
-use crate::glob;
-use crate::pattern::Pattern;
+use crate::wildcard;
+use crate::wildcard::Pattern;
 
 /// A command-line [`Pattern`] over app file names. One ending in `.app` is compared
 /// against the full file name; any other against the file name without its final `.app`.
@@ -27,7 +27,7 @@ enum Against {
 }
 
 impl AppPattern {
-    pub fn parse(text: &str) -> Result<AppPattern, glob::Error> {
+    pub fn parse(text: &str) -> Result<AppPattern, wildcard::Error> {
         let against = match names_an_app(text) {
             true => Against::FileName,
             false => Against::Stem,

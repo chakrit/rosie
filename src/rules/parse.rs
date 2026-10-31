@@ -13,8 +13,8 @@ use super::rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape,
 };
 use crate::fs::ShellCommand;
-use crate::glob::Glob;
 use crate::tier::Twin;
+use crate::wildcard::Glob;
 
 /// One rule table from a file, keyed as written: a plain name or a qualified override.
 pub(super) struct Parsed {

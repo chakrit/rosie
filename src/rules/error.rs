@@ -4,7 +4,7 @@ use thiserror::Error;
 
 use super::name::{MAX_CHARS, RuleId, RulePattern};
 use crate::fs::{self, InvalidCommand};
-use crate::glob;
+use crate::wildcard;
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -100,7 +100,7 @@ pub enum Error {
     PatternShape,
 
     #[error(transparent)]
-    Pattern(#[from] glob::Error),
+    Pattern(#[from] wildcard::Error),
 
     // one rule table
     #[error("an override by qualified name belongs in the user rules, not in a pack")]
@@ -146,7 +146,7 @@ pub enum Error {
     BadGlob {
         field: &'static str,
         #[source]
-        source: glob::Error,
+        source: wildcard::Error,
     },
 
     #[error("`{field}`: {source}")]

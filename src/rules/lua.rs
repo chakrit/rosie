@@ -22,7 +22,7 @@ use super::error::Error;
 use super::name::RuleId;
 use super::rule::LuaCode;
 use crate::fs::{self, Backend, Cleanup, FsContext, FsOp, PathPattern};
-use crate::glob::Glob;
+use crate::wildcard::Glob;
 
 /// Standard functions a check may call: pure, with no access to code loading,
 /// metatables, the garbage collector, or output.

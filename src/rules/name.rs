@@ -6,7 +6,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use super::error::Error;
-use crate::pattern::Pattern;
+use crate::wildcard::Pattern;
 
 /// The longest pack or rule name, in characters.
 pub(super) const MAX_CHARS: usize = 64;
@@ -180,7 +180,7 @@ impl fmt::Display for RulePattern {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::glob;
+    use crate::wildcard;
 
     #[test]
     fn accepts_ascii_letters_digits_underscores_and_dashes() {
@@ -309,15 +309,15 @@ mod tests {
         ));
         assert!(matches!(
             RulePattern::parse(""),
-            Err(Error::Pattern(glob::Error::Empty))
+            Err(Error::Pattern(wildcard::Error::Empty))
         ));
         assert!(matches!(
             RulePattern::parse("rosie/"),
-            Err(Error::Pattern(glob::Error::Empty))
+            Err(Error::Pattern(wildcard::Error::Empty))
         ));
         assert!(matches!(
             RulePattern::parse("py[c]*"),
-            Err(Error::Pattern(glob::Error::Unsupported(..)))
+            Err(Error::Pattern(wildcard::Error::Unsupported(..)))
         ));
     }
 }

@@ -30,10 +30,10 @@ use crate::config::Walk;
 use crate::fs::{
     self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, PathPattern, UserInput,
 };
-use crate::pattern::Pattern;
 use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder};
 use crate::rules::{RuleId, RuleSet, Shape};
 use crate::tier::Tier;
+use crate::wildcard::Pattern;
 
 pub use entry::{Entry, Folder, FolderError, InFolder, Mounts, NotAnEntry, Sealed};
 pub use log::{Log, Problem, Skipped};

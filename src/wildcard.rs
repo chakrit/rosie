@@ -1,11 +1,14 @@
-//! Glob patterns for one path component: rule markers (`docs/spec/rules.md#folder-strategies`),
-//! the components of a Lua `glob` pattern, and, folded, command-line patterns
-//! ([`crate::pattern`]).
+//! Wildcard matching of one path component. A [`Glob`] matches exactly: rule markers
+//! (`docs/spec/rules.md#folder-strategies`) and the components of a Lua `glob` pattern. A
+//! [`Pattern`] is a command-line pattern, case folded: `--only`, the `app` argument, and
+//! `tree <dir>` (`docs/spec/cli.md#patterns`).
 //!
 //! `*` matches any run of characters and `?` exactly one; everything else matches itself,
 //! case-sensitively. Brackets, braces, and backslashes are refused rather than taken
 //! literally, so a pattern written for a richer glob syntax fails loudly instead of never
 //! matching.
+
+use std::fmt;
 
 use thiserror::Error;
 
@@ -37,12 +40,12 @@ impl Glob {
     pub fn matches(&self, name: &str) -> bool {
         let pattern: Vec<char> = self.0.chars().collect();
         let name: Vec<char> = name.chars().collect();
-        wildcard_match(&pattern, &name)
+        match_chars(&pattern, &name)
     }
 }
 
 /// How one wildcard component of a path pattern matches the names in a folder: exactly,
-/// as [`Glob`] does for rule files, or folded, as [`crate::pattern::Pattern`] does for the
+/// as [`Glob`] does for rule files, or folded, as [`Pattern`] does for the
 /// command line.
 pub trait NameMatch: Sized {
     fn parse(text: &str) -> Result<Self, Error>;
@@ -60,9 +63,67 @@ impl NameMatch for Glob {
     }
 }
 
+/// A name pattern as the user types one. Case is ignored.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Pattern {
+    text: Box<str>,
+    matcher: Matcher,
+}
+
+/// How a pattern matches, each holding its text case-folded.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Matcher {
+    /// A word without `*` or `?`: its characters, anywhere in the name.
+    Anywhere(Box<str>),
+    /// A word with `*` or `?`: a glob over the whole name.
+    Whole(Glob),
+}
+
+impl Pattern {
+    pub fn parse(text: &str) -> Result<Pattern, Error> {
+        if text.is_empty() {
+            return Err(Error::Empty);
+        }
+
+        let folded = text.to_lowercase();
+        let matcher = match is_glob(text.as_bytes()) {
+            true => Matcher::Whole(Glob::parse(&folded)?),
+            false => Matcher::Anywhere(folded.into()),
+        };
+        Ok(Pattern {
+            text: text.into(),
+            matcher,
+        })
+    }
+
+    pub fn matches(&self, name: &str) -> bool {
+        let name = name.to_lowercase();
+        match &self.matcher {
+            Matcher::Anywhere(word) => name.contains(&**word),
+            Matcher::Whole(glob) => glob.matches(&name),
+        }
+    }
+}
+
+impl NameMatch for Pattern {
+    fn parse(text: &str) -> Result<Pattern, Error> {
+        Pattern::parse(text)
+    }
+
+    fn matches(&self, name: &str) -> bool {
+        Pattern::matches(self, name)
+    }
+}
+
+impl fmt::Display for Pattern {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        f.write_str(&self.text)
+    }
+}
+
 /// Whether `text` holds a `*` or `?`, which make a pattern a glob rather than a literal
 /// name.
-pub fn has_wildcard(text: &[u8]) -> bool {
+pub fn is_glob(text: &[u8]) -> bool {
     text.iter().any(|byte| matches!(byte, b'*' | b'?'))
 }
 
@@ -80,7 +141,7 @@ pub enum Error {
 
 /// Iterative wildcard matching: on a mismatch, retry from the most recent `*` with it
 /// swallowing one more character. Linear in practice, never exponential.
-fn wildcard_match(pattern: &[char], name: &[char]) -> bool {
+fn match_chars(pattern: &[char], name: &[char]) -> bool {
     let (mut p, mut n) = (0, 0);
     let mut last_star: Option<(usize, usize)> = None;
 
@@ -154,6 +215,57 @@ mod tests {
         ));
         assert!(matches!(
             Glob::parse("[ab].txt"),
+            Err(Error::Unsupported(_, '['))
+        ));
+    }
+
+    fn pattern(text: &str) -> Pattern {
+        Pattern::parse(text).expect("a valid pattern")
+    }
+
+    #[test]
+    fn a_plain_word_matches_anywhere_in_the_name() {
+        assert!(pattern("code").matches("CodeWrangler"));
+        assert!(pattern("code").matches("Xcode"));
+        assert!(pattern("code").matches("Visual Studio Code"));
+        assert!(pattern("node").matches("node-modules"));
+        assert!(!pattern("code").matches("Slack"));
+    }
+
+    #[test]
+    fn a_plain_word_matches_its_characters_literally() {
+        assert!(pattern("Foo [Beta]").matches("Foo [Beta] Pro"));
+        assert!(pattern("a{b}").matches("xa{b}x"));
+        assert!(!pattern("Foo [Beta]").matches("Foo B"));
+    }
+
+    #[test]
+    fn a_wildcard_word_is_a_glob_over_the_whole_name() {
+        assert!(pattern("code*").matches("CodeWrangler"));
+        assert!(!pattern("code*").matches("Xcode"));
+        assert!(pattern("*code").matches("Xcode"));
+        assert!(!pattern("*code").matches("CodeWrangler"));
+        assert!(pattern("?code").matches("Xcode"));
+        assert!(!pattern("?code").matches("Code"));
+    }
+
+    #[test]
+    fn ignores_case_beyond_ascii() {
+        assert!(pattern("PyCache").matches("pycache"));
+        assert!(pattern("éclair").matches("Éclair"));
+        assert!(pattern("É*").matches("éclair"));
+    }
+
+    #[test]
+    fn shows_the_text_as_typed() {
+        assert_eq!(pattern("Code*").to_string(), "Code*");
+    }
+
+    #[test]
+    fn refuses_what_a_glob_refuses() {
+        assert_eq!(Pattern::parse(""), Err(Error::Empty));
+        assert!(matches!(
+            Pattern::parse("[ab]*"),
             Err(Error::Unsupported(_, '['))
         ));
     }

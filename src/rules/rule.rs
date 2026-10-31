@@ -7,8 +7,8 @@ use std::path::PathBuf;
 
 use super::name::RuleId;
 use crate::fs::{Paths, ShellCommand};
-use crate::glob::Glob;
 use crate::tier::Twin;
+use crate::wildcard::Glob;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Rule {

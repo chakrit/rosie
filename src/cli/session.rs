@@ -13,9 +13,9 @@ use crate::config::{self, Config, ConfigFile};
 use crate::fs::{self, Backend, FsContext, FsOp, PathPattern, ROOT_UID, Roots, UserInput};
 use crate::output::{Line, Mark};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
-use crate::pattern::Pattern;
 use crate::rules::{RuleLayers, RulePattern, RuleSet};
 use crate::scan::{Scanner, Settings};
+use crate::wildcard::Pattern;
 
 /// Proof that stdin and stdout are terminals, which [`Session::pick`] takes: only
 /// [`Session::picker`] makes one.

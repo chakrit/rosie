@@ -10,10 +10,10 @@ use rosie::config::Walk;
 use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, FsContext, PathPattern, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
-use rosie::pattern::Pattern;
 use rosie::plan::{AggressiveItems, Status};
 use rosie::rules::{RuleLayers, RulePattern, RuleSet};
 use rosie::scan::{Progress, Scan, Scanner, Settings};
+use rosie::wildcard::Pattern;
 
 pub const HOME: &str = "/Users/me";
 pub const CONFIG: &str = "/Users/me/.config/rosie";

@@ -11,7 +11,7 @@ use super::context::FsContext;
 use super::error::Error;
 use super::links::EnterLinks;
 use super::ops::{Cleanup, FsOp, UserInput};
-use crate::glob::{NameMatch, has_wildcard};
+use crate::wildcard::{NameMatch, is_glob};
 
 /// A path pattern split at its first wildcard component: the literal folder above it,
 /// which the caller checks under its own policy, and the components from there down.
@@ -66,7 +66,7 @@ impl<M: NameMatch> PathPattern<M> {
             |(mut names, mut below), (component, from_typed)| {
                 match (component, below.is_empty()) {
                     (Component::Normal(name), true)
-                        if !(from_typed && has_wildcard(name.as_bytes())) =>
+                        if !(from_typed && is_glob(name.as_bytes())) =>
                     {
                         names.push(name)
                     }
@@ -89,7 +89,7 @@ impl<M: NameMatch> PathPattern<M> {
     /// enters.
     pub fn check(path: &Path) -> Result<(), Error> {
         path.iter()
-            .filter(|name| has_wildcard(name.as_bytes()))
+            .filter(|name| is_glob(name.as_bytes()))
             .try_for_each(|name| Part::<M>::parse(name).map(drop))
     }
 
@@ -159,7 +159,7 @@ impl<M: NameMatch> PathPattern<M> {
 
 impl<M: NameMatch> Part<M> {
     fn parse(name: &OsStr) -> Result<Part<M>, Error> {
-        if !has_wildcard(name.as_bytes()) {
+        if !is_glob(name.as_bytes()) {
             return Ok(Part::Literal(name.to_os_string()));
         }
 
@@ -209,7 +209,7 @@ impl<M: NameMatch> Part<M> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::pattern::Pattern;
+    use crate::wildcard::Pattern;
 
     fn typed(folder: &str, typed: &str) -> PathPattern<Pattern> {
         PathPattern::typed_under(Path::new(folder), Path::new(typed)).expect("parses")

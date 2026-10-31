@@ -19,21 +19,21 @@ pub struct PathPattern<M> {
     /// The path as given, made absolute.
     path: PathBuf,
     base: PathBuf,
-    below: Vec<Part<M>>,
+    after: Vec<Part<M>>,
 }
 
 /// One component after the base.
 enum Part<M> {
     Literal(OsString),
     Wildcard(M),
-    /// A `..` below the first wildcard: the folder holding each match, as a shell
+    /// A `..` after the first wildcard: the folder holding each match, as a shell
     /// resolves it.
     Parent,
 }
 
 impl<M: NameMatch> PathPattern<M> {
     /// Parses an absolute path. A `..` above the first wildcard resolves in the text; one
-    /// below it climbs from each match.
+    /// after it climbs from each match.
     pub fn parse(path: &Path) -> Result<PathPattern<M>, Error> {
         if !path.has_root() {
             return Err(Error::Relative {
@@ -61,27 +61,27 @@ impl<M: NameMatch> PathPattern<M> {
             .map(|component| (component, false))
             .chain(typed.components().map(|component| (component, true)));
 
-        let (names, below) = components.try_fold(
+        let (names, after) = components.try_fold(
             (Vec::new(), Vec::new()),
-            |(mut names, mut below), (component, from_typed)| {
-                match (component, below.is_empty()) {
+            |(mut names, mut after), (component, from_typed)| {
+                match (component, after.is_empty()) {
                     (Component::Normal(name), true)
                         if !(from_typed && is_glob(name.as_bytes())) =>
                     {
                         names.push(name)
                     }
-                    (Component::Normal(name), _) => below.push(Part::parse(name)?),
+                    (Component::Normal(name), _) => after.push(Part::parse(name)?),
                     (Component::ParentDir, true) => drop(names.pop()),
-                    (Component::ParentDir, false) => below.push(Part::Parent),
+                    (Component::ParentDir, false) => after.push(Part::Parent),
                     (Component::RootDir, _) => names.clear(),
                     (Component::CurDir | Component::Prefix(_), _) => {}
                 }
-                Ok::<_, Error>((names, below))
+                Ok::<_, Error>((names, after))
             },
         )?;
         let base: PathBuf = std::iter::once(OsStr::new("/")).chain(names).collect();
 
-        Ok(PathPattern { path, base, below })
+        Ok(PathPattern { path, base, after })
     }
 
     /// Checks every wildcard component of `path`, relative or not, as
@@ -105,7 +105,7 @@ impl<M: NameMatch> PathPattern<M> {
 
     /// Whether any component holds a wildcard.
     pub fn has_wildcard(&self) -> bool {
-        !self.below.is_empty()
+        !self.after.is_empty()
     }
 
     /// The entries a pattern the user typed names, sorted by path. The literal folder
@@ -142,7 +142,7 @@ impl<M: NameMatch> PathPattern<M> {
     ) -> Result<Vec<(PathBuf, FileKind)>, Error> {
         let start = vec![(base.to_path_buf(), base_kind)];
 
-        self.below.iter().try_fold(start, |found, part| {
+        self.after.iter().try_fold(start, |found, part| {
             let folders = found
                 .into_iter()
                 .filter(|&(_, kind)| kind == FileKind::Dir)
@@ -172,8 +172,8 @@ impl<M: NameMatch> Part<M> {
         Ok(Part::Wildcard(M::parse(text)?))
     }
 
-    /// The entries of `folder`, a link-free folder, that this component names, without
-    /// symlinks.
+    /// What this component names from `folder`, a link-free folder: its matching entries,
+    /// or its parent for a `..`; never a symlink.
     fn children<B: Backend>(
         &self,
         ctx: &FsContext<B>,

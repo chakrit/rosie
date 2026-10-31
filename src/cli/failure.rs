@@ -192,7 +192,7 @@ fn fs_hints(error: &fs::Error) -> Vec<Hint> {
         fs::Error::Misspelled { real, .. } => vec![use_instead(real)],
         fs::Error::Running { program, .. } => vec![Hint::by_hand(format!(
             "quit {}, then run again",
-            program_name(program)
+            app_to_quit(program)
         ))],
         fs::Error::Io { source, .. } if source.kind() == std::io::ErrorKind::PermissionDenied => {
             vec![full_disk_access()]
@@ -227,10 +227,16 @@ fn full_disk_access() -> Hint {
     )
 }
 
-/// `Slack` for `/Applications/Slack.app/Contents/MacOS/Slack`.
-fn program_name(program: &Path) -> String {
-    let name = program.file_name().unwrap_or(program.as_os_str());
-    name.to_string_lossy().into_owned()
+/// What to quit to stop `program`: the outermost app bundle holding it, so a helper inside
+/// an app names the app, else the program itself. `Slack` for
+/// `/Applications/Slack.app/Contents/MacOS/Slack`.
+fn app_to_quit(program: &Path) -> String {
+    let outermost_app = program.ancestors().filter(|path| apps::is_app_path(path)).last();
+    let name = match outermost_app {
+        Some(app) => app.file_stem(),
+        None => program.file_name(),
+    };
+    name.unwrap_or(program.as_os_str()).to_string_lossy().into_owned()
 }
 
 fn config_hints(error: &config::Error) -> Vec<Hint> {

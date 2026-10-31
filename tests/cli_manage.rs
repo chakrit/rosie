@@ -434,6 +434,23 @@ fn an_app_word_in_place_of_a_mode_ignores_case() {
 }
 
 #[test]
+fn a_running_helper_names_the_app_to_quit() {
+    let sandbox = code_sandbox();
+    let helper = "Contents/Frameworks/Code Helper (GPU).app/Contents/MacOS/Code Helper (GPU)";
+    sandbox
+        .fake
+        .respond_running(&[(4123, &format!("{VS_CODE}/{helper}"))]);
+
+    let ran = sandbox.run(&["scan", "app", VS_CODE]);
+
+    assert!(
+        ran.stderr.contains("quit Visual Studio Code, then run again"),
+        "{}",
+        ran.stderr
+    );
+}
+
+#[test]
 fn an_app_word_in_place_of_a_command_cleans_the_app() {
     let sandbox = code_sandbox();
 

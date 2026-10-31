@@ -102,6 +102,8 @@ Lua 5.4 ships in v1, through `mlua` with `vendored`, sandboxed with a read-only 
   value to match.
 - A Lua error is reported against the rule, and that candidate does not match.
 - There is no instruction limit.
+- A `..` after a wildcard in a `glob` pattern climbs from each match, as on the command
+  line ([cli.md](cli.md#patterns)). *(agent-inferred)*
 
 ## Names
 

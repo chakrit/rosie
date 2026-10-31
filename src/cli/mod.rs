@@ -34,7 +34,7 @@ use crate::packs::Network;
 use crate::run::RunStats;
 use crate::run::elevated::{self, Invocation};
 
-use args::{Cli, Command, Mode, Place};
+use args::{Cli, Command, Place};
 use session::Session;
 
 pub use console::{Console, Finish, PromptError, StderrReporter, SystemConsole, Terminals, Width};
@@ -120,7 +120,7 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             }
             None => self.command(env, typed_args(&argv), |session| {
                 let folder = cli.tree.folder_word(Place::Command);
-                session.clean(Mode::Tree(cli.tree), folder)
+                session.clean(cli.tree.mode()?, folder)
             }),
         };
         let status = match outcome {

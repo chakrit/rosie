@@ -22,10 +22,13 @@ Each mode is its own subcommand. A separate mode is a subcommand, never a flag.
 - A folder given in place of a mode runs `tree` on it: `rosie scan ../hdiff` is
   `rosie scan tree ../hdiff`.
 - A command or mode name always means the command or mode; `./app` names the folder.
-- App mode does not take `--only`, `--enter-bundles`, or `--enter-placeholders`; giving
-  one is a usage error. *(agent-inferred)*
 - `rosie scan Foo.app` enters app mode and uses app mode's logic on the `Foo.app`
   identifier ([app.md](app.md#app-name-matching)).
+- A word in place of a command or mode whose last part ends in `.app`, case ignored and
+  a trailing `/` allowed, enters app mode: `rosie Foo.app` is `rosie clean app Foo.app`.
+  *(agent-inferred)*
+- App mode does not take `--only`, `--enter-bundles`, or `--enter-placeholders`; giving
+  one is a usage error. *(agent-inferred)*
 - A word in place of a command or mode that names no command, mode, or folder is a usage
   error. Its hints list the close names, the folder form, and the other modes:
 

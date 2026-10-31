@@ -159,8 +159,8 @@ pub struct CleanArgs {
     pub target: Target,
 }
 
-/// What `scan` and `clean` scan: the mode named, `app` for a word ending in `.app` given
-/// in its place, or `tree` when a folder, or nothing, is (`docs/spec/cli.md#modes`).
+/// What `scan` and `clean` scan: the mode named, or what [`TreeArgs::mode`] makes of the
+/// word in its place.
 #[derive(Debug, Args)]
 pub struct Target {
     #[command(subcommand)]
@@ -172,49 +172,19 @@ pub struct Target {
 
 impl Target {
     pub fn mode(&self) -> Result<Mode, Error> {
-        if let Some(mode) = &self.mode {
-            return Ok(mode.clone());
+        match &self.mode {
+            Some(mode) => Ok(mode.clone()),
+            None => self.tree.mode(),
         }
-
-        self.app_word().map_or_else(
-            || Ok(Mode::Tree(self.tree.clone())),
-            |word| self.app_mode(word),
-        )
     }
 
     /// The folder given in place of a mode name after `verb`. When no such folder
     /// exists, it was likely meant as a command or mode.
     pub fn folder_word(&self, verb: Verb) -> Option<FolderWord> {
-        match (&self.mode, self.app_word()) {
-            (Some(_), _) | (None, Some(_)) => None,
-            (None, None) => self.tree.folder_word(Place::Mode(verb)),
+        match &self.mode {
+            Some(_) => None,
+            None => self.tree.folder_word(Place::Mode(verb)),
         }
-    }
-
-    /// The word given in place of a mode name, when it names an app.
-    fn app_word(&self) -> Option<&str> {
-        let word = self.tree.dir.as_deref()?.to_str()?;
-        names_an_app(word).then_some(word)
-    }
-
-    /// App mode on `word`, which took the place of a mode; the rule flags parsed beside
-    /// it belong to `tree` alone.
-    fn app_mode(&self, word: &str) -> Result<Mode, Error> {
-        let rules = &self.tree.rules;
-        let rule_flags = [
-            (!rules.only.is_empty(), "--only"),
-            (rules.enter_bundles, "--enter-bundles"),
-            (rules.enter_placeholders, "--enter-placeholders"),
-        ];
-        if let Some((_, flag)) = rule_flags.iter().find(|(given, _)| *given) {
-            return Err(Error::Usage(format!("app mode does not take {flag}")));
-        }
-
-        let app = parse_app(word).map_err(Error::Usage)?;
-        Ok(Mode::App {
-            app: Some(app),
-            flags: self.tree.flags.clone(),
-        })
     }
 }
 
@@ -420,10 +390,47 @@ pub struct TreeArgs {
 }
 
 impl TreeArgs {
-    /// The folder given, as a word standing at `place`.
+    /// The mode these arguments run in place of a named one: `app` for a word ending in
+    /// `.app`, `tree` otherwise (`docs/spec/cli.md#modes`).
+    pub fn mode(&self) -> Result<Mode, Error> {
+        self.app_word().map_or_else(
+            || Ok(Mode::Tree(self.clone())),
+            |word| self.app_mode(word),
+        )
+    }
+
+    /// The folder given, as a word standing at `place`; an app word is no folder.
     pub fn folder_word(&self, place: Place) -> Option<FolderWord> {
+        if self.app_word().is_some() {
+            return None;
+        }
+
         let word = self.dir.clone()?;
         Some(FolderWord { word, place })
+    }
+
+    /// The word given, when it names an app.
+    fn app_word(&self) -> Option<&str> {
+        let word = self.dir.as_deref()?.to_str()?;
+        names_an_app(word).then_some(word)
+    }
+
+    /// App mode on `word`; the rule flags parsed beside it belong to `tree` alone.
+    fn app_mode(&self, word: &str) -> Result<Mode, Error> {
+        let rule_flags = [
+            (!self.rules.only.is_empty(), "--only"),
+            (self.rules.enter_bundles, "--enter-bundles"),
+            (self.rules.enter_placeholders, "--enter-placeholders"),
+        ];
+        if let Some((_, flag)) = rule_flags.iter().find(|(given, _)| *given) {
+            return Err(Error::Usage(format!("app mode does not take {flag}")));
+        }
+
+        let app = parse_app(word).map_err(Error::Usage)?;
+        Ok(Mode::App {
+            app: Some(app),
+            flags: self.flags.clone(),
+        })
     }
 }
 

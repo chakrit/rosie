@@ -123,8 +123,9 @@ resolved path for the one it was given. The ban is on what rosie accepts, not on
 detects links: `canonicalize` and other link-resolving calls are the detector.
 
 - Every written path (`roots` entries, rule fixed paths, typed paths, context checks) is
-  made absolute by one call, `fs::Paths::resolve`: expand `~` against the injected home,
-  normalize by text (`.`, `..`, `//`), then `canonicalize` through the `Backend`.
+  made absolute by `fs::Paths::expand`, which expands `~` against the injected home and
+  normalizes by text (`.`, `..`, `//`), then checked by the context's `locate`, which
+  `canonicalize`s through the `Backend`.
 - A canonical form that differs from the normalized form means a symlink or a case or
   Unicode-form misspelling; the path is refused, naming the canonical path. There is no
   case folding.

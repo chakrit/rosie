@@ -31,8 +31,8 @@ strategy has its own fields:
 
 ### Paths
 
-- A fixed path is `/…` or `~/…`. It is made absolute by `fs::Paths::resolve`
-  ([safety.md](safety.md#symlinks)); `roots` decides the rest.
+- A fixed path is `/…` or `~/…`. It is made absolute by `fs::Paths::expand` and checked
+  on disk by `locate` ([safety.md](safety.md#symlinks)); `roots` decides the rest.
 - A fixed path that passes through a symlink (for example `/var` → `/private/var`) hits
   the symlink ban and fails like any refused path, unless `enter_links` allows it
   ([safety.md](safety.md#symlinks)). Pack authors write the non-symlink path, e.g.

@@ -172,19 +172,18 @@ pub struct Target {
 
 impl Target {
     pub fn mode(&self) -> Result<Mode, Error> {
-        match &self.mode {
-            Some(mode) => Ok(mode.clone()),
-            None => self.tree.mode(),
-        }
+        self.mode
+            .as_ref()
+            .map_or_else(|| self.tree.mode(), |mode| Ok(mode.clone()))
     }
 
     /// The folder given in place of a mode name after `verb`. When no such folder
     /// exists, it was likely meant as a command or mode.
     pub fn folder_word(&self, verb: Verb) -> Option<FolderWord> {
-        match &self.mode {
-            Some(_) => None,
-            None => self.tree.folder_word(Place::Mode(verb)),
-        }
+        self.mode
+            .is_none()
+            .then(|| self.tree.folder_word(Place::Mode(verb)))
+            .flatten()
     }
 }
 

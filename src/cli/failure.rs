@@ -235,10 +235,7 @@ fn app_to_quit(program: &Path) -> String {
         .ancestors()
         .filter(|path| apps::is_app_path(path))
         .last();
-    let name = match outermost_app {
-        Some(app) => app.file_stem(),
-        None => program.file_name(),
-    };
+    let name = outermost_app.map_or_else(|| program.file_name(), Path::file_stem);
     name.unwrap_or(program.as_os_str())
         .to_string_lossy()
         .into_owned()

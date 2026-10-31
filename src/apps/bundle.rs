@@ -407,8 +407,8 @@ pub fn is_app_path(path: &Path) -> bool {
 /// ignored (`docs/spec/cli.md#modes`).
 pub fn names_an_app(word: &str) -> bool {
     let last = Path::new(word).file_name().and_then(OsStr::to_str);
-    let extension = last.and_then(|name| name.rsplit_once('.'));
-    extension.is_some_and(|(_, extension)| extension.eq_ignore_ascii_case(APP_EXTENSION))
+    let extension = last.and_then(|name| name.rsplit_once('.')).map(|(_, after)| after);
+    extension.is_some_and(|text| text.eq_ignore_ascii_case(APP_EXTENSION))
 }
 
 /// An installed app whose `Info.plist` has no bundle-ID key ([`Installed::no_id`]). No

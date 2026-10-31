@@ -159,7 +159,7 @@ pub struct CleanArgs {
     pub target: Target,
 }
 
-/// What `scan` and `clean` scan: the mode named, or what [`TreeArgs::mode`] makes of the
+/// What `scan` and `clean` scan: the mode named, or what [`TreeArgs::resolve`] makes of the
 /// word in its place.
 #[derive(Debug, Args)]
 pub struct Target {
@@ -387,13 +387,13 @@ impl TreeArgs {
     /// `.app` and `tree` otherwise (`docs/spec/cli.md#modes`), with the folder given for
     /// `tree`, as a word standing at `place`.
     pub fn resolve(&self, place: Place) -> Result<(Mode, Option<FolderWord>), Error> {
-        match self.app_word() {
-            Some(word) => Ok((self.app_mode(word)?, None)),
-            None => {
+        self.app_word().map_or_else(
+            || {
                 let folder = self.dir.clone().map(|word| FolderWord { word, place });
                 Ok((Mode::Tree(self.clone()), folder))
-            }
-        }
+            },
+            |word| Ok((self.app_mode(word)?, None)),
+        )
     }
 
     /// The word given, when it names an app.

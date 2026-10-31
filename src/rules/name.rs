@@ -143,8 +143,8 @@ impl fmt::Display for RuleId {
     }
 }
 
-/// A `rule` or `pack/rule` pattern, each side a command-line [`wildcard::Pattern`]. A bare
-/// rule pattern matches in any pack.
+/// A `rule` or `pack/rule` pattern, each side a command-line [`wildcard::Pattern`]. A
+/// bare rule pattern matches in any pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pattern {
     text: Box<str>,

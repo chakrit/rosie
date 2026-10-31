@@ -242,6 +242,8 @@ Patterns are the `--only` rule patterns, the `app` argument
   that folder. *(agent-inferred)*
 - Every folder a `tree <dir>` pattern matches goes into one plan. *(agent-inferred)*
 - A `tree <dir>` pattern that matches no folder is a usage error. *(agent-inferred)*
+- A `..` after a wildcard part climbs from each matched folder, as a shell does:
+  `'nope-*/..'` matches nothing. *(agent-inferred)*
 
 ## Flags
 

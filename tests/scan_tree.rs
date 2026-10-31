@@ -258,6 +258,30 @@ fn a_wildcard_start_matching_no_folder_is_refused() {
 }
 
 #[test]
+fn dot_dot_after_a_wildcard_climbs_from_each_match_as_a_shell_does() {
+    let fake = node_home();
+    node_project(&fake, "/Users/me/code/web-a/app");
+    node_project(&fake, "/Users/me/code/web-b/app");
+    node_project(&fake, "/Users/me/code/web-c");
+    let scanner = scanner(&fake, Options::default());
+
+    let climbed = tree(&fake, "/Users/me/code/web-*/app/..");
+    let nothing = scanner.tree(&typed("/Users/me/code/nope-*/.."), &NoProgress);
+
+    assert_eq!(
+        paths(&climbed),
+        [
+            "/Users/me/code/web-a/app/node_modules",
+            "/Users/me/code/web-b/app/node_modules"
+        ]
+    );
+    assert!(
+        matches!(&nothing, Err(Error::NoFolderMatches { .. })),
+        "{nothing:?}"
+    );
+}
+
+#[test]
 fn the_literal_folder_above_a_wildcard_is_checked_as_typed() {
     let fake = node_home();
     node_project(&fake, "/Users/me/code/app");

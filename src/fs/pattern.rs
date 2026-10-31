@@ -26,10 +26,14 @@ pub struct PathPattern<M> {
 enum Part<M> {
     Literal(OsString),
     Wildcard(M),
+    /// A `..` below the first wildcard: the folder holding each match, as a shell
+    /// resolves it.
+    Parent,
 }
 
 impl<M: NameMatch> PathPattern<M> {
-    /// Parses an absolute path, `..` resolved first.
+    /// Parses an absolute path. A `..` above the first wildcard resolves in the text; one
+    /// below it climbs from each match.
     pub fn parse(path: &Path) -> Result<PathPattern<M>, Error> {
         if !path.has_root() {
             return Err(Error::Relative {
@@ -41,8 +45,8 @@ impl<M: NameMatch> PathPattern<M> {
     }
 
     /// Parses `typed`, a path the user typed, taken under `folder` when it is relative,
-    /// `..` resolved first. Only `typed`'s own components may hold wildcards: `folder` is
-    /// literal however it is spelled.
+    /// `..` taken as [`PathPattern::parse`] takes it. Only `typed`'s own components may
+    /// hold wildcards: `folder` is literal however it is spelled.
     pub fn typed_under(folder: &Path, typed: &Path) -> Result<PathPattern<M>, Error> {
         let path = folder.join(typed);
         if !path.has_root() {
@@ -52,34 +56,30 @@ impl<M: NameMatch> PathPattern<M> {
             true => Path::new("/"),
             false => folder,
         };
-        let components = anchor
+        let mut components = anchor
             .components()
             .map(|component| (component, false))
             .chain(typed.components().map(|component| (component, true)));
 
-        let names = components.fold(Vec::new(), |mut names, (component, from_typed)| {
-            match component {
-                Component::Normal(name) => names.push((name, from_typed)),
-                Component::ParentDir => drop(names.pop()),
-                Component::RootDir => names.clear(),
-                Component::CurDir | Component::Prefix(_) => {}
-            }
-            names
-        });
-        let literal_len = names
-            .iter()
-            .position(|&(name, from_typed)| from_typed && has_wildcard(name.as_bytes()))
-            .unwrap_or(names.len());
-        let base: PathBuf = std::iter::once(OsStr::new("/"))
-            .chain(names[..literal_len].iter().map(|&(name, _)| name))
-            .collect();
-        let below = names[literal_len..]
-            .iter()
-            .map(|&(name, from_typed)| match from_typed {
-                true => Part::parse(name),
-                false => Ok(Part::Literal(name.to_os_string())),
-            })
-            .collect::<Result<_, _>>()?;
+        let (names, below) = components.try_fold(
+            (Vec::new(), Vec::new()),
+            |(mut names, mut below), (component, from_typed)| {
+                match (component, below.is_empty()) {
+                    (Component::Normal(name), true)
+                        if !(from_typed && has_wildcard(name.as_bytes())) =>
+                    {
+                        names.push(name)
+                    }
+                    (Component::Normal(name), _) => below.push(Part::parse(name)?),
+                    (Component::ParentDir, true) => drop(names.pop()),
+                    (Component::ParentDir, false) => below.push(Part::Parent),
+                    (Component::RootDir, _) => names.clear(),
+                    (Component::CurDir | Component::Prefix(_), _) => {}
+                }
+                Ok::<_, Error>((names, below))
+            },
+        )?;
+        let base: PathBuf = std::iter::once(OsStr::new("/")).chain(names).collect();
 
         Ok(PathPattern { path, base, below })
     }
@@ -140,19 +140,20 @@ impl<M: NameMatch> PathPattern<M> {
         base_kind: FileKind,
     ) -> Result<Vec<(PathBuf, FileKind)>, Error> {
         let start = vec![(base.to_path_buf(), base_kind)];
-        let mut found = self.below.iter().try_fold(start, |found, part| {
+
+        self.below.iter().try_fold(start, |found, part| {
             let folders = found
                 .into_iter()
                 .filter(|&(_, kind)| kind == FileKind::Dir)
                 .map(|(folder, _)| folder);
-            folders
+            let mut children = folders
                 .map(|folder| part.children(ctx, &folder))
-                .collect::<Result<Vec<_>, Error>>()
-                .map(|children| children.concat())
-        })?;
-
-        found.sort_by(|(a, _), (b, _)| a.cmp(b));
-        Ok(found)
+                .collect::<Result<Vec<_>, Error>>()?
+                .concat();
+            children.sort_by(|(a, _), (b, _)| a.cmp(b));
+            children.dedup_by(|(a, _), (b, _)| a == b);
+            Ok(children)
+        })
     }
 }
 
@@ -179,6 +180,7 @@ impl<M: NameMatch> Part<M> {
     ) -> Result<Vec<(PathBuf, FileKind)>, Error> {
         let candidates = match self {
             Part::Literal(name) => vec![folder.join(name)],
+            Part::Parent => vec![folder.parent().unwrap_or(folder).to_path_buf()],
             Part::Wildcard(matcher) => Cleanup::read_dir(folder)
                 .perform(ctx)?
                 .into_iter()

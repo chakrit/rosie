@@ -4,9 +4,10 @@
 //! `tree <dir>` (`docs/spec/cli.md#patterns`).
 //!
 //! `*` matches any run of characters and `?` exactly one; everything else matches itself,
-//! case-sensitively. Brackets, braces, and backslashes are refused rather than taken
-//! literally, so a pattern written for a richer glob syntax fails loudly instead of never
-//! matching.
+//! case-sensitively. In a glob, brackets, braces, and backslashes are refused rather than
+//! taken literally, so a pattern written for a richer glob syntax fails loudly instead of
+//! never matching. A plain [`Pattern`] word holds no glob, so they are its literal
+//! characters.
 
 use std::fmt;
 

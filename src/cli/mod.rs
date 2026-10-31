@@ -205,13 +205,18 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
         }
     }
 
+    /// Prints help or the version on stdout, or clap's error text as one error line
+    /// (`docs/spec/cli.md#output`).
     fn show_parse_error(&mut self, error: &clap::Error) -> ExitStatus {
         let text = error.to_string();
         let (written, status) = match error.kind() {
             ErrorKind::DisplayHelp | ErrorKind::DisplayVersion => {
                 (write!(self.console.stdout(), "{text}"), ExitStatus::Success)
             }
-            _ => (write!(self.console.stderr(), "{text}"), ExitStatus::Usage),
+            _ => {
+                let line = self.console.stderr_palette().line(&parse_error_line(&text));
+                (writeln!(self.console.stderr(), "{line}"), ExitStatus::Usage)
+            }
         };
         match written {
             Ok(()) => status,
@@ -240,6 +245,14 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
             Err(_) => ExitStatus::Failed,
         }
     }
+}
+
+/// Clap's error text as an error line: its `error: ` lead dropped, since the marker says
+/// it, and its blank lines dropped, since continuation lines carry an indent.
+fn parse_error_line(text: &str) -> Line {
+    let message = text.strip_prefix("error: ").unwrap_or(text);
+    let lines: Vec<&str> = message.lines().filter(|line| !line.trim().is_empty()).collect();
+    Line::new(Mark::Error, lines.join("\n"))
 }
 
 /// The arguments after the program name, as typed, for the `sudo rosie` refusal to

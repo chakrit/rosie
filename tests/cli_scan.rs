@@ -889,3 +889,17 @@ fn a_missing_folder_named_after_tree_is_only_missing() {
     ran.assert_status(ExitStatus::Failed);
     assert_eq!(ran.stderr, format!("✗ {CWD}/scna does not exist\n"));
 }
+
+#[test]
+fn a_parse_error_carries_the_error_marker() {
+    let sandbox = Sandbox::new();
+
+    let ran = sandbox.run(&["scan", "--bogus"]);
+
+    ran.assert_status(ExitStatus::Usage);
+    assert!(
+        ran.stderr.starts_with("✗ unexpected argument '--bogus'"),
+        "{}",
+        ran.stderr
+    );
+}

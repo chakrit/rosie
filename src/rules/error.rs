@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::name::{MAX_CHARS, RuleId, RulePattern};
+use super::name::{MAX_CHARS, Pattern, RuleId};
 use crate::fs::{self, InvalidCommand};
 use crate::wildcard;
 
@@ -78,7 +78,7 @@ pub enum Error {
     },
 
     #[error("no rule matches `{pattern}`")]
-    NoRuleMatches { pattern: RulePattern },
+    NoRuleMatches { pattern: Pattern },
 
     // names
     #[error("a name cannot be empty")]

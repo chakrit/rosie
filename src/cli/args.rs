@@ -8,12 +8,12 @@ use std::path::PathBuf;
 use clap::builder::{OsStringValueParser, TypedValueParser};
 use clap::{Args, CommandFactory, Parser, Subcommand};
 
-use crate::apps::{AppPattern, names_an_app};
+use crate::apps::{self, names_an_app};
 use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::{EnterLinks, PathPattern};
 use crate::plan::{AggressiveItems, Selection};
-use crate::rules::RulePattern;
+use crate::rules;
 use crate::run::elevated;
 use crate::scan::{Needs, Settings, WalkSkip};
 use crate::wildcard::Pattern;
@@ -371,7 +371,7 @@ pub enum AppArg {
     /// A word with a `/`.
     Path(PathBuf),
     /// Any other word: a name to find among the installed apps.
-    Pattern(AppPattern),
+    Pattern(apps::Pattern),
 }
 
 /// `tree` and its folder.
@@ -493,7 +493,7 @@ pub struct RuleFlags {
     /// the name, `*` and `?` match the whole name, case ignored; repeatable. See
     /// `rosie rules`.
     #[arg(long = "only", value_name = "RULE", value_parser = parse_pattern)]
-    pub only: Vec<RulePattern>,
+    pub only: Vec<rules::Pattern>,
 
     /// Walk into bundles (overrides `[walk] enter_bundles`).
     #[arg(long)]
@@ -567,14 +567,14 @@ fn parse_plan_source(text: &str) -> Result<PlanSource, String> {
     }
 }
 
-fn parse_pattern(text: &str) -> Result<RulePattern, String> {
-    RulePattern::parse(text).map_err(|error| error.to_string())
+fn parse_pattern(text: &str) -> Result<rules::Pattern, String> {
+    rules::Pattern::parse(text).map_err(|error| error.to_string())
 }
 
 fn parse_app(text: &str) -> Result<AppArg, String> {
     match text.contains('/') {
         true => parse_path(text.into()).map(AppArg::Path),
-        false => AppPattern::parse(text)
+        false => apps::Pattern::parse(text)
             .map(AppArg::Pattern)
             .map_err(|error| error.to_string()),
     }

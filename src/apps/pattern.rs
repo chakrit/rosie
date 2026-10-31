@@ -7,13 +7,12 @@ use super::Error;
 use super::bundle::{bundle_stem, names_an_app};
 use crate::fs::{Backend, FsContext};
 use crate::wildcard;
-use crate::wildcard::Pattern;
 
-/// A command-line [`Pattern`] over app file names. One ending in `.app` is compared
+/// A command-line [`wildcard::Pattern`] over app file names. One ending in `.app` is compared
 /// against the full file name; any other against the file name without its final `.app`.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct AppPattern {
-    pattern: Pattern,
+pub struct Pattern {
+    pattern: wildcard::Pattern,
     against: Against,
 }
 
@@ -26,15 +25,15 @@ enum Against {
     Stem,
 }
 
-impl AppPattern {
-    pub fn parse(text: &str) -> Result<AppPattern, wildcard::Error> {
+impl Pattern {
+    pub fn parse(text: &str) -> Result<Pattern, wildcard::Error> {
         let against = match names_an_app(text) {
             true => Against::FileName,
             false => Against::Stem,
         };
 
-        Ok(AppPattern {
-            pattern: Pattern::parse(text)?,
+        Ok(Pattern {
+            pattern: wildcard::Pattern::parse(text)?,
             against,
         })
     }
@@ -48,14 +47,14 @@ impl AppPattern {
     }
 }
 
-impl fmt::Display for AppPattern {
+impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         self.pattern.fmt(f)
     }
 }
 
 /// The apps the picker offers that `pattern` matches, sorted.
-pub fn find<B: Backend>(ctx: &FsContext<B>, pattern: &AppPattern) -> Result<Vec<PathBuf>, Error> {
+pub fn find<B: Backend>(ctx: &FsContext<B>, pattern: &Pattern) -> Result<Vec<PathBuf>, Error> {
     let apps = super::picker_apps(ctx)?;
     Ok(apps
         .into_iter()
@@ -77,7 +76,7 @@ mod tests {
 
     /// The file names, without `.app`, of the apps `text` matches.
     fn matched(text: &str) -> Vec<String> {
-        let pattern = AppPattern::parse(text).expect("a valid pattern");
+        let pattern = Pattern::parse(text).expect("a valid pattern");
         APPS.iter()
             .map(Path::new)
             .filter(|app| pattern.matches(app))

@@ -7,7 +7,7 @@ use std::path::Path;
 use super::error::Error;
 use super::layers::{self, RuleLayers};
 use super::lua::LuaSandbox;
-use super::name::{RuleId, RulePattern};
+use super::name::{Pattern, RuleId};
 use super::rule::{Detection, Rule, Shape};
 use crate::fs::{Backend, Cleanup, DirEntry, FsContext, FsOp};
 use crate::tier::Tier;
@@ -58,7 +58,7 @@ impl RuleSet {
     /// other rules, so none of them can match a folder and stop the walk above a
     /// selected rule's match (`--only`, `docs/spec/cli.md#flags`). A pattern no loaded
     /// rule matches is an error naming it.
-    pub fn only(self, patterns: &[RulePattern]) -> Result<RuleSet, Error> {
+    pub fn only(self, patterns: &[Pattern]) -> Result<RuleSet, Error> {
         let unmatched = patterns
             .iter()
             .find(|pattern| !self.rules.iter().any(|rule| pattern.matches(&rule.id)));

@@ -6,7 +6,7 @@ use std::fmt;
 use std::hash::{Hash, Hasher};
 
 use super::error::Error;
-use crate::wildcard::Pattern;
+use crate::wildcard;
 
 /// The longest pack or rule name, in characters.
 pub(super) const MAX_CHARS: usize = 64;
@@ -143,26 +143,26 @@ impl fmt::Display for RuleId {
     }
 }
 
-/// A `rule` or `pack/rule` pattern, each side a command-line [`Pattern`]. A bare rule
+/// A `rule` or `pack/rule` pattern, each side a command-line [`wildcard::Pattern`]. A bare rule
 /// pattern matches in any pack.
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RulePattern {
+pub struct Pattern {
     text: Box<str>,
-    pack: Pattern,
-    rule: Pattern,
+    pack: wildcard::Pattern,
+    rule: wildcard::Pattern,
 }
 
-impl RulePattern {
-    pub fn parse(text: &str) -> Result<RulePattern, Error> {
+impl Pattern {
+    pub fn parse(text: &str) -> Result<Pattern, Error> {
         let (pack, rule) = text.split_once('/').unwrap_or(("*", text));
         if rule.contains('/') {
             return Err(Error::PatternShape);
         }
 
-        Ok(RulePattern {
+        Ok(Pattern {
             text: text.into(),
-            pack: Pattern::parse(pack)?,
-            rule: Pattern::parse(rule)?,
+            pack: wildcard::Pattern::parse(pack)?,
+            rule: wildcard::Pattern::parse(rule)?,
         })
     }
 
@@ -171,7 +171,7 @@ impl RulePattern {
     }
 }
 
-impl fmt::Display for RulePattern {
+impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str(&self.text)
     }
@@ -180,7 +180,6 @@ impl fmt::Display for RulePattern {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::wildcard;
 
     #[test]
     fn accepts_ascii_letters_digits_underscores_and_dashes() {
@@ -256,8 +255,8 @@ mod tests {
         ));
     }
 
-    fn pattern(text: &str) -> RulePattern {
-        RulePattern::parse(text).expect("valid pattern")
+    fn pattern(text: &str) -> Pattern {
+        Pattern::parse(text).expect("valid pattern")
     }
 
     fn id(text: &str) -> RuleId {
@@ -303,20 +302,17 @@ mod tests {
 
     #[test]
     fn refuses_a_malformed_pattern() {
+        assert!(matches!(Pattern::parse("a/b/c"), Err(Error::PatternShape)));
         assert!(matches!(
-            RulePattern::parse("a/b/c"),
-            Err(Error::PatternShape)
-        ));
-        assert!(matches!(
-            RulePattern::parse(""),
+            Pattern::parse(""),
             Err(Error::Pattern(wildcard::Error::Empty))
         ));
         assert!(matches!(
-            RulePattern::parse("rosie/"),
+            Pattern::parse("rosie/"),
             Err(Error::Pattern(wildcard::Error::Empty))
         ));
         assert!(matches!(
-            RulePattern::parse("py[c]*"),
+            Pattern::parse("py[c]*"),
             Err(Error::Pattern(wildcard::Error::Unsupported(..)))
         ));
     }

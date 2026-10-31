@@ -9,7 +9,7 @@ use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, Cleanup, DirEntry, FileKind, FsContext, FsOp, Op, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
-    Candidate, Error, LuaSandbox, RuleId, RuleLayers, RulePattern, RuleSet, Shape, Source,
+    Candidate, Error, LuaSandbox, Pattern, RuleId, RuleLayers, RuleSet, Shape, Source,
 };
 use rosie::tier::{Tier, Twin};
 
@@ -638,10 +638,10 @@ fn two_pack_fixture() -> FakeBackend {
     fake
 }
 
-fn patterns(texts: &[&str]) -> Vec<RulePattern> {
+fn patterns(texts: &[&str]) -> Vec<Pattern> {
     texts
         .iter()
-        .map(|text| RulePattern::parse(text).expect("valid rule pattern"))
+        .map(|text| Pattern::parse(text).expect("valid rule pattern"))
         .collect()
 }
 

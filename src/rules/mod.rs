@@ -13,7 +13,7 @@ mod set;
 pub use error::Error;
 pub use layers::{PackFolder, RuleLayers};
 pub use lua::LuaSandbox;
-pub use name::{Name, PackName, RuleId, RulePattern};
+pub use name::{Name, PackName, Pattern, RuleId};
 pub use pack::load_pack;
 pub use rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Rule, Shape,

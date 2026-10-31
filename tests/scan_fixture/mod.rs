@@ -11,7 +11,7 @@ use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, FsContext, PathPattern, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::plan::{AggressiveItems, Status};
-use rosie::rules::{RuleLayers, RulePattern, RuleSet};
+use rosie::rules::{self, RuleLayers, RuleSet};
 use rosie::scan::{Progress, Scan, Scanner, Settings};
 use rosie::wildcard::Pattern;
 
@@ -114,10 +114,10 @@ pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     Scanner::new(ctx, rules, settings)
 }
 
-pub fn patterns(texts: &[&str]) -> Vec<RulePattern> {
+pub fn patterns(texts: &[&str]) -> Vec<rules::Pattern> {
     texts
         .iter()
-        .map(|text| RulePattern::parse(text).expect("valid rule pattern"))
+        .map(|text| rules::Pattern::parse(text).expect("valid rule pattern"))
         .collect()
 }
 

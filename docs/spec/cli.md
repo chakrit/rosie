@@ -77,10 +77,13 @@ Save a plan with `rosie scan tree ~ > plan.toml`, or pipe it:
     rosie run plan.toml`;
   - `app mode does not take --only` → `drop --only`;
   - a bad or reserved pack source → `rosie rules pull <owner/repo>`.
+  - a running program → `quit <app>, then run again`, naming the outermost app bundle
+    holding the program.
 
 ### Bare `rosie`
 
-Bare `rosie [<dir>]` is `rosie clean tree [<dir>]`, flags included.
+Bare `rosie [<dir>]` is `rosie clean tree [<dir>]`, flags included; an app word in place of
+`<dir>` enters app mode ([modes](#modes)).
 
 ## Check
 

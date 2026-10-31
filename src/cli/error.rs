@@ -27,7 +27,7 @@ pub enum Error {
     #[error("there are no {} to choose from", .kind.empty())]
     NothingToPick { kind: PickKind },
 
-    #[error("no installed app matches {pattern}")]
+    #[error("no app matches {pattern}")]
     NoAppMatches { pattern: String },
 
     /// A pattern matching several apps with no terminal to pick on; rosie exits with the

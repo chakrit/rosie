@@ -362,7 +362,7 @@ fn scan_app_never_matches_the_bundle_name() {
 
     ran.assert_status(ExitStatus::Failed);
     assert!(
-        ran.stderr.contains("no installed app matches Editor"),
+        ran.stderr.contains("no app matches Editor"),
         "{}",
         ran.stderr
     );
@@ -505,7 +505,7 @@ fn scan_app_matching_nothing_says_so() {
 
     ran.assert_status(ExitStatus::Failed);
     assert!(
-        ran.stderr.contains("no installed app matches Nope"),
+        ran.stderr.contains("no app matches Nope"),
         "{}",
         ran.stderr
     );
@@ -554,7 +554,7 @@ fn scan_app_takes_a_path_with_wildcards() {
     none.assert_status(ExitStatus::Failed);
     assert!(
         none.stderr
-            .contains("no installed app matches /Users/me/Downloads/x*.app"),
+            .contains("no app matches /Users/me/Downloads/x*.app"),
         "{}",
         none.stderr
     );

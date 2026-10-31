@@ -171,19 +171,13 @@ pub struct Target {
 }
 
 impl Target {
-    pub fn mode(&self) -> Result<Mode, Error> {
-        self.mode
-            .as_ref()
-            .map_or_else(|| self.tree.mode(), |mode| Ok(mode.clone()))
-    }
-
-    /// The folder given in place of a mode name after `verb`. When no such folder
-    /// exists, it was likely meant as a command or mode.
-    pub fn folder_word(&self, verb: Verb) -> Option<FolderWord> {
-        self.mode
-            .is_none()
-            .then(|| self.tree.folder_word(Place::Mode(verb)))
-            .flatten()
+    /// The mode to run, and the folder given in place of a mode name after `verb`, if
+    /// any. When no such folder exists, it was likely meant as a command or mode.
+    pub fn resolve(&self, verb: Verb) -> Result<(Mode, Option<FolderWord>), Error> {
+        self.mode.as_ref().map_or_else(
+            || self.tree.resolve(Place::Mode(verb)),
+            |mode| Ok((mode.clone(), None)),
+        )
     }
 }
 
@@ -389,21 +383,17 @@ pub struct TreeArgs {
 }
 
 impl TreeArgs {
-    /// The mode these arguments run in place of a named one: `app` for a word ending in
-    /// `.app`, `tree` otherwise (`docs/spec/cli.md#modes`).
-    pub fn mode(&self) -> Result<Mode, Error> {
-        self.app_word()
-            .map_or_else(|| Ok(Mode::Tree(self.clone())), |word| self.app_mode(word))
-    }
-
-    /// The folder given, as a word standing at `place`; an app word is no folder.
-    pub fn folder_word(&self, place: Place) -> Option<FolderWord> {
-        if self.app_word().is_some() {
-            return None;
+    /// The mode these arguments run in place of a named one, `app` for a word ending in
+    /// `.app` and `tree` otherwise (`docs/spec/cli.md#modes`), with the folder given for
+    /// `tree`, as a word standing at `place`.
+    pub fn resolve(&self, place: Place) -> Result<(Mode, Option<FolderWord>), Error> {
+        match self.app_word() {
+            Some(word) => Ok((self.app_mode(word)?, None)),
+            None => {
+                let folder = self.dir.clone().map(|word| FolderWord { word, place });
+                Ok((Mode::Tree(self.clone()), folder))
+            }
         }
-
-        let word = self.dir.clone()?;
-        Some(FolderWord { word, place })
     }
 
     /// The word given, when it names an app.

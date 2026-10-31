@@ -101,8 +101,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         match command {
             UserCommand::Scan(args) => self.scan(args),
             UserCommand::Clean(args) => {
-                let mode = args.target.mode()?;
-                self.clean(mode, args.target.folder_word(Verb::Clean))
+                let (mode, folder) = args.target.resolve(Verb::Clean)?;
+                self.clean(mode, folder)
             }
             UserCommand::Check(args) => self.check(args),
             UserCommand::Run { plan, conflicts } => self.run_plan(&plan, conflicts.conflicts),

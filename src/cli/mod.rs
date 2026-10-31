@@ -119,8 +119,8 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
                 self.command(env, typed_args(&argv), |session| session.dispatch(command))
             }
             None => self.command(env, typed_args(&argv), |session| {
-                let folder = cli.tree.folder_word(Place::Command);
-                session.clean(cli.tree.mode()?, folder)
+                let (mode, folder) = cli.tree.resolve(Place::Command)?;
+                session.clean(mode, folder)
             }),
         };
         let status = match outcome {

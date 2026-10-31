@@ -79,8 +79,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
         };
         let format = args.format.or(by_terminal)?;
         let config = self.config()?;
-        let mode = args.target.mode()?;
-        let folder = args.target.folder_word(Verb::Scan);
+        let (mode, folder) = args.target.resolve(Verb::Scan)?;
 
         let scan = self
             .find(&config, &mode, Verb::Scan)

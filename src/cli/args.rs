@@ -393,10 +393,8 @@ impl TreeArgs {
     /// The mode these arguments run in place of a named one: `app` for a word ending in
     /// `.app`, `tree` otherwise (`docs/spec/cli.md#modes`).
     pub fn mode(&self) -> Result<Mode, Error> {
-        self.app_word().map_or_else(
-            || Ok(Mode::Tree(self.clone())),
-            |word| self.app_mode(word),
-        )
+        self.app_word()
+            .map_or_else(|| Ok(Mode::Tree(self.clone())), |word| self.app_mode(word))
     }
 
     /// The folder given, as a word standing at `place`; an app word is no folder.

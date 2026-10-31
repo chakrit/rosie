@@ -251,7 +251,10 @@ impl<B: Backend + Sync, N: Network, C: Console> App<B, N, C> {
 /// it, and its blank lines dropped, since continuation lines carry an indent.
 fn parse_error_line(text: &str) -> Line {
     let message = text.strip_prefix("error: ").unwrap_or(text);
-    let lines: Vec<&str> = message.lines().filter(|line| !line.trim().is_empty()).collect();
+    let lines: Vec<&str> = message
+        .lines()
+        .filter(|line| !line.trim().is_empty())
+        .collect();
     Line::new(Mark::Error, lines.join("\n"))
 }
 

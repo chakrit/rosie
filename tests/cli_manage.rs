@@ -444,7 +444,8 @@ fn a_running_helper_names_the_app_to_quit() {
     let ran = sandbox.run(&["scan", "app", VS_CODE]);
 
     assert!(
-        ran.stderr.contains("quit Visual Studio Code, then run again"),
+        ran.stderr
+            .contains("quit Visual Studio Code, then run again"),
         "{}",
         ran.stderr
     );
@@ -457,7 +458,11 @@ fn an_app_word_in_place_of_a_command_cleans_the_app() {
     let ran = sandbox.run_with(Script::terminal().answer("n"), &["Xcode.app"]);
 
     ran.assert_status(ExitStatus::Success);
-    assert!(ran.stdout.contains("app/com.apple.dt.Xcode"), "{}", ran.stdout);
+    assert!(
+        ran.stdout.contains("app/com.apple.dt.Xcode"),
+        "{}",
+        ran.stdout
+    );
 }
 
 #[test]
@@ -548,11 +553,7 @@ fn scan_app_matching_nothing_says_so() {
     let ran = sandbox.run(&["scan", "app", "Nope"]);
 
     ran.assert_status(ExitStatus::Failed);
-    assert!(
-        ran.stderr.contains("no app matches Nope"),
-        "{}",
-        ran.stderr
-    );
+    assert!(ran.stderr.contains("no app matches Nope"), "{}", ran.stderr);
 }
 
 #[test]

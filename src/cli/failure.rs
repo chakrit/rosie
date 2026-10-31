@@ -231,12 +231,17 @@ fn full_disk_access() -> Hint {
 /// an app names the app, else the program itself. `Slack` for
 /// `/Applications/Slack.app/Contents/MacOS/Slack`.
 fn app_to_quit(program: &Path) -> String {
-    let outermost_app = program.ancestors().filter(|path| apps::is_app_path(path)).last();
+    let outermost_app = program
+        .ancestors()
+        .filter(|path| apps::is_app_path(path))
+        .last();
     let name = match outermost_app {
         Some(app) => app.file_stem(),
         None => program.file_name(),
     };
-    name.unwrap_or(program.as_os_str()).to_string_lossy().into_owned()
+    name.unwrap_or(program.as_os_str())
+        .to_string_lossy()
+        .into_owned()
 }
 
 fn config_hints(error: &config::Error) -> Vec<Hint> {

@@ -159,8 +159,8 @@ pub struct CleanArgs {
     pub target: Target,
 }
 
-/// What `scan` and `clean` scan: the mode named, or what [`TreeArgs::resolve`] makes of the
-/// word in its place.
+/// What `scan` and `clean` scan: the mode named, or what [`TreeArgs::resolve`] makes of
+/// the word in its place.
 #[derive(Debug, Args)]
 pub struct Target {
     #[command(subcommand)]
@@ -405,9 +405,12 @@ impl TreeArgs {
     /// App mode on `word`; the rule flags parsed beside it belong to `tree` alone.
     fn app_mode(&self, word: &str) -> Result<Mode, Error> {
         let rule_flags = [
-            (!self.rules.only.is_empty(), "--only"),
-            (self.rules.enter_bundles, "--enter-bundles"),
-            (self.rules.enter_placeholders, "--enter-placeholders"),
+            (!self.rules.only.is_empty(), Flag::Only),
+            (self.rules.enter_bundles, Flag::Enter(WalkSetting::Bundles)),
+            (
+                self.rules.enter_placeholders,
+                Flag::Enter(WalkSetting::Placeholders),
+            ),
         ];
         if let Some(&(_, flag)) = rule_flags.iter().find(|(given, _)| *given) {
             return Err(Error::AppModeFlag { flag });

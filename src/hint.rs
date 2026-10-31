@@ -211,6 +211,8 @@ impl Word {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Flag {
     Aggressive,
+    /// `--only`, which narrows the rules.
+    Only,
     Enter(WalkSetting),
     /// `--conflicts=clean` or `--conflicts=skip`.
     Conflicts(Selection),
@@ -220,6 +222,7 @@ impl fmt::Display for Flag {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Flag::Aggressive => write!(f, "--aggressive"),
+            Flag::Only => write!(f, "--only"),
             Flag::Enter(setting) => write!(f, "{}", flag(*setting)),
             Flag::Conflicts(answer) => write!(f, "--conflicts={}", answer.label()),
         }

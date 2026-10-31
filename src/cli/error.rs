@@ -8,6 +8,7 @@ use super::args::{Place, Verb};
 use super::console::PromptError;
 use super::root::RootError;
 use super::session::PickKind;
+use crate::hint::Flag;
 use crate::{apps, config, fs, packs, plan, rules, run, scan};
 
 #[derive(Debug, Error)]
@@ -28,7 +29,7 @@ pub enum Error {
     /// A rule flag given beside an app word, which app mode does not take
     /// (`docs/spec/cli.md#modes`).
     #[error("app mode does not take {flag}")]
-    AppModeFlag { flag: &'static str },
+    AppModeFlag { flag: Flag },
 
     #[error("cancelled")]
     Cancelled,

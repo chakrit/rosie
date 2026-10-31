@@ -13,7 +13,7 @@ use pack_fixture::{
     listing, source, url_of,
 };
 use rosie::packs::{self, Error, FirstRun, Installed, MONTH, RemovePack, Source, Store};
-use rosie::rules::{self, Problem};
+use rosie::rules;
 use tarball::{TOP, Tarball};
 
 // pull
@@ -332,7 +332,7 @@ fn pull_refuses_a_rule_key_that_is_not_a_valid_name() {
     )]);
 
     assert!(
-        matches!(&error, rules::Error::Rule { rule, problem: Problem::Name(_), .. } if rule == "a.b"),
+        matches!(&error, rules::Error::Rule { rule, problem, .. } if rule == "a.b" && matches!(**problem, rules::Error::BadChar('.'))),
         "got {error}"
     );
 }
@@ -347,10 +347,7 @@ fn pull_refuses_an_override_by_qualified_name_in_a_pack() {
     assert!(
         matches!(
             &error,
-            rules::Error::Rule {
-                problem: Problem::OverrideInPack,
-                ..
-            }
+            rules::Error::Rule { problem, .. } if matches!(**problem, rules::Error::OverrideInPack)
         ),
         "got {error}"
     );

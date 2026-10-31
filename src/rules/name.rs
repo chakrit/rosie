@@ -5,13 +5,11 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use thiserror::Error;
-
-use crate::glob;
+use super::error::Error;
 use crate::pattern::Pattern;
 
 /// The longest pack or rule name, in characters.
-const MAX_CHARS: usize = 64;
+pub(super) const MAX_CHARS: usize = 64;
 
 /// A valid rule name, compared as written.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -20,7 +18,7 @@ pub struct Name(Box<str>);
 impl Name {
     /// Accepts an ASCII letter first, then ASCII letters, digits, `_`, or `-`, at most 64
     /// characters in all.
-    pub fn parse(text: &str) -> Result<Name, NameError> {
+    pub fn parse(text: &str) -> Result<Name, Error> {
         valid(text).map(Name)
     }
 
@@ -43,7 +41,7 @@ pub struct PackName(Box<str>);
 
 impl PackName {
     /// Accepts what [`Name::parse`] accepts.
-    pub fn parse(text: &str) -> Result<PackName, NameError> {
+    pub fn parse(text: &str) -> Result<PackName, Error> {
         valid(text).map(PackName)
     }
 
@@ -101,21 +99,21 @@ impl fmt::Display for PackName {
 }
 
 /// The text of a valid pack or rule name (`docs/spec/rules.md#names`).
-fn valid(text: &str) -> Result<Box<str>, NameError> {
+fn valid(text: &str) -> Result<Box<str>, Error> {
     let mut chars = text.chars();
     let Some(first) = chars.next() else {
-        return Err(NameError::Empty);
+        return Err(Error::EmptyName);
     };
     if !first.is_ascii_alphabetic() {
-        return Err(NameError::BadFirst(first));
+        return Err(Error::BadFirst(first));
     }
     if let Some(bad) = chars.find(|&c| !(c.is_ascii_alphanumeric() || c == '_' || c == '-')) {
-        return Err(NameError::BadChar(bad));
+        return Err(Error::BadChar(bad));
     }
 
     let length = text.len();
     match length > MAX_CHARS {
-        true => Err(NameError::TooLong(length)),
+        true => Err(Error::TooLong(length)),
         false => Ok(text.into()),
     }
 }
@@ -129,9 +127,9 @@ pub struct RuleId {
 
 impl RuleId {
     /// Parses a qualified `pack/rule` name, as an override names the rule it replaces.
-    pub fn parse_qualified(text: &str) -> Result<RuleId, NameError> {
+    pub fn parse_qualified(text: &str) -> Result<RuleId, Error> {
         let Some((pack, rule)) = text.split_once('/') else {
-            return Err(NameError::Unqualified);
+            return Err(Error::Unqualified);
         };
         let pack = PackName::parse(pack)?;
         let rule = Name::parse(rule)?;
@@ -155,10 +153,10 @@ pub struct RulePattern {
 }
 
 impl RulePattern {
-    pub fn parse(text: &str) -> Result<RulePattern, NameError> {
+    pub fn parse(text: &str) -> Result<RulePattern, Error> {
         let (pack, rule) = text.split_once('/').unwrap_or(("*", text));
         if rule.contains('/') {
-            return Err(NameError::PatternShape);
+            return Err(Error::PatternShape);
         }
 
         Ok(RulePattern {
@@ -179,41 +177,15 @@ impl fmt::Display for RulePattern {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
-pub enum NameError {
-    #[error("a name cannot be empty")]
-    Empty,
-
-    #[error("a name must start with an ASCII letter, not {0:?}")]
-    BadFirst(char),
-
-    #[error("a name may hold only ASCII letters, digits, `_`, and `-`, not {0:?}")]
-    BadChar(char),
-
-    #[error("a name is at most {MAX_CHARS} characters, not {0}")]
-    TooLong(usize),
-
-    #[error("a qualified name is `pack/rule`")]
-    Unqualified,
-
-    #[error("a rule pattern is `rule` or `pack/rule`")]
-    PatternShape,
-
-    #[error(transparent)]
-    Pattern(#[from] glob::Error),
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::glob;
 
     #[test]
     fn accepts_ascii_letters_digits_underscores_and_dashes() {
         for text in ["node-modules", "cargo_target", "py3", "Rosie", "x"] {
-            assert_eq!(
-                Name::parse(text).map(|name| name.to_string()),
-                Ok(text.to_string())
-            );
+            assert_eq!(Name::parse(text).expect("a valid name").to_string(), text);
         }
     }
 
@@ -227,7 +199,10 @@ mod tests {
             ("9lives", '9'),
             ("ñandú", 'ñ'),
         ] {
-            assert_eq!(Name::parse(text), Err(NameError::BadFirst(first)), "{text}");
+            assert!(
+                matches!(Name::parse(text), Err(Error::BadFirst(found)) if found == first),
+                "{text}"
+            );
         }
     }
 
@@ -244,9 +219,12 @@ mod tests {
             ("café", 'é'),
             ("a🦀", '🦀'),
         ] {
-            assert_eq!(Name::parse(text), Err(NameError::BadChar(bad)), "{text}");
+            assert!(
+                matches!(Name::parse(text), Err(Error::BadChar(found)) if found == bad),
+                "{text}"
+            );
         }
-        assert_eq!(Name::parse(""), Err(NameError::Empty));
+        assert!(matches!(Name::parse(""), Err(Error::EmptyName)));
     }
 
     #[test]
@@ -255,7 +233,7 @@ mod tests {
         let too_long = "a".repeat(65);
 
         assert!(Name::parse(&longest).is_ok());
-        assert_eq!(Name::parse(&too_long), Err(NameError::TooLong(65)));
+        assert!(matches!(Name::parse(&too_long), Err(Error::TooLong(65))));
     }
 
     #[test]
@@ -264,18 +242,18 @@ mod tests {
 
         assert_eq!((id.pack.as_str(), id.rule.as_str()), ("rosie", "docker"));
         assert_eq!(id.to_string(), "rosie/docker");
-        assert_eq!(
+        assert!(matches!(
             RuleId::parse_qualified("docker"),
-            Err(NameError::Unqualified)
-        );
-        assert_eq!(
+            Err(Error::Unqualified)
+        ));
+        assert!(matches!(
             RuleId::parse_qualified("rosie/a/b"),
-            Err(NameError::BadChar('/'))
-        );
-        assert_eq!(
+            Err(Error::BadChar('/'))
+        ));
+        assert!(matches!(
             RuleId::parse_qualified("my pack/x"),
-            Err(NameError::BadChar(' '))
-        );
+            Err(Error::BadChar(' '))
+        ));
     }
 
     fn pattern(text: &str) -> RulePattern {
@@ -325,18 +303,21 @@ mod tests {
 
     #[test]
     fn refuses_a_malformed_pattern() {
-        assert_eq!(RulePattern::parse("a/b/c"), Err(NameError::PatternShape));
-        assert_eq!(
+        assert!(matches!(
+            RulePattern::parse("a/b/c"),
+            Err(Error::PatternShape)
+        ));
+        assert!(matches!(
             RulePattern::parse(""),
-            Err(NameError::Pattern(glob::Error::Empty))
-        );
-        assert_eq!(
+            Err(Error::Pattern(glob::Error::Empty))
+        ));
+        assert!(matches!(
             RulePattern::parse("rosie/"),
-            Err(NameError::Pattern(glob::Error::Empty))
-        );
+            Err(Error::Pattern(glob::Error::Empty))
+        ));
         assert!(matches!(
             RulePattern::parse("py[c]*"),
-            Err(NameError::Pattern(glob::Error::Unsupported(..)))
+            Err(Error::Pattern(glob::Error::Unsupported(..)))
         ));
     }
 }

@@ -94,13 +94,13 @@ pub enum Error {
 }
 
 /// Why an entry of the packs folder is not a pack (`docs/spec/rules.md#packs`).
-#[derive(Debug, Clone, PartialEq, Eq, Error)]
+#[derive(Debug, Error)]
 pub enum Stray {
     #[error("its name is not UTF-8")]
     NotUtf8,
 
     #[error("its name is not a valid pack name: {0}")]
-    BadName(rules::NameError),
+    BadName(rules::Error),
 
     #[error("the pack name `user` is reserved for your own rules")]
     ReservedName,

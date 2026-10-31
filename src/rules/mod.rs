@@ -10,10 +10,10 @@ mod parse;
 mod rule;
 mod set;
 
-pub use error::{Error, Problem};
+pub use error::Error;
 pub use layers::{PackFolder, RuleLayers};
 pub use lua::LuaSandbox;
-pub use name::{Name, NameError, PackName, RuleId, RulePattern};
+pub use name::{Name, PackName, RuleId, RulePattern};
 pub use pack::load_pack;
 pub use rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Rule, Shape,

@@ -7,7 +7,7 @@ use std::path::Path;
 use mlua::Lua;
 use serde::Deserialize;
 
-use super::error::{Error, Problem};
+use super::error::Error;
 use super::lua::compile;
 use super::rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape,
@@ -36,7 +36,7 @@ pub(super) fn parse_file(bytes: &[u8], file: &Path, lua: &Lua) -> Result<Vec<Par
             Err(problem) => Err(Error::Rule {
                 file: file.into(),
                 rule: key,
-                problem,
+                problem: Box::new(problem),
             }),
         })
         .collect()
@@ -97,15 +97,15 @@ enum Strategy {
 }
 
 impl Strategy {
-    fn parse(text: &str) -> Result<Strategy, Problem> {
+    fn parse(text: &str) -> Result<Strategy, Error> {
         match text {
-            "" => Err(Problem::MissingStrategy),
+            "" => Err(Error::MissingStrategy),
             "name" => Ok(Strategy::Name),
             "marker" => Ok(Strategy::Marker),
             "lua" => Ok(Strategy::Lua),
             "path" => Ok(Strategy::Path),
             "tool" => Ok(Strategy::Tool),
-            other => Err(Problem::UnknownStrategy(other.into())),
+            other => Err(Error::UnknownStrategy(other.into())),
         }
     }
 
@@ -130,20 +130,20 @@ impl Strategy {
     }
 }
 
-fn parse_rule(key: &str, value: toml::Value, lua: &Lua) -> Result<Shape, Problem> {
+fn parse_rule(key: &str, value: toml::Value, lua: &Lua) -> Result<Shape, Error> {
     let toml::Value::Table(table) = value else {
-        return Err(Problem::NotATable);
+        return Err(Error::NotATable);
     };
     let raw: RawRule = toml::Value::Table(table)
         .try_into()
-        .map_err(|error| Problem::Invalid(Box::new(error)))?;
+        .map_err(|error| Error::Invalid(Box::new(error)))?;
     let strategy = Strategy::parse(&raw.strategy)?;
     let foreign = raw
         .present_fields()
         .into_iter()
         .find(|&(field, present)| present && !strategy.fields().contains(&field));
     if let Some((field, _)) = foreign {
-        return Err(Problem::FieldNotAllowed {
+        return Err(Error::FieldNotAllowed {
             field: field.into(),
             strategy: strategy.label(),
         });
@@ -160,7 +160,7 @@ fn parse_rule(key: &str, value: toml::Value, lua: &Lua) -> Result<Shape, Problem
 
 // strategies
 
-fn folder(raw: &RawRule, detection: Detection) -> Result<Shape, Problem> {
+fn folder(raw: &RawRule, detection: Detection) -> Result<Shape, Error> {
     let normal = raw
         .target
         .as_deref()
@@ -172,11 +172,11 @@ fn folder(raw: &RawRule, detection: Detection) -> Result<Shape, Problem> {
         .map(|text| folder_name("target_aggressive", text))
         .transpose()?;
     let target = Twin::from_parts(normal, aggressive)
-        .ok_or(Problem::Missing("`target` or `target_aggressive`"))?;
+        .ok_or(Error::Missing("`target` or `target_aggressive`"))?;
     Ok(Shape::Folder(FolderRule { target, detection }))
 }
 
-fn markers(raw: &RawRule) -> Result<Markers, Problem> {
+fn markers(raw: &RawRule) -> Result<Markers, Error> {
     let sibling = raw
         .marker
         .as_deref()
@@ -187,22 +187,22 @@ fn markers(raw: &RawRule) -> Result<Markers, Problem> {
         .as_deref()
         .map(|patterns| globs("inside", patterns))
         .transpose()?;
-    Markers::from_parts(sibling, inside).ok_or(Problem::Missing("`marker` or `inside`"))
+    Markers::from_parts(sibling, inside).ok_or(Error::Missing("`marker` or `inside`"))
 }
 
-fn lua_code(key: &str, raw: &RawRule, lua: &Lua) -> Result<LuaCode, Problem> {
+fn lua_code(key: &str, raw: &RawRule, lua: &Lua) -> Result<LuaCode, Error> {
     let code = match (&raw.expr, &raw.script) {
         (Some(expr), None) => LuaCode::Expr(expr.as_str().into()),
         (None, Some(script)) => LuaCode::Script(script.as_str().into()),
-        (Some(_), Some(_)) => return Err(Problem::BothExprAndScript),
-        (None, None) => return Err(Problem::Missing("one of `expr` or `script`")),
+        (Some(_), Some(_)) => return Err(Error::BothExprAndScript),
+        (None, None) => return Err(Error::Missing("one of `expr` or `script`")),
     };
 
-    compile(lua, key, &code).map_err(|error| Problem::LuaSyntax(error.to_string()))?;
+    compile(lua, key, &code).map_err(|error| Error::LuaSyntax(error.to_string()))?;
     Ok(code)
 }
 
-fn paths(raw: &RawRule) -> Result<Shape, Problem> {
+fn paths(raw: &RawRule) -> Result<Shape, Error> {
     let normal = raw
         .paths
         .as_deref()
@@ -214,11 +214,11 @@ fn paths(raw: &RawRule) -> Result<Shape, Problem> {
         .map(|texts| fixed_paths("paths_aggressive", texts))
         .transpose()?;
     let paths = Twin::from_parts(normal, aggressive)
-        .ok_or(Problem::Missing("`paths` or `paths_aggressive`"))?;
+        .ok_or(Error::Missing("`paths` or `paths_aggressive`"))?;
     Ok(Shape::Paths(paths))
 }
 
-fn tool(raw: &RawRule) -> Result<Shape, Problem> {
+fn tool(raw: &RawRule) -> Result<Shape, Error> {
     let command = |field, text: &String| {
         let shell = raw
             .shell
@@ -226,7 +226,7 @@ fn tool(raw: &RawRule) -> Result<Shape, Problem> {
             .unwrap_or_else(|| ShellCommand::DEFAULT_SHELL.to_owned());
         let env = raw.env.clone().unwrap_or_default();
         ShellCommand::new(shell, text.clone(), env)
-            .map_err(|source| Problem::BadCommand { field, source })
+            .map_err(|source| Error::BadCommand { field, source })
     };
 
     let normal = raw
@@ -239,33 +239,33 @@ fn tool(raw: &RawRule) -> Result<Shape, Problem> {
         .as_ref()
         .map(|text| command("cmd_aggressive", text))
         .transpose()?;
-    let cmd = Twin::from_parts(normal, aggressive)
-        .ok_or(Problem::Missing("`cmd` or `cmd_aggressive`"))?;
+    let cmd =
+        Twin::from_parts(normal, aggressive).ok_or(Error::Missing("`cmd` or `cmd_aggressive`"))?;
     Ok(Shape::Tool(cmd))
 }
 
 // fields
 
-fn folder_name(field: &'static str, text: &str) -> Result<FolderName, Problem> {
-    FolderName::parse(text).ok_or_else(|| Problem::BadFolderName {
+fn folder_name(field: &'static str, text: &str) -> Result<FolderName, Error> {
+    FolderName::parse(text).ok_or_else(|| Error::BadFolderName {
         field,
         value: text.into(),
     })
 }
 
-fn globs(field: &'static str, patterns: &[String]) -> Result<Globs, Problem> {
+fn globs(field: &'static str, patterns: &[String]) -> Result<Globs, Error> {
     let parsed = patterns
         .iter()
-        .map(|pattern| Glob::parse(pattern).map_err(|source| Problem::BadGlob { field, source }))
+        .map(|pattern| Glob::parse(pattern).map_err(|source| Error::BadGlob { field, source }))
         .collect::<Result<Vec<_>, _>>()?;
-    Globs::new(parsed).ok_or(Problem::EmptyList(field))
+    Globs::new(parsed).ok_or(Error::EmptyList(field))
 }
 
-fn fixed_paths(field: &'static str, texts: &[String]) -> Result<FixedPaths, Problem> {
+fn fixed_paths(field: &'static str, texts: &[String]) -> Result<FixedPaths, Error> {
     let parsed = texts
         .iter()
         .map(|text| {
-            FixedPath::parse(text).ok_or_else(|| Problem::BadPath {
+            FixedPath::parse(text).ok_or_else(|| Error::BadPath {
                 field,
                 value: text.clone(),
             })
@@ -276,12 +276,12 @@ fn fixed_paths(field: &'static str, texts: &[String]) -> Result<FixedPaths, Prob
         .enumerate()
         .find_map(|(index, path)| parsed[..index].contains(path).then(|| texts[index].clone()))
     {
-        return Err(Problem::DuplicatePath {
+        return Err(Error::DuplicatePath {
             field,
             value: repeated,
         });
     }
-    FixedPaths::new(parsed).ok_or(Problem::EmptyList(field))
+    FixedPaths::new(parsed).ok_or(Error::EmptyList(field))
 }
 
 #[cfg(test)]
@@ -303,11 +303,11 @@ mod tests {
     }
 
     /// The problem with the one rule in `text`, which must be named `r`.
-    fn problem(text: &str) -> Problem {
+    fn problem(text: &str) -> Error {
         match parse(text) {
             Err(Error::Rule { rule, problem, .. }) => {
                 assert_eq!(rule, "r");
-                problem
+                *problem
             }
             Err(other) => panic!("expected a rule problem, got {other}"),
             Ok(_) => panic!("expected a rule problem, got a valid rule"),
@@ -493,15 +493,15 @@ mod tests {
         );
         let neither = problem("[rules.r]\nstrategy = \"lua\"\ntarget = \"x\"");
 
-        assert!(matches!(both, Problem::BothExprAndScript));
-        assert!(matches!(neither, Problem::Missing(_)));
+        assert!(matches!(both, Error::BothExprAndScript));
+        assert!(matches!(neither, Error::Missing(_)));
     }
 
     #[test]
     fn refuses_lua_that_does_not_compile() {
         let found = problem("[rules.r]\nstrategy = \"lua\"\ntarget = \"x\"\nexpr = \"exists(\"");
 
-        let Problem::LuaSyntax(message) = found else {
+        let Error::LuaSyntax(message) = found else {
             panic!("expected a Lua syntax problem, got {found}");
         };
         assert!(message.contains("error: r:"), "{message}");
@@ -513,7 +513,7 @@ mod tests {
         let found =
             problem("[rules.r]\nstrategy = \"lua\"\ntarget = \"x\"\nscript = \"\\u001bLua\"");
 
-        let Problem::LuaSyntax(message) = found else {
+        let Error::LuaSyntax(message) = found else {
             panic!("expected a Lua syntax problem, got {found}");
         };
         assert!(
@@ -546,7 +546,7 @@ mod tests {
             let text = format!("[rules.r]\nstrategy = \"tool\"\n{fields}");
             let found = problem(&text);
             assert!(
-                matches!(found, Problem::BadCommand { field, .. } if field == want),
+                matches!(found, Error::BadCommand { field, .. } if field == want),
                 "{text}: {found}"
             );
         }
@@ -610,7 +610,7 @@ mod tests {
         for (text, field, strategy) in cases {
             let found = problem(text);
             assert!(
-                matches!(&found, Problem::FieldNotAllowed { field: f, strategy: s } if f == field && *s == strategy),
+                matches!(&found, Error::FieldNotAllowed { field: f, strategy: s } if f == field && *s == strategy),
                 "{text}: got {found}"
             );
         }
@@ -620,50 +620,50 @@ mod tests {
     fn refuses_missing_and_unknown_strategies_and_fields() {
         assert!(matches!(
             problem("[rules.r]\ntarget = \"x\""),
-            Problem::MissingStrategy
+            Error::MissingStrategy
         ));
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"regex\"\ntarget = \"x\""),
-            Problem::UnknownStrategy(s) if s == "regex"
+            Error::UnknownStrategy(s) if s == "regex"
         ));
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"name\"\ntargte = \"x\""),
-            Problem::Invalid(_)
+            Error::Invalid(_)
         ));
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"name\"\ntarget = [\"x\"]"),
-            Problem::Invalid(_)
+            Error::Invalid(_)
         ));
-        assert!(matches!(problem("[rules]\nr = 3"), Problem::NotATable));
+        assert!(matches!(problem("[rules]\nr = 3"), Error::NotATable));
     }
 
     #[test]
     fn refuses_rules_with_nothing_to_clean() {
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"name\""),
-            Problem::Missing(_)
+            Error::Missing(_)
         ));
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"marker\"\ntarget = \"x\""),
-            Problem::Missing(_)
+            Error::Missing(_)
         ));
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"path\""),
-            Problem::Missing(_)
+            Error::Missing(_)
         ));
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"tool\""),
-            Problem::Missing(_)
+            Error::Missing(_)
         ));
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"path\"\npaths = []"),
-            Problem::EmptyList("paths")
+            Error::EmptyList("paths")
         ));
         assert!(matches!(
             problem(
                 "[rules.r]\nstrategy = \"marker\"\ntarget = \"x\"\nmarker = []\ninside = [\"a\"]"
             ),
-            Problem::EmptyList("marker")
+            Error::EmptyList("marker")
         ));
     }
 
@@ -672,17 +672,17 @@ mod tests {
         for target in ["\"\"", "\"a/b\"", "\".\"", "\"..\"", "\"a\\u0000b\""] {
             let text = format!("[rules.r]\nstrategy = \"name\"\ntarget = {target}");
             assert!(
-                matches!(problem(&text), Problem::BadFolderName { .. }),
+                matches!(problem(&text), Error::BadFolderName { .. }),
                 "{target}"
             );
         }
         for path in ["relative/x", "~user/x", ""] {
             let text = format!("[rules.r]\nstrategy = \"path\"\npaths = [{path:?}]");
-            assert!(matches!(problem(&text), Problem::BadPath { .. }), "{path}");
+            assert!(matches!(problem(&text), Error::BadPath { .. }), "{path}");
         }
         assert!(matches!(
             problem("[rules.r]\nstrategy = \"marker\"\ntarget = \"x\"\nmarker = [\"a/b\"]"),
-            Problem::BadGlob {
+            Error::BadGlob {
                 field: "marker",
                 ..
             }
@@ -710,7 +710,7 @@ mod tests {
     fn refuses_a_path_repeated_within_one_list() {
         let text = "[rules.r]\nstrategy = \"path\"\npaths = [\"~/a\", \"~/a\"]";
         assert!(
-            matches!(problem(text), Problem::DuplicatePath { field: "paths", .. }),
+            matches!(problem(text), Error::DuplicatePath { field: "paths", .. }),
             "{}",
             problem(text)
         );
@@ -719,7 +719,7 @@ mod tests {
         assert!(
             matches!(
                 problem(text),
-                Problem::DuplicatePath {
+                Error::DuplicatePath {
                     field: "paths_aggressive",
                     ..
                 }

@@ -5,7 +5,7 @@
 use std::collections::BTreeMap;
 use std::path::Path;
 
-use super::error::{Error, Problem};
+use super::error::Error;
 use super::lua::new_parser_state;
 use super::name::{Name, PackName, RuleId};
 use super::parse::{Parsed, parse_file};
@@ -36,13 +36,13 @@ pub fn load_pack<'a>(
 fn pack_rule(pack: &PackName, parsed: Parsed, file: &Path) -> Result<Rule, Error> {
     let rule = Name::parse(&parsed.key).map_err(|error| {
         let problem = match parsed.key.contains('/') {
-            true => Problem::OverrideInPack,
-            false => Problem::Name(error),
+            true => Error::OverrideInPack,
+            false => error,
         };
         Error::Rule {
             file: file.into(),
             rule: parsed.key.clone(),
-            problem,
+            problem: Box::new(problem),
         }
     })?;
 

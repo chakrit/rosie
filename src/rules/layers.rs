@@ -7,9 +7,9 @@
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
 
-use super::error::{Error, Problem};
+use super::error::Error;
 use super::lua::new_parser_state;
-use super::name::{Name, NameError, PackName, RuleId};
+use super::name::{Name, PackName, RuleId};
 use super::pack::load_pack;
 use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
@@ -129,10 +129,10 @@ fn user_rule_identity(
     key: &str,
     file: &Path,
 ) -> Result<(RuleId, Source), Error> {
-    let name_problem = |error: NameError| Error::Rule {
+    let name_problem = |error: Error| Error::Rule {
         file: file.into(),
         rule: key.to_owned(),
-        problem: Problem::Name(error),
+        problem: Box::new(error),
     };
 
     if !key.contains('/') {

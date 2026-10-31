@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::name::{NameError, RuleId, RulePattern};
+use super::name::{MAX_CHARS, RuleId, RulePattern};
 use crate::fs::{self, InvalidCommand};
 use crate::glob;
 
@@ -24,7 +24,7 @@ pub enum Error {
         /// The rule's key as written in the file.
         rule: String,
         #[source]
-        problem: Problem,
+        problem: Box<Error>,
     },
 
     #[error(
@@ -79,14 +79,30 @@ pub enum Error {
 
     #[error("no rule matches `{pattern}`")]
     NoRuleMatches { pattern: RulePattern },
-}
 
-/// Why one rule table is invalid.
-#[derive(Debug, Error)]
-pub enum Problem {
-    #[error("{0}")]
-    Name(#[from] NameError),
+    // names
+    #[error("a name cannot be empty")]
+    EmptyName,
 
+    #[error("a name must start with an ASCII letter, not {0:?}")]
+    BadFirst(char),
+
+    #[error("a name may hold only ASCII letters, digits, `_`, and `-`, not {0:?}")]
+    BadChar(char),
+
+    #[error("a name is at most {MAX_CHARS} characters, not {0}")]
+    TooLong(usize),
+
+    #[error("a qualified name is `pack/rule`")]
+    Unqualified,
+
+    #[error("a rule pattern is `rule` or `pack/rule`")]
+    PatternShape,
+
+    #[error(transparent)]
+    Pattern(#[from] glob::Error),
+
+    // one rule table
     #[error("an override by qualified name belongs in the user rules, not in a pack")]
     OverrideInPack,
 

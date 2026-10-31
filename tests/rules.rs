@@ -9,7 +9,7 @@ use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, Cleanup, DirEntry, FileKind, FsContext, FsOp, Op, Paths, Roots};
 use rosie::packs::{SettlePacks, Store};
 use rosie::rules::{
-    Candidate, Error, LuaSandbox, Problem, RuleId, RuleLayers, RulePattern, RuleSet, Shape, Source,
+    Candidate, Error, LuaSandbox, RuleId, RuleLayers, RulePattern, RuleSet, Shape, Source,
 };
 use rosie::tier::{Tier, Twin};
 
@@ -236,7 +236,7 @@ fn refuses_a_pack_rule_that_overrides_another_pack() {
     let result = load(&fake);
 
     assert!(
-        matches!(&result, Err(Error::Rule { rule, problem: Problem::OverrideInPack, .. }) if rule == "rosie/docker"),
+        matches!(&result, Err(Error::Rule { rule, problem, .. }) if rule == "rosie/docker" && matches!(**problem, Error::OverrideInPack)),
         "{:?}",
         result.err()
     );
@@ -321,7 +321,7 @@ fn refuses_invalid_rule_names() {
 
     assert!(matches!(
         load(&bad_rule),
-        Err(Error::Rule { rule, problem: Problem::Name(_), .. }) if rule == "my rule"
+        Err(Error::Rule { rule, problem, .. }) if rule == "my rule" && matches!(*problem, Error::BadChar(' '))
     ));
 }
 

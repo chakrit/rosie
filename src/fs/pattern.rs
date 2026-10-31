@@ -130,9 +130,9 @@ impl<M: NameMatch> PathPattern<M> {
         self.expand(ctx, &base, base_meta.kind)
     }
 
-    /// The entries the pattern names, sorted by path, below `base`: where the caller
-    /// found [`PathPattern::base`] on disk, of kind `base_kind`. Symlinks below it are
-    /// neither matched nor descended.
+    /// The entries the pattern names, sorted by path, from `base`: where the caller found
+    /// [`PathPattern::base`] on disk, of kind `base_kind`. A `..` after a wildcard may name
+    /// `base` or a folder above it. Symlinks below it are neither matched nor descended.
     pub fn expand<B: Backend>(
         &self,
         ctx: &FsContext<B>,

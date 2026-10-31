@@ -21,8 +21,7 @@ pub enum Error {
     #[error("no command or folder named {}", .word.display())]
     UnknownWord { word: PathBuf, place: Place },
 
-    /// `rosie clean` with no terminal to confirm on
-    /// (`docs/spec/plan.md#interactive-confirmation`).
+    /// `rosie clean` with no terminal to confirm on (`docs/spec/cli.md#scan-and-clean`).
     #[error("rosie clean needs a terminal")]
     NeedsTerminal,
 

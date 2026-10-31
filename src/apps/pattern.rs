@@ -12,7 +12,7 @@ use crate::wildcard;
 /// against the full file name; any other against the file name without its final `.app`.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Pattern {
-    pattern: wildcard::Pattern,
+    name: wildcard::Pattern,
     against: Against,
 }
 
@@ -33,7 +33,7 @@ impl Pattern {
         };
 
         Ok(Pattern {
-            pattern: wildcard::Pattern::parse(text)?,
+            name: wildcard::Pattern::parse(text)?,
             against,
         })
     }
@@ -43,13 +43,13 @@ impl Pattern {
             Against::FileName => bundle.file_name().unwrap_or_default().to_string_lossy(),
             Against::Stem => bundle_stem(bundle).into(),
         };
-        self.pattern.matches(&name)
+        self.name.matches(&name)
     }
 }
 
 impl fmt::Display for Pattern {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.pattern.fmt(f)
+        self.name.fmt(f)
     }
 }
 

@@ -31,7 +31,9 @@ pub fn status_hints(status: &Status, shown_path: &Path) -> Vec<Hint> {
     match status {
         Status::Skip(SkipReason::Aggressive) => vec![aggressive_hint()],
         Status::Skip(SkipReason::OutsideRoots) => Hint::allow_in_roots(shown_path),
-        Status::Clean | Status::Skip(SkipReason::Chosen) | Status::Conflict(_) => Vec::new(),
+        Status::Clean
+        | Status::Skip(SkipReason::OtherApp | SkipReason::Chosen)
+        | Status::Conflict(_) => Vec::new(),
     }
 }
 

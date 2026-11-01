@@ -433,27 +433,30 @@ fn a_location_rosie_may_not_list_is_a_walk_skip() {
 // other copies of the app
 
 #[test]
-fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_as_keep() {
-    let fake = FakeBackend::new();
-    bar_app(&fake);
-    let beta = "/Applications/Bar Beta.app";
-    install_app(&fake, beta, "com.foo.Bar", Some("Bar"));
-    fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
-    receipts(&fake, "com.foo.Bar.pkg\n");
+fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_skipped_even_with_aggressive() {
+    for aggressive in [AggressiveItems::Skip, AggressiveItems::Clean] {
+        let fake = FakeBackend::new();
+        bar_app(&fake);
+        let beta = "/Applications/Bar Beta.app";
+        install_app(&fake, beta, "com.foo.Bar", Some("Bar"));
+        fake.add_file(lib("Preferences/com.foo.Bar.plist"), "x");
+        receipts(&fake, "com.foo.Bar.pkg\n");
 
-    let scanned = try_app(&fake, beta, &ALL_ROOTS, AggressiveItems::Skip).expect("app scan");
+        let scanned = try_app(&fake, beta, &ALL_ROOTS, aggressive).expect("app scan");
 
-    assert_eq!(
-        deletes(&scanned),
-        [
-            (beta.to_owned(), Status::Clean),
-            (
-                lib("Preferences/com.foo.Bar.plist"),
-                Status::Skip(SkipReason::Aggressive)
-            ),
-        ]
-    );
-    assert!(!scanned.plan.receipts()[0].selection.is_clean());
+        assert_eq!(
+            deletes(&scanned),
+            [
+                (beta.to_owned(), Status::Clean),
+                (
+                    lib("Preferences/com.foo.Bar.plist"),
+                    Status::Skip(SkipReason::OtherApp)
+                ),
+            ],
+            "{aggressive:?}"
+        );
+        assert!(!scanned.plan.receipts()[0].selection.is_clean());
+    }
 }
 
 // app: launch folders, bundle contents, other installed apps
@@ -497,7 +500,13 @@ fn a_bundle_folder_rosie_may_not_list_for_reports_fails_the_scan() {
 }
 
 #[test]
-fn matches_of_a_longer_installed_bundle_id_are_aggressive() {
+fn matches_of_a_longer_installed_bundle_id_are_skipped_even_with_aggressive() {
+    for aggressive in [AggressiveItems::Skip, AggressiveItems::Clean] {
+        longer_installed_bundle_id_matches(aggressive);
+    }
+}
+
+fn longer_installed_bundle_id_matches(aggressive: AggressiveItems) {
     let fake = FakeBackend::new();
     bar_app(&fake);
     install_app(
@@ -513,7 +522,7 @@ fn matches_of_a_longer_installed_bundle_id_are_aggressive() {
     fake.add_dir(lib("Group Containers/ABCDE12345.com.foo.Bar.canary"));
     receipts(&fake, "com.foo.Bar.pkg\ncom.foo.Bar.canary.pkg\n");
 
-    let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
+    let scanned = scanned_app(&fake, &ALL_ROOTS, aggressive);
 
     assert_eq!(
         deletes(&scanned),
@@ -521,19 +530,20 @@ fn matches_of_a_longer_installed_bundle_id_are_aggressive() {
             (BAR.to_owned(), Status::Clean),
             (
                 lib("Caches/com.foo.Bar.canary"),
-                Status::Skip(SkipReason::Aggressive)
+                Status::Skip(SkipReason::OtherApp)
             ),
             (lib("Caches/com.foo.Bar.canaryish"), Status::Clean),
             (
                 lib("Group Containers/ABCDE12345.com.foo.Bar.canary"),
-                Status::Skip(SkipReason::Aggressive)
+                Status::Skip(SkipReason::OtherApp)
             ),
             (
                 lib("Preferences/com.foo.Bar.canary.plist"),
-                Status::Skip(SkipReason::Aggressive)
+                Status::Skip(SkipReason::OtherApp)
             ),
             (lib("Preferences/com.foo.Bar.plist"), Status::Clean),
-        ]
+        ],
+        "{aggressive:?}"
     );
     let receipts: Vec<(&str, bool)> = scanned
         .plan

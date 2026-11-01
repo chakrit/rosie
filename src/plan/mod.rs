@@ -27,7 +27,7 @@ use crate::hint::{self, Hint};
 
 use deletes::Deletes;
 
-pub use builder::{AggressiveItems, Built, EntryTiers, PathMatch, PlanBuilder, Reach};
+pub use builder::{AggressiveItems, Built, Claim, EntryTiers, PathMatch, PlanBuilder, Reach};
 pub use conflict::Disagreement;
 pub use error::{EntryProblem, Error};
 pub use size::Size;
@@ -125,21 +125,29 @@ impl Plan {
     }
 }
 
-/// What a `skip` entry's comment says: `skip: aggressive`, or `skip: outside the roots`
-/// with the hints that would let it in on the lines below.
+/// What a `skip` entry's comment says: [`skip_words`], with the hints that would let it
+/// in on the lines below when it is outside the roots.
 fn skip_note(reason: SkipReason, path: &Path) -> String {
     match reason {
-        SkipReason::Aggressive => SKIP_AGGRESSIVE.to_owned(),
         SkipReason::OutsideRoots => {
             let hints = hint::hints_text(&Hint::allow_in_roots(path));
-            format!("skip: outside the roots\n{hints}")
+            format!("{}\n{hints}", skip_words(reason))
         }
-        SkipReason::Chosen => "skip".to_owned(),
+        SkipReason::Aggressive | SkipReason::OtherApp | SkipReason::Chosen => {
+            skip_words(reason).to_owned()
+        }
     }
 }
 
-/// What the comment of an entry skipped as aggressive says.
-const SKIP_AGGRESSIVE: &str = "skip: aggressive";
+/// What the comment of an entry skipped for `reason` says: `skip: aggressive`.
+fn skip_words(reason: SkipReason) -> &'static str {
+    match reason {
+        SkipReason::Aggressive => "skip: aggressive",
+        SkipReason::OtherApp => "skip: another app's",
+        SkipReason::OutsideRoots => "skip: outside the roots",
+        SkipReason::Chosen => "skip",
+    }
+}
 
 /// `text` as comment lines, so no line of it can run or parse as TOML.
 fn comment(text: &str) -> String {
@@ -322,6 +330,9 @@ pub struct Tool {
 }
 
 impl Tool {
+    /// Why a scan skips a tool: it skips one only as aggressive.
+    pub const SKIPPED_AS: SkipReason = SkipReason::Aggressive;
+
     /// Whether this tool is `clean` and belongs to the part acting as `run_as`: tools run
     /// as the user.
     fn runs_in(&self, run_as: RunAs) -> bool {
@@ -337,6 +348,9 @@ pub struct Receipt {
 }
 
 impl Receipt {
+    /// Why a scan skips a receipt: it skips one only as another app's.
+    pub const SKIPPED_AS: SkipReason = SkipReason::OtherApp;
+
     /// The command as a run executes it: the [`SystemTool`] by its absolute path, so no
     /// `PATH` lookup can put another program in its place.
     pub fn absolute_argv(&self) -> SystemArgv {
@@ -488,6 +502,9 @@ impl Status {
 pub enum SkipReason {
     /// An aggressive item, scanned without `--aggressive`.
     Aggressive,
+    /// Another installed app claims it too, or something inside it
+    /// (`docs/spec/app.md#rosie-clean-app-xapp`).
+    OtherApp,
     /// Outside the `roots` allowlist.
     OutsideRoots,
     /// Answered `skip` by the user, at a prompt, with `--conflicts`, or in a plan file.
@@ -521,8 +538,8 @@ impl StatusKind {
     }
 }
 
-/// Whether a command entry runs. Commands are outside the roots gate and never conflict,
-/// so a scan skips one only as aggressive.
+/// Whether a command entry runs. Commands are outside the roots gate and never conflict;
+/// a scan skips each kind for one reason, its `SKIPPED_AS`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Selection {
     Clean,

@@ -24,6 +24,8 @@ is a plan like any other ([plan.md](plan.md)).
 - A name-only match uses `CFBundleName`.
 - A match claimed by an equal-or-longer installed bundle ID is `skip` (for example
   Chrome vs Chrome Canary).
+- `--aggressive` does not make a claimed match `clean`.
+- A claimed match, and a folder holding one, is `skip (another app's)`. *(agent-inferred)*
 - `group.<id>` containers are not matched.
 - An app whose bundle ID cannot be read is a report entry.
 - `launchctl bootout` uses the domain `gui/<uid>` for a user LaunchAgent and `system`

@@ -168,8 +168,9 @@ no rule   ~/Downloads/missing
 - A conflict found by a `tree` or `caches` walk is at one path, so neither side names an
   `on <path>`, and a conflict nested in another, as in the example's `~/src/api/target`
   and `~/src/api/target/debug` lines, does not arise. *(agent-inferred)*
-- A summary's counts list `conflict`, `clean`, `skip (aggressive)`, `skip (outside the
-  roots)`, and `skip`, in that order, leaving out any that are zero.
+- A summary's counts list `conflict`, `clean`, `skip (aggressive)`, `skip (another
+  app's)`, `skip (outside the roots)`, and `skip`, in that order, leaving out any that
+  are zero.
   *(agent-inferred)*
 - A folder with no plan entry inside but items refused or skipped inside is `in use`
   when any item runs, else `skipped`: `contains N in use, M skipped; see rosie scan tree

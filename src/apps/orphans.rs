@@ -8,6 +8,7 @@ use super::locations::leftover_locations;
 use super::matching::reads_as_bundle_id;
 use super::search::Search;
 use crate::fs::{Backend, FsContext};
+use crate::plan::Claim;
 use crate::scan::{Progress, Scan, Settings};
 use crate::tier::Tier;
 
@@ -47,7 +48,12 @@ where
             (reads_as_id && !claims.claim(name)).then_some(())
         };
         for (candidate, ()) in search.candidates(&location, orphaned)? {
-            search.add(candidate, location.holds, RULE, Tier::Aggressive)?;
+            search.add(
+                candidate,
+                location.holds,
+                RULE,
+                (Tier::Aggressive, Claim::Sole),
+            )?;
         }
     }
     search.finish(progress)

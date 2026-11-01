@@ -16,7 +16,9 @@
 
 use std::path::Path;
 
-use super::{Error, Plan, SKIP_AGGRESSIVE, Selection, SkipReason, Status, comment, skip_note};
+use super::{
+    Error, Plan, Receipt, Selection, SkipReason, Status, Tool, comment, skip_note, skip_words,
+};
 use crate::fs::{Argv, SystemTool};
 use crate::shell;
 
@@ -85,12 +87,12 @@ impl Plan {
         }
         for tool in &self.tools {
             let note = format!("size unknown · {}", shell::comment_text(&tool.rule));
-            let line = Line::pathless(tool.selection, note);
+            let line = Line::pathless(tool.selection, Tool::SKIPPED_AS, note);
             script.push_str(&line.render(&command_line(&tool.command.argv())));
         }
         for receipt in &self.receipts {
             let note = "size unknown · forget receipt".to_owned();
-            let line = Line::pathless(receipt.selection, note);
+            let line = Line::pathless(receipt.selection, Receipt::SKIPPED_AS, note);
             let argv = receipt.argv_for(programs.pkgutil);
             script.push_str(&line.render(&command_line(&argv)));
         }
@@ -127,17 +129,17 @@ impl Line {
         Line { status, note }
     }
 
-    /// A command entry, which the roots gate does not cover; a scan skips one only as
-    /// aggressive.
-    fn pathless(selection: Selection, note: String) -> Self {
+    /// A command entry, which the roots gate does not cover, and which a scan skips only
+    /// as `skipped`.
+    fn pathless(selection: Selection, skipped: SkipReason, note: String) -> Self {
         match selection {
             Selection::Clean => Line {
                 status: Status::Clean,
                 note,
             },
             Selection::Skip => Line {
-                status: Status::Skip(SkipReason::Aggressive),
-                note: format!("{note}; {SKIP_AGGRESSIVE}"),
+                status: Status::Skip(skipped),
+                note: format!("{note}; {}", skip_words(skipped)),
             },
         }
     }
@@ -195,8 +197,8 @@ mod tests {
     use super::*;
     use crate::fs::ShellCommand;
     use crate::plan::{
-        AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
-        Size, tool_command,
+        AggressiveItems, Claim, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report,
+        RunAs, Size, tool_command,
     };
     use crate::tier::{Tier, Twin};
 
@@ -209,6 +211,7 @@ mod tests {
             size: Size::bytes(2_000_000),
             run_as: RunAs::User,
             reach,
+            claim: Claim::Sole,
             rule: "rosie/node".to_owned(),
             tier,
         }
@@ -243,7 +246,7 @@ mod tests {
             &Twin::Aggressive(tool_command("tool clean --dir=/tmp/x$y")),
         );
         builder
-            .add_receipt("com.x.pkg", Tier::Normal)
+            .add_receipt("com.x.pkg", Claim::Sole)
             .expect("valid");
         builder.add_report(
             Report::new(

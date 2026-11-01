@@ -179,15 +179,7 @@ fn delete_item(delete: &Delete, shown: &Shown) -> Item {
             delete.rules.clone()
         }
     };
-    let status = match &delete.status {
-        Status::Clean => None,
-        Status::Skip(SkipReason::Aggressive) => Some((Tone::Calm, "skip (aggressive)".to_owned())),
-        Status::Skip(SkipReason::OutsideRoots) => {
-            Some((Tone::Alarm, "skip (outside the roots)".to_owned()))
-        }
-        Status::Skip(SkipReason::Chosen) => Some((Tone::Calm, "skip".to_owned())),
-        Status::Conflict(_) => Some((Tone::Caution, "conflict".to_owned())),
-    };
+    let status = status_word(&delete.status);
     let unloads = delete
         .bootouts
         .iter()
@@ -209,6 +201,19 @@ fn delete_item(delete: &Delete, shown: &Shown) -> Item {
         note: Some(note),
         steps: Vec::new(),
     }
+}
+
+/// Why an entry with `status` is not cleaned, as its note says it; nothing when it is.
+fn status_word(status: &Status) -> Option<(Tone, String)> {
+    let (tone, word) = match status {
+        Status::Clean => return None,
+        Status::Skip(SkipReason::Aggressive) => (Tone::Calm, "skip (aggressive)"),
+        Status::Skip(SkipReason::OtherApp) => (Tone::Calm, "skip (another app's)"),
+        Status::Skip(SkipReason::OutsideRoots) => (Tone::Alarm, "skip (outside the roots)"),
+        Status::Skip(SkipReason::Chosen) => (Tone::Calm, "skip"),
+        Status::Conflict(_) => (Tone::Caution, "conflict"),
+    };
+    Some((tone, word.to_owned()))
 }
 
 fn refused_item(refused: &Refused) -> Item {
@@ -258,7 +263,7 @@ fn tool_item(tool: &Tool) -> Item {
         saved: tool.selection == Selection::Clean,
         rules: vec![tool.rule.clone()],
         name: format!("$ {}", tool.command.cmd()),
-        note: Some(selection_note(tool.selection)),
+        note: Some(selection_note(tool.selection, Tool::SKIPPED_AS)),
         steps: Vec::new(),
     }
 }
@@ -269,23 +274,26 @@ fn forget_item(receipt: &Receipt) -> Item {
         saved: receipt.selection == Selection::Clean,
         rules: Vec::new(),
         name: format!("forget package {}", receipt.package.as_str()),
-        note: Some(selection_note(receipt.selection)),
+        note: Some(selection_note(receipt.selection, Receipt::SKIPPED_AS)),
         steps: Vec::new(),
     }
 }
 
 /// A tool command or package forget is `clean` or `skip`; a scan skips one only as
-/// aggressive.
-fn selection_note(selection: Selection) -> Note {
-    let (status, hints) = match selection {
-        Selection::Clean => (None, Vec::new()),
-        Selection::Skip => (
-            Some((Tone::Calm, "skip (aggressive)".to_owned())),
-            vec![aggressive_hint()],
-        ),
+/// `skipped`, and `--aggressive` lifts only an aggressive skip.
+fn selection_note(selection: Selection, skipped: SkipReason) -> Note {
+    let status = match selection {
+        Selection::Clean => Status::Clean,
+        Selection::Skip => Status::Skip(skipped),
+    };
+    let hints = match status {
+        Status::Skip(SkipReason::Aggressive) => vec![aggressive_hint()],
+        Status::Clean
+        | Status::Skip(SkipReason::OtherApp | SkipReason::OutsideRoots | SkipReason::Chosen)
+        | Status::Conflict(_) => Vec::new(),
     };
     Note {
-        status,
+        status: status_word(&status),
         details: Vec::new(),
         hints,
     }
@@ -458,7 +466,7 @@ mod tests {
     use crate::cli::args::TreeArgs;
     use crate::output::ColorChoice;
     use crate::plan::{
-        AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, RunAs,
+        AggressiveItems, Claim, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, RunAs,
     };
     use crate::scan::{Needs, WalkSkip};
     use crate::tier::Tier;
@@ -509,6 +517,7 @@ mod tests {
             size: Size::bytes(bytes),
             run_as: RunAs::User,
             reach: Reach::InRoots,
+            claim: Claim::Sole,
             rule: rule.to_owned(),
             tier,
         }
@@ -700,6 +709,7 @@ steps = ["Remove it"]
                 size: Size::bytes(3_000_000_000),
                 run_as: RunAs::User,
                 reach: Reach::InRoots,
+                claim: Claim::Sole,
                 rule: rule.to_owned(),
                 tier,
             };

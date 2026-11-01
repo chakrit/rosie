@@ -13,7 +13,7 @@ use super::progress::Progress;
 use super::screening::{Admitted, Refused, Screening};
 use super::sizing::{Measure, Sizer};
 use crate::fs::{Backend, FsContext};
-use crate::plan::{ItemKind, PathMatch, Reach, RunAs};
+use crate::plan::{Claim, ItemKind, PathMatch, Reach, RunAs};
 
 /// Takes every target the walk or the fixed paths find, from any worker.
 pub(super) struct Targets<'a, B: Backend, P: Progress> {
@@ -51,6 +51,7 @@ impl Target {
             size: self.size.get(),
             run_as: self.run_as,
             reach: self.reach,
+            claim: Claim::Sole,
             rule: matched.rule.to_string(),
             tier: matched.tier,
         })

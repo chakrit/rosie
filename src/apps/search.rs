@@ -16,7 +16,7 @@ use super::Error;
 use super::listing::{FolderLookup, Listed, find_folder, list_found};
 use super::locations::{Holds, Location};
 use crate::fs::{Backend, FsContext};
-use crate::plan::{AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Report};
+use crate::plan::{AggressiveItems, Claim, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Report};
 use crate::scan::{
     Entry, InFolder, Log, Mounts, Needs, Progress, Scan, Screening, Sizer, WalkSkip,
 };
@@ -50,6 +50,7 @@ struct Marks {
     launch: Option<LaunchDomain>,
     rule: String,
     tier: Tier,
+    claim: Claim,
 }
 
 pub(super) struct Search<'g, B: Backend> {
@@ -135,7 +136,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
         candidate: Candidate,
         holds: Holds,
         rule: &str,
-        tier: Tier,
+        (tier, claim): (Tier, Claim),
     ) -> Result<(), Error> {
         let (entry, kind) = match candidate {
             Candidate::Item { entry, kind } => (entry, kind),
@@ -154,13 +155,14 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
             launch,
             rule: rule.to_owned(),
             tier,
+            claim,
         };
         self.matched.push((entry, marks));
         Ok(())
     }
 
-    pub(super) fn add_receipt(&mut self, package: &str, tier: Tier) -> Result<(), Error> {
-        self.builder.add_receipt(package, tier)?;
+    pub(super) fn add_receipt(&mut self, package: &str, claim: Claim) -> Result<(), Error> {
+        self.builder.add_receipt(package, claim)?;
         Ok(())
     }
 
@@ -209,6 +211,7 @@ impl<'g, B: Backend + Sync> Search<'g, B> {
                 size: size.get(),
                 run_as,
                 reach,
+                claim: marks.claim,
                 rule: marks.rule,
                 tier: marks.tier,
             };

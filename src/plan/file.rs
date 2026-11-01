@@ -16,8 +16,8 @@ use serde::{Deserialize, Serialize};
 
 use super::{
     Bootout, Delete, Deletes, EntryProblem, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
-    Report, RunAs, SKIP_AGGRESSIVE, Selection, Sides, Size, SkipReason, Status, StatusKind, Tool,
-    check_path, comment, skip_note,
+    Report, RunAs, Selection, Sides, Size, SkipReason, Status, StatusKind, Tool, check_path,
+    comment, skip_note, skip_words,
 };
 use crate::fs::ShellCommand;
 
@@ -55,11 +55,11 @@ impl Plan {
             push_entry(&mut text, Some(note), PlanFile::delete(delete))?;
         }
         for tool in &self.tools {
-            let note = Some(command_note(tool.selection));
+            let note = Some(command_note(tool.selection, Tool::SKIPPED_AS));
             push_entry(&mut text, note, PlanFile::tool(tool))?;
         }
         for receipt in &self.receipts {
-            let note = Some(command_note(receipt.selection));
+            let note = Some(command_note(receipt.selection, Receipt::SKIPPED_AS));
             push_entry(&mut text, note, PlanFile::receipt(receipt))?;
         }
         for report in &self.reports {
@@ -86,11 +86,11 @@ impl Plan {
     }
 }
 
-/// A command entry's comment: its size is unknown, and a `skip` says why.
-fn command_note(selection: Selection) -> String {
+/// A command entry's comment: its size is unknown, and a `skip` says why, `skipped`.
+fn command_note(selection: Selection, skipped: SkipReason) -> String {
     match selection {
         Selection::Clean => "size unknown".to_owned(),
-        Selection::Skip => format!("size unknown; {SKIP_AGGRESSIVE}"),
+        Selection::Skip => format!("size unknown; {}", skip_words(skipped)),
     }
 }
 
@@ -459,7 +459,7 @@ fn selection(text: &str) -> Result<Selection, EntryProblem> {
 mod tests {
     use super::*;
 
-    use crate::plan::{AggressiveItems, PathMatch, PlanBuilder, Reach};
+    use crate::plan::{AggressiveItems, Claim, PathMatch, PlanBuilder, Reach};
     use crate::tier::{Tier, Twin};
 
     fn found(path: &str, reach: Reach, tier: Tier) -> PathMatch {
@@ -469,6 +469,7 @@ mod tests {
             size: Size::bytes(1_234_567),
             run_as: RunAs::User,
             reach,
+            claim: Claim::Sole,
             rule: "rosie/node".to_owned(),
             tier,
         }
@@ -549,7 +550,7 @@ mod tests {
         .expect("valid");
         builder.add_tool("user/brew", &Twin::Normal(brew));
         builder
-            .add_receipt("com.x.pkg", Tier::Normal)
+            .add_receipt("com.x.pkg", Claim::Sole)
             .expect("valid");
         builder.add_report(
             Report::new(
@@ -729,16 +730,16 @@ mod tests {
     }
 
     #[test]
-    fn an_aggressive_receipt_comment_says_why_it_is_skipped() {
+    fn another_apps_receipt_comment_says_why_it_is_skipped() {
         let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         builder
-            .add_receipt("com.x.pkg", Tier::Aggressive)
+            .add_receipt("com.x.pkg", Claim::Shared)
             .expect("valid");
 
         let text = builder.build().plan.to_toml().expect("serializable");
 
         assert!(
-            text.contains("# size unknown; skip: aggressive\n[[forget]]\n"),
+            text.contains("# size unknown; skip: another app's\n[[forget]]\n"),
             "{text}"
         );
     }

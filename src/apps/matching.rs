@@ -24,7 +24,8 @@ pub(super) fn claims_by_name(app_name: &BundleName, name: &str) -> bool {
 
 /// Whether a bundle-ID match of `id` also belongs to `other`, another installed app whose
 /// ID equals `id` (a second copy) or extends it (`com.foo.Bar.canary` for `com.foo.Bar`).
-/// Such matches are demoted to aggressive, since the other app still uses them.
+/// Such matches are `skip` whatever `--aggressive` says, since the other app still uses
+/// them.
 pub(super) fn claimed_by_other(id: &BundleId, other: &BundleId, name: &str, holds: Holds) -> bool {
     let equal_or_longer = dot_bounded(id.as_str(), other.as_str());
     equal_or_longer && claims_by_id(other, name, holds)

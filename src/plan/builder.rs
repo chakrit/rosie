@@ -37,6 +37,13 @@ pub enum Reach {
     OutsideRoots,
 }
 
+/// Whether another installed app also claims a match (`docs/spec/app.md`).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Claim {
+    Sole,
+    Shared,
+}
+
 /// One rule matching one path during a scan.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct PathMatch {
@@ -45,6 +52,7 @@ pub struct PathMatch {
     pub size: Size,
     pub run_as: RunAs,
     pub reach: Reach,
+    pub claim: Claim,
     pub rule: String,
     pub tier: Tier,
 }
@@ -140,10 +148,15 @@ impl PlanBuilder {
         self.tools.extend(tools);
     }
 
-    pub fn add_receipt(&mut self, package: &str, tier: Tier) -> Result<(), Error> {
+    /// Adds a package receipt: `clean`, unless another installed app claims it, which
+    /// `--aggressive` does not lift.
+    pub fn add_receipt(&mut self, package: &str, claim: Claim) -> Result<(), Error> {
         let package = Package::new(package.to_owned())?;
 
-        let selection = self.selection(tier);
+        let selection = match claim {
+            Claim::Sole => Selection::Clean,
+            Claim::Shared => Selection::Skip,
+        };
         self.receipts.push(Receipt { package, selection });
         Ok(())
     }
@@ -186,6 +199,7 @@ impl PlanBuilder {
             rules: Vec::new(),
             tiers: Tiers::of(found.rule.clone(), found.tier),
             reach: found.reach,
+            claim: found.claim,
             run_as: found.run_as,
             bootouts: Vec::new(),
         });
@@ -225,22 +239,25 @@ struct FoundPath {
     rules: Vec<String>,
     tiers: Tiers,
     reach: Reach,
+    claim: Claim,
     run_as: RunAs,
     bootouts: Vec<Bootout>,
 }
 
 impl FoundPath {
-    /// `skip` outside the roots; otherwise as the tier of `verdict`, the verdict of its
-    /// tiers, selects it, with a skip its rules disagree on surfaced as a conflict.
+    /// `skip` outside the roots, then `skip` when another app claims it; otherwise as
+    /// the tier of `verdict`, the verdict of its tiers, selects it, with a skip its rules
+    /// disagree on surfaced as a conflict.
     fn into_delete(self, verdict: Verdict, aggressive: AggressiveItems) -> Delete {
         let selection = aggressive.selection(verdict.tier());
-        let status = match (self.reach, selection, verdict) {
-            (Reach::OutsideRoots, _, _) => Status::Skip(SkipReason::OutsideRoots),
-            (Reach::InRoots, Selection::Clean, _) => Status::Clean,
-            (Reach::InRoots, Selection::Skip, Verdict::Agreed(_)) => {
+        let status = match (self.reach, self.claim, selection, verdict) {
+            (Reach::OutsideRoots, _, _, _) => Status::Skip(SkipReason::OutsideRoots),
+            (Reach::InRoots, Claim::Shared, _, _) => Status::Skip(SkipReason::OtherApp),
+            (Reach::InRoots, Claim::Sole, Selection::Clean, _) => Status::Clean,
+            (Reach::InRoots, Claim::Sole, Selection::Skip, Verdict::Agreed(_)) => {
                 Status::Skip(SkipReason::Aggressive)
             }
-            (Reach::InRoots, Selection::Skip, Verdict::Disagreed(disagreement)) => {
+            (Reach::InRoots, Claim::Sole, Selection::Skip, Verdict::Disagreed(disagreement)) => {
                 Status::Conflict(Sides::Scanned(disagreement))
             }
         };
@@ -265,12 +282,16 @@ impl Located for FoundPath {
 
 /// The outer path keeps its own rules, size, and reach. It takes over the bootouts of
 /// the paths inside it, so their jobs are unloaded exactly when it is deleted, runs
-/// elevated when any of them would, and weighs their rules' tiers with its own.
+/// elevated when any of them would, is another app's when any of them is, and weighs
+/// their rules' tiers with its own.
 impl Found for FoundPath {
     fn absorb(&mut self, inner: FoundPath) {
         self.bootouts.extend(inner.bootouts);
         if inner.run_as == RunAs::Sudo {
             self.run_as = RunAs::Sudo;
+        }
+        if inner.claim == Claim::Shared {
+            self.claim = Claim::Shared;
         }
         self.tiers.absorb(inner.tiers);
     }
@@ -288,6 +309,7 @@ mod tests {
             size: Size::bytes(1000),
             run_as: RunAs::User,
             reach: Reach::InRoots,
+            claim: Claim::Sole,
             rule: rule.to_owned(),
             tier,
         }
@@ -470,6 +492,54 @@ mod tests {
         assert_eq!(statuses(aggressive), [Status::Clean, Status::Clean]);
     }
 
+    #[test]
+    fn another_apps_match_is_skipped_even_with_aggressive() {
+        for aggressive in [AggressiveItems::Skip, AggressiveItems::Clean] {
+            let plan = built(
+                aggressive,
+                vec![PathMatch {
+                    claim: Claim::Shared,
+                    ..found("/w/a", "app/x", Tier::Normal)
+                }],
+            );
+
+            assert_eq!(
+                plan.deletes()[0].status,
+                Status::Skip(SkipReason::OtherApp),
+                "{aggressive:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_folder_holding_another_apps_match_is_skipped() {
+        let plan = built(
+            AggressiveItems::Clean,
+            vec![
+                found("/w/app", "app/x", Tier::Normal),
+                PathMatch {
+                    claim: Claim::Shared,
+                    ..found("/w/app/shared", "app/x", Tier::Normal)
+                },
+            ],
+        );
+
+        assert_eq!(paths(&plan), ["/w/app"]);
+        assert_eq!(plan.deletes()[0].status, Status::Skip(SkipReason::OtherApp));
+    }
+
+    #[test]
+    fn another_apps_receipt_is_skipped_even_with_aggressive() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Clean);
+        builder
+            .add_receipt("com.x.pkg", Claim::Shared)
+            .expect("valid");
+
+        let plan = builder.build().plan;
+
+        assert_eq!(plan.receipts()[0].selection, Selection::Skip);
+    }
+
     fn disagreeing_on(path: &str) -> Vec<PathMatch> {
         vec![
             found(path, "rosie/strict", Tier::Aggressive),
@@ -590,7 +660,7 @@ mod tests {
     fn refuses_an_empty_receipt_package_or_report_subject() {
         let mut builder = PlanBuilder::new(AggressiveItems::Skip);
 
-        let package = builder.add_receipt("", Tier::Normal);
+        let package = builder.add_receipt("", Claim::Sole);
         let report = Report::new(String::new(), vec!["Remove X".to_owned()]);
 
         assert!(matches!(package, Err(Error::EmptyPackage)), "{package:?}");
@@ -610,7 +680,7 @@ mod tests {
                 found("/w/x\0.plist", "rosie/launch", Tier::Normal),
                 LaunchDomain::System,
             ),
-            builder.add_receipt("com.x\0.pkg", Tier::Normal),
+            builder.add_receipt("com.x\0.pkg", Claim::Sole),
         ];
 
         for refused in refusals {

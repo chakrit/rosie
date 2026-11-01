@@ -205,7 +205,8 @@ by hand
 - A folder or name too long for the terminal is trimmed from the front to `…` and its
   end.
 - Below the rules, a note says why the item is not cleaned (`skip (aggressive)`,
-  `skip (outside the roots)`, `skip`, `conflict`, `in use: <program> (pid N)`,
+  `skip (another app's)`, `skip (outside the roots)`, `skip`, `conflict`,
+  `in use: <program> (pid N)`,
   `skipped: <reason>`),
   then `needs sudo` and the jobs it unloads, then one hint on the same line or several
   in the stderr hint form below.
@@ -226,7 +227,7 @@ Plans and clean runs report saved space. Simple stats suffice. Stats are printed
 stderr, never written into the plan TOML.
 
 - Scan and confirmation show the item count and total size of `clean` items, `skip`
-  items by reason (aggressive, outside the roots, chosen), and conflicts.
+  items by reason (aggressive, another app's, outside the roots, chosen), and conflicts.
 - The end of a run shows the total freed and the items done, plus skipped and failed
   items (stale, running process, sudo refused, errors) with their sizes, and walk-skip
   counts per reason.

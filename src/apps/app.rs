@@ -16,7 +16,7 @@ use super::search::{Candidate, Search};
 use crate::fs::{
     self, Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool, UserInput,
 };
-use crate::plan::Report;
+use crate::plan::{Claim, Report};
 use crate::scan::{Entry, Mounts, NotAnEntry, Progress, Scan, Settings};
 use crate::tier::Tier;
 
@@ -99,32 +99,32 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
             .map_or_else(|| "app".to_owned(), |id| format!("app/{}", id.as_str()));
 
         let mut search = Search::new(ctx, mounts, settings.aggressive);
-        search.add(itself, Holds::Plain, &rule, Tier::Normal)?;
+        search.add(itself, Holds::Plain, &rule, (Tier::Normal, Claim::Sole))?;
 
         for location in leftover_locations(ctx.paths()) {
-            let tier_of = |name: &str| {
-                let id_tier = bundle
+            let graded = |name: &str| {
+                let id_claim = bundle
                     .id
                     .as_ref()
                     .filter(|id| claims_by_id(id, name, location.holds))
-                    .map(|id| id_match_tier(id, &others, name, location.holds));
+                    .map(|id| id_match_claim(id, &others, name, location.holds));
                 let by_name = bundle
                     .name
                     .as_ref()
                     .is_some_and(|own| claims_by_name(own, name));
-                match (id_tier, by_name) {
-                    (Some(tier), _) => Some(tier),
-                    (None, true) => Some(Tier::Aggressive),
+                match (id_claim, by_name) {
+                    (Some(claim), _) => Some((Tier::Normal, claim)),
+                    (None, true) => Some((Tier::Aggressive, Claim::Sole)),
                     (None, false) => None,
                 }
             };
-            for (candidate, tier) in search.candidates(&location, tier_of)? {
-                search.add(candidate, location.holds, &rule, tier)?;
+            for (candidate, grade) in search.candidates(&location, graded)? {
+                search.add(candidate, location.holds, &rule, grade)?;
             }
         }
 
-        for (package, tier) in self.receipts(&bundle, &others)? {
-            search.add_receipt(&package, tier)?;
+        for (package, claim) in self.receipts(&bundle, &others)? {
+            search.add_receipt(&package, claim)?;
         }
         for report in reports(ctx, &bundle)? {
             search.add_report(report);
@@ -145,9 +145,13 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
     }
 
     /// The installed package receipts whose IDs are bundle-ID matches of the app, each
-    /// with the tier [`id_match_tier`] gives it. An app with no bundle ID matches none,
-    /// and needs no receipt listing.
-    fn receipts(&self, bundle: &Bundle, others: &[BundleId]) -> Result<Vec<(String, Tier)>, Error> {
+    /// with its [`id_match_claim`]. An app with no bundle ID matches none, and needs no
+    /// receipt listing.
+    fn receipts(
+        &self,
+        bundle: &Bundle,
+        others: &[BundleId],
+    ) -> Result<Vec<(String, Claim)>, Error> {
         let Some(id) = &bundle.id else {
             return Ok(Vec::new());
         };
@@ -156,8 +160,8 @@ impl<'c, B: Backend + Sync> AppScanner<'c, B> {
             .lines()
             .filter(|package| claims_by_id(id, package, Holds::Plain))
             .map(|package| {
-                let tier = id_match_tier(id, others, package, Holds::Plain);
-                (package.to_owned(), tier)
+                let claim = id_match_claim(id, others, package, Holds::Plain);
+                (package.to_owned(), claim)
             });
         Ok(matching.collect())
     }
@@ -181,17 +185,17 @@ fn unreadable(bundle: &Path, source: fs::Error) -> Error {
     }
 }
 
-/// A bundle-ID match is `clean`, unless it also belongs to another installed app,
-/// `others`: a second copy with the same ID, or an app with a longer ID that also
+/// A bundle-ID match is the app's alone, unless it also belongs to another installed
+/// app, `others`: a second copy with the same ID, or an app with a longer ID that also
 /// matches it (`com.foo.Bar.canary.plist` while `com.foo.Bar.canary` is installed and
-/// `com.foo.Bar` is being removed). Then it is aggressive.
-fn id_match_tier(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -> Tier {
+/// `com.foo.Bar` is being removed).
+fn id_match_claim(id: &BundleId, others: &[BundleId], name: &str, holds: Holds) -> Claim {
     let shared = others
         .iter()
         .any(|other| claimed_by_other(id, other, name, holds));
     match shared {
-        true => Tier::Aggressive,
-        false => Tier::Normal,
+        true => Claim::Shared,
+        false => Claim::Sole,
     }
 }
 

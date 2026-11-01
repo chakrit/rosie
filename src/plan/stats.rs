@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use super::{Delete, Plan, Selection, Size, SkipReason, Status, StatusKind};
+use super::{Delete, Plan, Receipt, Selection, Size, SkipReason, Status, StatusKind, Tool};
 
 /// How much one item weighs in the totals. Tool commands are "size unknown" and are
 /// excluded from the byte totals.
@@ -66,6 +66,8 @@ pub struct PlanStats {
     pub clean: Tally,
     /// Aggressive items scanned without `--aggressive`.
     pub aggressive: Tally,
+    /// Items another installed app claims.
+    pub other_app: Tally,
     /// Items outside the roots.
     pub outside_roots: Tally,
     /// Items the user answered `skip`.
@@ -78,7 +80,8 @@ pub struct PlanStats {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Counted {
     pub kind: StatusKind,
-    /// `clean`, `skip (aggressive)`, `skip (outside the roots)`, `skip`, or `conflict`.
+    /// `clean`, `skip (aggressive)`, `skip (another app's)`, `skip (outside the roots)`,
+    /// `skip`, or `conflict`.
     pub label: &'static str,
     pub tally: Tally,
 }
@@ -86,19 +89,22 @@ pub struct Counted {
 impl PlanStats {
     /// Report-only entries are not items: rosie does nothing with them.
     pub fn of(plan: &Plan) -> Self {
-        let commands = plan
+        let tools = plan
             .tools()
             .iter()
-            .map(|tool| tool.selection)
-            .chain(plan.receipts().iter().map(|receipt| receipt.selection));
+            .map(|tool| (tool.selection, Tool::SKIPPED_AS));
+        let receipts = plan
+            .receipts()
+            .iter()
+            .map(|receipt| (receipt.selection, Receipt::SKIPPED_AS));
 
         let mut stats = PlanStats::of_deletes(plan.deletes());
-        for selection in commands {
-            let tally = match selection {
-                Selection::Clean => &mut stats.clean,
-                Selection::Skip => &mut stats.aggressive,
+        for (selection, skipped) in tools.chain(receipts) {
+            let status = match selection {
+                Selection::Clean => Status::Clean,
+                Selection::Skip => Status::Skip(skipped),
             };
-            tally.add(ItemSize::Unknown);
+            stats.bucket(&status).add(ItemSize::Unknown);
         }
         stats
     }
@@ -115,11 +121,12 @@ impl PlanStats {
     }
 
     /// Every tally with its words, in the order the stats show them.
-    pub fn counted(&self) -> [Counted; 5] {
+    pub fn counted(&self) -> [Counted; 6] {
         let counted = |kind, label, tally| Counted { kind, label, tally };
         [
             counted(StatusKind::Clean, "clean", self.clean),
             counted(StatusKind::Skip, "skip (aggressive)", self.aggressive),
+            counted(StatusKind::Skip, "skip (another app's)", self.other_app),
             counted(
                 StatusKind::Skip,
                 "skip (outside the roots)",
@@ -134,6 +141,7 @@ impl PlanStats {
         match status {
             Status::Clean => &mut self.clean,
             Status::Skip(SkipReason::Aggressive) => &mut self.aggressive,
+            Status::Skip(SkipReason::OtherApp) => &mut self.other_app,
             Status::Skip(SkipReason::OutsideRoots) => &mut self.outside_roots,
             Status::Skip(SkipReason::Chosen) => &mut self.chosen,
             Status::Conflict(_) => &mut self.conflicts,
@@ -159,7 +167,8 @@ mod tests {
 
     use super::*;
     use crate::plan::{
-        AggressiveItems, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report, RunAs,
+        AggressiveItems, Claim, ItemKind, LaunchDomain, PathMatch, PlanBuilder, Reach, Report,
+        RunAs,
     };
     use crate::tier::{Tier, Twin};
 
@@ -170,6 +179,7 @@ mod tests {
             size: Size::bytes(bytes),
             run_as: RunAs::User,
             reach,
+            claim: Claim::Sole,
             rule: "rosie/r".to_owned(),
             tier,
         }
@@ -203,7 +213,7 @@ mod tests {
         };
         builder.add_tool("rosie/docker", &docker);
         builder
-            .add_receipt("com.x.pkg", Tier::Normal)
+            .add_receipt("com.x.pkg", Claim::Sole)
             .expect("valid");
         builder
             .add_launch_job(
@@ -220,6 +230,7 @@ mod tests {
             PlanStats {
                 clean: tally(5, 3_800, 2),
                 aggressive: tally(2, 40_000, 1),
+                other_app: Tally::default(),
                 outside_roots: tally(1, 7, 0),
                 chosen: Tally::default(),
                 conflicts: Tally::default(),

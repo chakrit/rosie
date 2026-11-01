@@ -303,6 +303,9 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
         (Place::Inside, _) => Some(format!("inside {} ({rules})", shown.path(&delete.path))),
         (Place::At, Planned::Clean(tier)) => Some(format!("{rules} ({})", tier.label())),
         (Place::At, Planned::Skip(SkipReason::Aggressive)) => Some(format!("{rules} (aggressive)")),
+        (Place::At, Planned::Skip(SkipReason::OtherApp)) => {
+            Some(format!("{rules} (another app's)"))
+        }
         (Place::At, Planned::Skip(SkipReason::OutsideRoots)) => {
             Some("outside the roots".to_owned())
         }

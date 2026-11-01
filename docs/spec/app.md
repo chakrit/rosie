@@ -59,6 +59,8 @@ is a plan like any other ([plan.md](plan.md)).
 - A path with wildcards keeps only the `.app` folders it matches. *(agent-inferred)*
 - A pattern that matches no app is an error: `no app matches <pattern>`.
   *(agent-inferred)*
+- Its hint names the folders searched: the applications folders, or the folder a path
+  pattern's wildcards are under. *(agent-inferred)*
 
 ## `rosie clean orphans`
 

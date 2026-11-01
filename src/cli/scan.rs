@@ -212,7 +212,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                     }
                     Some(AppArg::Pattern(pattern)) => {
                         let found = apps::find(&ctx, pattern)?;
-                        self.one_app(found, pattern.to_string(), verb)?
+                        let looked_in = apps::app_folders(ctx.paths()).to_vec();
+                        self.one_app(found, pattern.to_string(), looked_in, verb)?
                     }
                     None => self.pick_app(&ctx, verb)?,
                 };
@@ -254,19 +255,21 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
             .filter(|(app, kind)| *kind == FileKind::Dir && apps::is_app_path(app))
             .map(|(app, _)| app)
             .collect();
-        self.one_app(found, given.display().to_string(), verb)
+        let looked_in = vec![pattern.base().to_path_buf()];
+        self.one_app(found, given.display().to_string(), looked_in, verb)
     }
 
-    /// The one app `pattern` matched, else the one the user picks among its matches
-    /// (`docs/spec/app.md#app-name-matching`).
+    /// The one app `pattern` matched in `looked_in`, else the one the user picks among
+    /// its matches (`docs/spec/app.md#app-name-matching`).
     fn one_app(
         &mut self,
         mut apps: Vec<PathBuf>,
         pattern: String,
+        looked_in: Vec<PathBuf>,
         verb: Verb,
     ) -> Result<PathBuf, Error> {
         match (apps.len(), self.console.terminals().interactive()) {
-            (0, _) => Err(Error::NoAppMatches { pattern }),
+            (0, _) => Err(Error::NoAppMatches { pattern, looked_in }),
             (1, _) => Ok(apps.remove(0)),
             (_, true) => {
                 let picker = self.picker(&app_usage(verb))?;

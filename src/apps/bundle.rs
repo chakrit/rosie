@@ -268,9 +268,10 @@ pub(super) fn installed_apps<B>(ctx: &FsContext<B>) -> Result<Installed, Error>
 where
     B: Backend + Sync,
 {
+    let [applications, home_applications] = super::app_folders(ctx.paths());
     let folders = [
-        PathBuf::from("/Applications"),
-        ctx.paths().home().join("Applications"),
+        applications,
+        home_applications,
         PathBuf::from("/System/Applications"),
     ];
     let found = bundles_in(ctx, &folders)?;

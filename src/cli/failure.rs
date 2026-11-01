@@ -72,14 +72,23 @@ fn hints(error: &Error) -> Vec<Hint> {
             "save a plan with rosie scan … > plan.toml, then rosie run plan.toml",
         )],
         Error::AppModeFlag { flag } => vec![Hint::by_hand(format!("drop {flag}"))],
+        Error::NoAppMatches { looked_in, .. } => vec![look_in(looked_in)],
         Error::Root(RootError::Process(_))
         | Error::Usage(_)
-        | Error::NoAppMatches { .. }
         | Error::Cancelled
         | Error::PlanNotText(_)
         | Error::UnansweredConflicts { .. }
         | Error::Io(_) => Vec::new(),
     }
+}
+
+/// Where to look for an app no pattern matched.
+fn look_in(folders: &[PathBuf]) -> Hint {
+    let folders: Vec<String> = folders
+        .iter()
+        .map(|folder| folder.display().to_string())
+        .collect();
+    Hint::by_hand(format!("look in {}", folders.join(" and ")))
 }
 
 /// A `roots` entry that fails here, named as written: keep it by allowing what it passes

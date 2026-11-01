@@ -37,8 +37,12 @@ pub enum Error {
     #[error("there are no {} to choose from", .kind.empty())]
     NothingToPick { kind: PickKind },
 
+    /// `looked_in` is where the search for `pattern` looked.
     #[error("no app matches {pattern}")]
-    NoAppMatches { pattern: String },
+    NoAppMatches {
+        pattern: String,
+        looked_in: Vec<PathBuf>,
+    },
 
     /// A pattern matching several apps with no terminal to pick on; rosie exits with the
     /// usage status (`docs/spec/app.md#app-name-matching`).

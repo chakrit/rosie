@@ -554,6 +554,12 @@ fn scan_app_matching_nothing_says_so() {
 
     ran.assert_status(ExitStatus::Failed);
     assert!(ran.stderr.contains("no app matches Nope"), "{}", ran.stderr);
+    assert!(
+        ran.stderr
+            .contains("look in /Applications and /Users/me/Applications"),
+        "{}",
+        ran.stderr
+    );
 }
 
 #[test]
@@ -600,6 +606,11 @@ fn scan_app_takes_a_path_with_wildcards() {
     assert!(
         none.stderr
             .contains("no app matches /Users/me/Downloads/x*.app"),
+        "{}",
+        none.stderr
+    );
+    assert!(
+        none.stderr.contains("look in /Users/me/Downloads\n"),
         "{}",
         none.stderr
     );

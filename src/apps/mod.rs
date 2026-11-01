@@ -19,7 +19,7 @@ mod search;
 
 use std::path::PathBuf;
 
-use crate::fs::{Backend, FsContext};
+use crate::fs::{Backend, FsContext, Paths};
 
 pub use app::AppScanner;
 pub use bundle::{bundle_stem, is_app_path, names_an_app};
@@ -32,15 +32,20 @@ pub use pattern::{Pattern, find};
 /// `~/Applications` (`docs/spec/cli.md#pickers`), sorted. A folder rosie may not list
 /// fails the listing, which would otherwise be incomplete.
 pub fn picker_apps<B: Backend>(ctx: &FsContext<B>) -> Result<Vec<PathBuf>, Error> {
-    let folders = [
-        PathBuf::from("/Applications"),
-        ctx.paths().home().join("Applications"),
-    ];
-    let found = bundle::bundles_in(ctx, &folders)?;
+    let found = bundle::bundles_in(ctx, &app_folders(ctx.paths()))?;
     match found.unlistable.into_iter().next() {
         Some(unlistable) => Err(unlistable.cause.into()),
         None => Ok(found.bundles),
     }
+}
+
+/// The applications folders: `/Applications` and `~/Applications`
+/// (`docs/spec/app.md#app-name-matching`).
+pub fn app_folders(paths: &Paths) -> [PathBuf; 2] {
+    [
+        PathBuf::from("/Applications"),
+        paths.home().join("Applications"),
+    ]
 }
 
 #[cfg(test)]

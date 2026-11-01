@@ -30,8 +30,9 @@ use crate::config::Walk;
 use crate::fs::{
     self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, PathPattern, UserInput,
 };
+use crate::name::RuleId;
 use crate::plan::{AggressiveItems, EntryTiers, Plan, PlanBuilder};
-use crate::rules::{RuleId, RuleSet, Shape};
+use crate::rules::{RuleSet, Shape};
 use crate::tier::Tier;
 use crate::wildcard::Pattern;
 

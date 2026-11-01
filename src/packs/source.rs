@@ -4,7 +4,7 @@ use std::fmt;
 use std::str::FromStr;
 
 use super::error::Error;
-use crate::rules::PackName;
+use crate::name::PackName;
 
 const DEFAULT_OWNER: &str = "chakrit";
 const DEFAULT_REPO: &str = "rosie";

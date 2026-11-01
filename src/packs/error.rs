@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use thiserror::Error;
 
 use super::source::Source;
-use crate::{fs, rules};
+use crate::{fs, name, rules};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -80,33 +80,33 @@ pub enum Error {
     #[error("the pack {pack} is already installed from {installed}")]
     PackNameTaken { pack: String, installed: Source },
 
+    #[error("{path} is in the packs folder but is not a pack: its name is not UTF-8", path = path.display())]
+    StrayNotUtf8 { path: PathBuf },
+
     #[error(
-        "{path} is in the packs folder but is not a pack: {problem}",
+        "{path} is in the packs folder but is not a pack: its name is not a valid pack name: {source}",
         path = path.display(),
     )]
-    StrayEntry { path: PathBuf, problem: Stray },
+    StrayBadName { path: PathBuf, source: name::Error },
+
+    #[error(
+        "{path} is in the packs folder but is not a pack: the pack name `user` is reserved for your own rules",
+        path = path.display(),
+    )]
+    StrayReserved { path: PathBuf },
+
+    #[error(
+        "{path} is in the packs folder but is not a pack: it is a {}, not a folder",
+        kind.label(),
+        path = path.display(),
+    )]
+    StrayNotAFolder { path: PathBuf, kind: fs::FileKind },
 
     #[error("no pack named {pack} is installed")]
     NotInstalled { pack: String },
 
     #[error("several installed packs are named {pack}: {sources}", sources = join(sources))]
     Ambiguous { pack: String, sources: Vec<Source> },
-}
-
-/// Why an entry of the packs folder is not a pack (`docs/spec/rules.md#packs`).
-#[derive(Debug, Error)]
-pub enum Stray {
-    #[error("its name is not UTF-8")]
-    NotUtf8,
-
-    #[error("its name is not a valid pack name: {0}")]
-    BadName(rules::Error),
-
-    #[error("the pack name `user` is reserved for your own rules")]
-    ReservedName,
-
-    #[error("it is a {}, not a folder", .0.label())]
-    NotAFolder(fs::FileKind),
 }
 
 /// Why an archive entry is refused (`docs/spec/safety.md#rosies-own-data`).

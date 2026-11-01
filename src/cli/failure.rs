@@ -275,7 +275,10 @@ fn packs_hints(error: &packs::Error) -> Vec<Hint> {
         packs::Error::NotInstalled { .. } => {
             vec![Hint::run("see the installed packs", [Command::Rules])]
         }
-        packs::Error::StrayEntry { path, .. } => vec![Hint::by_hand(format!(
+        packs::Error::StrayNotUtf8 { path }
+        | packs::Error::StrayBadName { path, .. }
+        | packs::Error::StrayReserved { path }
+        | packs::Error::StrayNotAFolder { path, .. } => vec![Hint::by_hand(format!(
             "move {} out of the packs folder",
             path.display()
         ))],
@@ -313,29 +316,7 @@ fn rules_hints(error: &rules::Error) -> Vec<Hint> {
         | rules::Error::WrongKind { .. }
         | rules::Error::LuaStart(_)
         | rules::Error::Lua { .. }
-        | rules::Error::Listing { .. }
-        | rules::Error::EmptyName
-        | rules::Error::BadFirst(_)
-        | rules::Error::BadChar(_)
-        | rules::Error::TooLong(_)
-        | rules::Error::Unqualified
-        | rules::Error::PatternShape
-        | rules::Error::Pattern(_)
-        | rules::Error::OverrideInPack
-        | rules::Error::NotATable
-        | rules::Error::MissingStrategy
-        | rules::Error::UnknownStrategy(_)
-        | rules::Error::FieldNotAllowed { .. }
-        | rules::Error::Invalid(_)
-        | rules::Error::Missing(_)
-        | rules::Error::EmptyList(_)
-        | rules::Error::BothExprAndScript
-        | rules::Error::BadFolderName { .. }
-        | rules::Error::BadPath { .. }
-        | rules::Error::DuplicatePath { .. }
-        | rules::Error::BadGlob { .. }
-        | rules::Error::BadCommand { .. }
-        | rules::Error::LuaSyntax(_) => Vec::new(),
+        | rules::Error::Listing { .. } => Vec::new(),
     }
 }
 

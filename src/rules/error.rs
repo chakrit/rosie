@@ -2,9 +2,9 @@ use std::path::PathBuf;
 
 use thiserror::Error;
 
-use super::name::{MAX_CHARS, Pattern, RuleId};
-use crate::fs::{self, InvalidCommand};
-use crate::wildcard;
+use super::table;
+use crate::fs;
+use crate::name::{Pattern, RuleId};
 
 #[derive(Debug, Error)]
 pub enum Error {
@@ -24,7 +24,7 @@ pub enum Error {
         /// The rule's key as written in the file.
         rule: String,
         #[source]
-        problem: Box<Error>,
+        problem: Box<table::Error>,
     },
 
     #[error(
@@ -79,83 +79,4 @@ pub enum Error {
 
     #[error("no rule matches `{pattern}`")]
     NoRuleMatches { pattern: Pattern },
-
-    // names
-    #[error("a name cannot be empty")]
-    EmptyName,
-
-    #[error("a name must start with an ASCII letter, not {0:?}")]
-    BadFirst(char),
-
-    #[error("a name may hold only ASCII letters, digits, `_`, and `-`, not {0:?}")]
-    BadChar(char),
-
-    #[error("a name is at most {MAX_CHARS} characters, not {0}")]
-    TooLong(usize),
-
-    #[error("a qualified name is `pack/rule`")]
-    Unqualified,
-
-    #[error("a rule pattern is `rule` or `pack/rule`")]
-    PatternShape,
-
-    #[error(transparent)]
-    Pattern(#[from] wildcard::Error),
-
-    // one rule table
-    #[error("an override by qualified name belongs in the user rules, not in a pack")]
-    OverrideInPack,
-
-    #[error("is not a table")]
-    NotATable,
-
-    #[error("has no `strategy`")]
-    MissingStrategy,
-
-    #[error("has an unknown strategy {0:?}; use name, marker, lua, path, or tool")]
-    UnknownStrategy(String),
-
-    #[error("`{field}` does not apply to the {strategy} strategy")]
-    FieldNotAllowed {
-        field: String,
-        strategy: &'static str,
-    },
-
-    #[error("{0}")]
-    Invalid(#[source] Box<toml::de::Error>),
-
-    #[error("needs {0}")]
-    Missing(&'static str),
-
-    #[error("`{0}` cannot be an empty list")]
-    EmptyList(&'static str),
-
-    #[error("needs exactly one of `expr` or `script`, not both")]
-    BothExprAndScript,
-
-    #[error("`{field}` = {value:?} is not one folder name")]
-    BadFolderName { field: &'static str, value: String },
-
-    #[error("`{field}` path {value:?} must start with `/`, or be `~` or start with `~/`")]
-    BadPath { field: &'static str, value: String },
-
-    #[error("`{field}` repeats the path {value:?}")]
-    DuplicatePath { field: &'static str, value: String },
-
-    #[error("`{field}`: {source}")]
-    BadGlob {
-        field: &'static str,
-        #[source]
-        source: wildcard::Error,
-    },
-
-    #[error("`{field}`: {source}")]
-    BadCommand {
-        field: &'static str,
-        #[source]
-        source: InvalidCommand,
-    },
-
-    #[error("Lua does not compile: {0}")]
-    LuaSyntax(String),
 }

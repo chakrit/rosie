@@ -19,9 +19,9 @@ use mlua::chunk::ChunkMode;
 use mlua::{Function, Lua, LuaOptions, LuaString, Scope, StdLib, Table, Value};
 
 use super::error::Error;
-use super::name::RuleId;
 use super::rule::LuaCode;
 use crate::fs::{self, Backend, Cleanup, FsContext, FsOp, PathPattern};
+use crate::name::RuleId;
 use crate::wildcard::Glob;
 
 /// Standard functions a check may call: pure, with no access to code loading,
@@ -366,7 +366,7 @@ mod tests {
     use crate::fs::Op;
     use crate::fs::fake::{FakeBackend, USER_UID};
     use crate::fs::{Bounds, Paths, Roots};
-    use crate::rules::name::{Name, PackName};
+    use crate::name::{Name, PackName};
     use std::io::ErrorKind;
 
     const APP: &str = "/Users/me/code/app/build";

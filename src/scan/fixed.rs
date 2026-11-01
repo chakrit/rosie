@@ -20,7 +20,8 @@ use super::progress::Progress;
 use super::skip::{Needs, WalkSkip};
 use super::targets::Targets;
 use crate::fs::{self, Backend, Cleanup, EnterLinks, FsContext, FsOp};
-use crate::rules::{FixedPath, RuleId, RuleSet, Shape};
+use crate::name::RuleId;
+use crate::rules::{FixedPath, RuleSet, Shape};
 use crate::tier::Tier;
 
 /// Every fixed rule path located on disk, with the rules that list it, and every path

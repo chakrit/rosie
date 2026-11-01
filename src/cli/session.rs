@@ -11,9 +11,10 @@ use super::shown::Shown;
 use super::{Env, Error, ExitStatus};
 use crate::config::{self, Config, ConfigFile};
 use crate::fs::{self, Backend, FsContext, FsOp, PathPattern, ROOT_UID, Roots, UserInput};
+use crate::name;
 use crate::output::{Line, Mark};
 use crate::packs::{self, FirstRun, Network, SettlePacks, Store};
-use crate::rules::{self, RuleLayers, RuleSet};
+use crate::rules::{RuleLayers, RuleSet};
 use crate::scan::{Scanner, Settings};
 use crate::wildcard::Pattern;
 
@@ -144,7 +145,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// The rules of every layer, narrowed to `only` when it names any. With no pack
     /// installed, the default source is pulled first; old packs draw the age warning
     /// (`docs/spec/rules.md#packs`).
-    pub fn rules(&mut self, only: &[rules::Pattern]) -> Result<RuleSet, Error> {
+    pub fn rules(&mut self, only: &[name::Pattern]) -> Result<RuleSet, Error> {
         let store = self.store();
         let first_run = packs::first_run(&store, self.network, self.env.now)?;
         let settled = SettlePacks.run(&store)?;

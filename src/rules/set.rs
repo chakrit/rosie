@@ -7,9 +7,9 @@ use std::path::Path;
 use super::error::Error;
 use super::layers::{self, RuleLayers};
 use super::lua::LuaSandbox;
-use super::name::{Pattern, RuleId};
 use super::rule::{Detection, Rule, Shape};
 use crate::fs::{Backend, Cleanup, DirEntry, FsContext, FsOp};
+use crate::name::{Pattern, RuleId};
 use crate::tier::Tier;
 
 /// Every rule from every layer, in identity order, with the folder rules indexed once

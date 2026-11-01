@@ -5,11 +5,37 @@ use std::cmp::Ordering;
 use std::fmt;
 use std::hash::{Hash, Hasher};
 
-use super::error::Error;
+use thiserror::Error;
+
 use crate::wildcard;
 
 /// The longest pack or rule name, in characters.
-pub(super) const MAX_CHARS: usize = 64;
+const MAX_CHARS: usize = 64;
+
+/// Why a pack or rule name, or a rule pattern, is refused.
+#[derive(Debug, Error)]
+pub enum Error {
+    #[error("a name cannot be empty")]
+    Empty,
+
+    #[error("a name must start with an ASCII letter, not {0:?}")]
+    BadFirst(char),
+
+    #[error("a name may hold only ASCII letters, digits, `_`, and `-`, not {0:?}")]
+    BadChar(char),
+
+    #[error("a name is at most {MAX_CHARS} characters, not {0}")]
+    TooLong(usize),
+
+    #[error("a qualified name is `pack/rule`")]
+    Unqualified,
+
+    #[error("a rule pattern is `rule` or `pack/rule`")]
+    PatternShape,
+
+    #[error(transparent)]
+    Pattern(#[from] wildcard::Error),
+}
 
 /// A valid rule name, compared as written.
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Hash)]
@@ -102,7 +128,7 @@ impl fmt::Display for PackName {
 fn valid(text: &str) -> Result<Box<str>, Error> {
     let mut chars = text.chars();
     let Some(first) = chars.next() else {
-        return Err(Error::EmptyName);
+        return Err(Error::Empty);
     };
     if !first.is_ascii_alphabetic() {
         return Err(Error::BadFirst(first));
@@ -223,7 +249,7 @@ mod tests {
                 "{text}"
             );
         }
-        assert!(matches!(Name::parse(""), Err(Error::EmptyName)));
+        assert!(matches!(Name::parse(""), Err(Error::Empty)));
     }
 
     #[test]

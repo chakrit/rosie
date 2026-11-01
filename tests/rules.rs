@@ -7,10 +7,9 @@ use std::path::{Path, PathBuf};
 
 use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, Cleanup, DirEntry, FileKind, FsContext, FsOp, Op, Paths, Roots};
+use rosie::name::{self, Pattern, RuleId};
 use rosie::packs::{SettlePacks, Store};
-use rosie::rules::{
-    Candidate, Error, LuaSandbox, Pattern, RuleId, RuleLayers, RuleSet, Shape, Source,
-};
+use rosie::rules::{Candidate, Error, LuaSandbox, RuleLayers, RuleSet, Shape, Source, table};
 use rosie::tier::{Tier, Twin};
 
 const HOME: &str = "/Users/me";
@@ -236,7 +235,7 @@ fn refuses_a_pack_rule_that_overrides_another_pack() {
     let result = load(&fake);
 
     assert!(
-        matches!(&result, Err(Error::Rule { rule, problem, .. }) if rule == "rosie/docker" && matches!(**problem, Error::OverrideInPack)),
+        matches!(&result, Err(Error::Rule { rule, problem, .. }) if rule == "rosie/docker" && matches!(**problem, table::Error::OverrideInPack)),
         "{:?}",
         result.err()
     );
@@ -321,7 +320,7 @@ fn refuses_invalid_rule_names() {
 
     assert!(matches!(
         load(&bad_rule),
-        Err(Error::Rule { rule, problem, .. }) if rule == "my rule" && matches!(*problem, Error::BadChar(' '))
+        Err(Error::Rule { rule, problem, .. }) if rule == "my rule" && matches!(*problem, table::Error::Name(name::Error::BadChar(' ')))
     ));
 }
 

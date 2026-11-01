@@ -9,9 +9,10 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use rosie::config::Walk;
 use rosie::fs::fake::{FakeBackend, USER_UID};
 use rosie::fs::{Bounds, FsContext, PathPattern, Paths, Roots};
+use rosie::name;
 use rosie::packs::{SettlePacks, Store};
 use rosie::plan::{AggressiveItems, Status};
-use rosie::rules::{self, RuleLayers, RuleSet};
+use rosie::rules::{RuleLayers, RuleSet};
 use rosie::scan::{Progress, Scan, Scanner, Settings};
 use rosie::wildcard::Pattern;
 
@@ -114,10 +115,10 @@ pub fn scanner(fake: &FakeBackend, options: Options) -> Scanner<&FakeBackend> {
     Scanner::new(ctx, rules, settings)
 }
 
-pub fn patterns(texts: &[&str]) -> Vec<rules::Pattern> {
+pub fn patterns(texts: &[&str]) -> Vec<name::Pattern> {
     texts
         .iter()
-        .map(|text| rules::Pattern::parse(text).expect("valid rule pattern"))
+        .map(|text| name::Pattern::parse(text).expect("valid rule pattern"))
         .collect()
 }
 

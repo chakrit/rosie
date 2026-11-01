@@ -12,8 +12,8 @@ use crate::apps::{self, names_an_app};
 use crate::config::Walk;
 use crate::config::WalkSetting;
 use crate::fs::{EnterLinks, PathPattern};
+use crate::name;
 use crate::plan::{AggressiveItems, Selection};
-use crate::rules;
 use crate::run::elevated;
 use crate::scan::{Needs, Settings, WalkSkip};
 use crate::wildcard::Pattern;
@@ -485,7 +485,7 @@ pub struct RuleFlags {
     /// the name, `*` and `?` match the whole name, case ignored; repeatable. See
     /// `rosie rules`.
     #[arg(long = "only", value_name = "RULE", value_parser = parse_pattern)]
-    pub only: Vec<rules::Pattern>,
+    pub only: Vec<name::Pattern>,
 
     /// Walk into bundles (overrides `[walk] enter_bundles`).
     #[arg(long)]
@@ -559,8 +559,8 @@ fn parse_plan_source(text: &str) -> Result<PlanSource, String> {
     }
 }
 
-fn parse_pattern(text: &str) -> Result<rules::Pattern, String> {
-    rules::Pattern::parse(text).map_err(|error| error.to_string())
+fn parse_pattern(text: &str) -> Result<name::Pattern, String> {
+    name::Pattern::parse(text).map_err(|error| error.to_string())
 }
 
 fn parse_app(text: &str) -> Result<AppArg, String> {

@@ -10,10 +10,10 @@ use std::ffi::OsStr;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
-use super::error::{Error, Stray};
+use super::error::Error;
 use super::source::Source;
 use crate::fs::{Backend, FileKind, FsContext, FsOp, Rosie};
-use crate::rules::PackName;
+use crate::name::{self, PackName};
 
 const PACKS_FOLDER: &str = "packs";
 const PULLED_FILE: &str = ".pulled";
@@ -262,21 +262,21 @@ fn top_entry(path: &Path, kind: FileKind) -> Result<TopEntry, Error> {
     match kind {
         FileKind::File => Ok(TopEntry::File),
         FileKind::Dir => entry_name(path).map(TopEntry::Owner),
-        FileKind::Symlink | FileKind::Other => Err(stray(path, Stray::NotAFolder(kind))),
+        FileKind::Symlink | FileKind::Other => Err(not_a_folder(path, kind)),
     }
 }
 
 /// A copy is known by its name, whatever its kind, so settling can clear it.
 fn owner_entry(owner: &PackName, path: &Path, kind: FileKind) -> Result<OwnerEntry, Error> {
     if let Some(repo) = copied_repo(path) {
-        let repo = PackName::parse(repo).map_err(|error| stray(path, Stray::BadName(error)))?;
+        let repo = PackName::parse(repo).map_err(|source| bad_name(path, source))?;
         return source_in(owner, path, repo).map(OwnerEntry::Copy);
     }
 
     match kind {
         FileKind::File => Ok(OwnerEntry::File),
         FileKind::Dir => source_in(owner, path, entry_name(path)?).map(OwnerEntry::Pack),
-        FileKind::Symlink | FileKind::Other => Err(stray(path, Stray::NotAFolder(kind))),
+        FileKind::Symlink | FileKind::Other => Err(not_a_folder(path, kind)),
     }
 }
 
@@ -293,18 +293,26 @@ fn entry_name(path: &Path) -> Result<PackName, Error> {
     let text = path
         .file_name()
         .and_then(OsStr::to_str)
-        .ok_or_else(|| stray(path, Stray::NotUtf8))?;
-    PackName::parse(text).map_err(|error| stray(path, Stray::BadName(error)))
+        .ok_or_else(|| Error::StrayNotUtf8 { path: path.into() })?;
+    PackName::parse(text).map_err(|source| bad_name(path, source))
 }
 
 fn source_in(owner: &PackName, path: &Path, repo: PackName) -> Result<Source, Error> {
-    Source::from_valid_names(owner.clone(), repo).map_err(|_| stray(path, Stray::ReservedName))
+    Source::from_valid_names(owner.clone(), repo)
+        .map_err(|_| Error::StrayReserved { path: path.into() })
 }
 
-fn stray(path: &Path, problem: Stray) -> Error {
-    Error::StrayEntry {
+fn bad_name(path: &Path, source: name::Error) -> Error {
+    Error::StrayBadName {
         path: path.into(),
-        problem,
+        source,
+    }
+}
+
+fn not_a_folder(path: &Path, kind: FileKind) -> Error {
+    Error::StrayNotAFolder {
+        path: path.into(),
+        kind,
     }
 }
 
@@ -366,10 +374,12 @@ mod tests {
         ];
         for (fake, entry, problem) in cases {
             let result = listed(&fake);
-            let Err(Error::StrayEntry {
-                path,
-                problem: found,
-            }) = &result
+            let Err(
+                found @ (Error::StrayNotUtf8 { path }
+                | Error::StrayBadName { path, .. }
+                | Error::StrayReserved { path }
+                | Error::StrayNotAFolder { path, .. }),
+            ) = &result
             else {
                 panic!("{entry}: expected a stray entry, got {result:?}");
             };

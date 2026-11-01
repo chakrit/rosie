@@ -1,18 +1,22 @@
 //! Reads one rule file into validated rule shapes. Serde reads the TOML; everything else
 //! is checked here, and every problem names the rule.
 
+mod error;
+
 use std::collections::BTreeMap;
 use std::path::Path;
 
 use mlua::Lua;
 use serde::Deserialize;
 
-use super::error::Error;
+pub use error::Error;
+
 use super::lua::compile;
 use super::rule::{
     Detection, FixedPath, FixedPaths, FolderName, FolderRule, Globs, LuaCode, Markers, Shape,
 };
 use crate::fs::ShellCommand;
+use crate::rules;
 use crate::tier::Twin;
 use crate::wildcard::Glob;
 
@@ -23,8 +27,12 @@ pub(super) struct Parsed {
 }
 
 /// Parses a rule file. `lua` compiles Lua detections to catch syntax errors at load.
-pub(super) fn parse_file(bytes: &[u8], file: &Path, lua: &Lua) -> Result<Vec<Parsed>, Error> {
-    let raw: RawFile = toml::from_slice(bytes).map_err(|source| Error::Toml {
+pub(super) fn parse_file(
+    bytes: &[u8],
+    file: &Path,
+    lua: &Lua,
+) -> Result<Vec<Parsed>, rules::Error> {
+    let raw: RawFile = toml::from_slice(bytes).map_err(|source| rules::Error::Toml {
         file: file.into(),
         source: Box::new(source),
     })?;
@@ -33,7 +41,7 @@ pub(super) fn parse_file(bytes: &[u8], file: &Path, lua: &Lua) -> Result<Vec<Par
         .into_iter()
         .map(|(key, value)| match parse_rule(&key, value, lua) {
             Ok(shape) => Ok(Parsed { key, shape }),
-            Err(problem) => Err(Error::Rule {
+            Err(problem) => Err(rules::Error::Rule {
                 file: file.into(),
                 rule: key,
                 problem: Box::new(problem),
@@ -291,7 +299,7 @@ mod tests {
     use super::*;
     use crate::tier::Tier;
 
-    fn parse(text: &str) -> Result<Vec<Parsed>, Error> {
+    fn parse(text: &str) -> Result<Vec<Parsed>, rules::Error> {
         let lua = Lua::new();
         parse_file(text.as_bytes(), Path::new("/packs/test.toml"), &lua)
     }
@@ -305,7 +313,7 @@ mod tests {
     /// The problem with the one rule in `text`, which must be named `r`.
     fn problem(text: &str) -> Error {
         match parse(text) {
-            Err(Error::Rule { rule, problem, .. }) => {
+            Err(rules::Error::Rule { rule, problem, .. }) => {
                 assert_eq!(rule, "r");
                 *problem
             }
@@ -733,7 +741,7 @@ mod tests {
     fn names_the_file_for_malformed_toml_and_unknown_top_level_keys() {
         for text in ["[rules.r\n", "[other]\nx = 1"] {
             assert!(
-                matches!(parse(text), Err(Error::Toml { file, .. }) if file == Path::new("/packs/test.toml")),
+                matches!(parse(text), Err(rules::Error::Toml { file, .. }) if file == Path::new("/packs/test.toml")),
                 "{text}"
             );
         }

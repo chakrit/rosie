@@ -24,7 +24,7 @@ pub use actions::remove_pack::RemovePack;
 pub use actions::settle_packs::{SettlePacks, Settled};
 pub use age::{AgeWarning, MONTH, age_warning};
 pub use archive::{Archive, RuleFile};
-pub use error::{Error, Refusal, Stray};
+pub use error::{Error, Refusal};
 pub use network::{Https, Network};
 pub use source::Source;
 pub use store::{Installed, Store};

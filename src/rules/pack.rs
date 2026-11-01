@@ -7,9 +7,9 @@ use std::path::Path;
 
 use super::error::Error;
 use super::lua::new_parser_state;
-use super::name::{Name, PackName, RuleId};
-use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
+use super::table::{self, Parsed, parse_file};
+use crate::name::{Name, PackName, RuleId};
 
 /// The rules of the pack `pack`, from its `files`, each given as its label (for error
 /// messages) and contents, in rule name order. Every file must parse, every rule key
@@ -36,8 +36,8 @@ pub fn load_pack<'a>(
 fn pack_rule(pack: &PackName, parsed: Parsed, file: &Path) -> Result<Rule, Error> {
     let rule = Name::parse(&parsed.key).map_err(|error| {
         let problem = match parsed.key.contains('/') {
-            true => Error::OverrideInPack,
-            false => error,
+            true => table::Error::OverrideInPack,
+            false => table::Error::Name(error),
         };
         Error::Rule {
             file: file.into(),

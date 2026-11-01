@@ -9,11 +9,11 @@ use std::path::{Path, PathBuf};
 
 use super::error::Error;
 use super::lua::new_parser_state;
-use super::name::{Name, PackName, RuleId};
 use super::pack::load_pack;
-use super::parse::{Parsed, parse_file};
 use super::rule::{Rule, Source};
+use super::table::{self, Parsed, parse_file};
 use crate::fs::{Backend, FileKind, FsContext, FsOp, Rosie};
+use crate::name::{self, Name, PackName, RuleId};
 
 /// A pulled pack's name and the folder holding its `*.toml` rule files.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -129,10 +129,10 @@ fn user_rule_identity(
     key: &str,
     file: &Path,
 ) -> Result<(RuleId, Source), Error> {
-    let name_problem = |error: Error| Error::Rule {
+    let name_problem = |error: name::Error| Error::Rule {
         file: file.into(),
         rule: key.to_owned(),
-        problem: Box::new(error),
+        problem: Box::new(table::Error::Name(error)),
     };
 
     if !key.contains('/') {

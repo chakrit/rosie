@@ -5,8 +5,8 @@ use std::borrow::Cow;
 use std::ffi::OsStr;
 use std::path::PathBuf;
 
-use super::name::RuleId;
 use crate::fs::{Paths, ShellCommand};
+use crate::name::RuleId;
 use crate::tier::Twin;
 use crate::wildcard::Glob;
 

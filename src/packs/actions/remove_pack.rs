@@ -1,10 +1,10 @@
 use super::clear_copy::{ClearCopy, Discarded};
 use super::settle_packs::{SettlePacks, Settled};
 use crate::fs::{Backend, FsOp, Rosie};
+use crate::name::PackName;
 use crate::packs::error::Error;
 use crate::packs::source::Source;
 use crate::packs::store::Store;
-use crate::rules::PackName;
 
 /// Removes an installed pack by its pack name, including `rosie`
 /// (`docs/spec/rules.md#packs`).

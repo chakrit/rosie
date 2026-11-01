@@ -242,6 +242,7 @@ Rosie elevates only root items, once per run.
 - If sudo is refused or fails, those items are reported as skipped.
 - The elevated child deletes root-owned items anywhere inside the roots. On the root side
   it never follows symlinks, never crosses mounts, and never chmods.
+- The elevated child does not re-check who owns a `sudo` item.
 - A bootout that never ran is a skip, never a failure.
 - A user folder whose elevated delete the child refused fails the run.
 - The child reports each delete as it finishes.

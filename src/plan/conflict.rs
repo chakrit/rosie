@@ -1,8 +1,9 @@
 //! Rule conflicts: entries whose rules disagree on tier, which only the user may resolve
 //! (`docs/spec/plan.md#rule-conflicts`).
 //!
-//! No rule's tier wins over another's. A scan marks the entry `conflict`; a run and the
-//! shell export refuse a plan that still holds one; the user picks `clean` or `skip`.
+//! An aggressive rule makes the entry aggressive. Without `--aggressive` a scan marks the
+//! entry `conflict` rather than skipping it; a run and the shell export refuse a plan
+//! that still holds one; the user picks `clean` or `skip`.
 
 use std::collections::BTreeMap;
 use std::fmt;
@@ -60,6 +61,16 @@ pub(super) struct Tiers(BTreeMap<String, Tier>);
 pub(super) enum Verdict {
     Agreed(Tier),
     Disagreed(Disagreement),
+}
+
+impl Verdict {
+    /// The entry's tier: an aggressive rule makes it aggressive, whatever the others say.
+    pub(super) fn tier(&self) -> Tier {
+        match self {
+            Verdict::Agreed(tier) => *tier,
+            Verdict::Disagreed(_) => Tier::Aggressive,
+        }
+    }
 }
 
 impl Tiers {

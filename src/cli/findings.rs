@@ -91,7 +91,7 @@ pub(super) fn problem_line(problem: &Problem) -> Line {
 mod tests {
     use super::*;
     use crate::cli::args::{ModeFlags, TreeArgs};
-    use crate::plan::{AgreedTiers, ItemSize, Plan, Size};
+    use crate::plan::{EntryTiers, ItemSize, Plan, Size};
     use crate::run::{Outcome, RunStats};
     use crate::scan::Needs;
 
@@ -106,7 +106,7 @@ mod tests {
             skipped: Vec::new(),
             refused: Vec::new(),
             problems: Vec::new(),
-            tiers: AgreedTiers::default(),
+            tiers: EntryTiers::default(),
         };
 
         assert_eq!(
@@ -130,7 +130,7 @@ mod tests {
             }],
             refused: Vec::new(),
             problems: Vec::new(),
-            tiers: AgreedTiers::default(),
+            tiers: EntryTiers::default(),
         };
 
         assert_eq!(
@@ -158,7 +158,7 @@ mod tests {
             }],
             refused: Vec::new(),
             problems: Vec::new(),
-            tiers: AgreedTiers::default(),
+            tiers: EntryTiers::default(),
         };
 
         assert_eq!(

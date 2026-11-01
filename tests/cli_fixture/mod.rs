@@ -286,6 +286,11 @@ impl Script {
         self
     }
 
+    /// Enter at a pick: the option the cursor starts on, the first.
+    pub fn enter(self) -> Self {
+        self.pick(0)
+    }
+
     pub fn keep(mut self, kept: &[usize]) -> Self {
         self.checklists.push_back(kept.to_vec());
         self

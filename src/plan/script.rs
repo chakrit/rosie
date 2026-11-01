@@ -453,7 +453,7 @@ mod tests {
 
     #[test]
     fn refuses_a_plan_with_an_unresolved_conflict() {
-        let mut builder = PlanBuilder::new(AggressiveItems::Clean);
+        let mut builder = PlanBuilder::new(AggressiveItems::Skip);
         for (rule, tier) in [("rosie/a", Tier::Normal), ("alice/b", Tier::Aggressive)] {
             let found = PathMatch {
                 rule: rule.to_owned(),

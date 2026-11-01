@@ -7,8 +7,9 @@
 //! - Aggressive items are `skip` unless `--aggressive` is given, which also makes a
 //!   rule's `cmd_aggressive` replace its `cmd`; items outside the roots are
 //!   `skip` too, each with its reason.
-//! - Rules that disagree on the tier of a path, or of paths nested in it, make the entry
-//!   a conflict (`docs/spec/plan.md#rule-conflicts`).
+//! - An aggressive rule makes the entry aggressive; without `--aggressive`, rules that
+//!   disagree on the tier of a path, or of paths nested in it, make the entry a conflict
+//!   (`docs/spec/plan.md#rule-conflicts`).
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -48,20 +49,20 @@ pub struct PathMatch {
     pub tier: Tier,
 }
 
-/// What [`PlanBuilder::build`] makes: the plan, and the tier its rules agree on for each
-/// delete entry that is not a conflict, which the plan file does not record.
+/// What [`PlanBuilder::build`] makes: the plan, and each delete entry's tier, which the
+/// plan file does not record.
 #[derive(Debug)]
 pub struct Built {
     pub plan: Plan,
-    pub tiers: AgreedTiers,
+    pub tiers: EntryTiers,
 }
 
-/// The tier each delete entry's rules, and the rules of the paths nested in it, agree
-/// on, by the entry's path. A conflict entry has none.
+/// Each delete entry's tier, by its path: aggressive when any of its rules, or the rules
+/// of the paths nested in it, is aggressive (`docs/spec/plan.md#rule-conflicts`).
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AgreedTiers(BTreeMap<PathBuf, Tier>);
+pub struct EntryTiers(BTreeMap<PathBuf, Tier>);
 
-impl AgreedTiers {
+impl EntryTiers {
     pub fn of(&self, path: &Path) -> Option<Tier> {
         self.0.get(path).copied()
     }
@@ -153,12 +154,10 @@ impl PlanBuilder {
 
     pub fn build(self) -> Built {
         let aggressive = self.aggressive;
-        let mut agreed = BTreeMap::new();
+        let mut tiers = BTreeMap::new();
         let deletes = Deletes::collapsing(self.deletes, |found| {
             let verdict = found.tiers.verdict();
-            if let Verdict::Agreed(tier) = &verdict {
-                agreed.insert(found.path.clone(), *tier);
-            }
+            tiers.insert(found.path.clone(), verdict.tier());
             found.into_delete(verdict, aggressive)
         });
 
@@ -170,7 +169,7 @@ impl PlanBuilder {
         };
         Built {
             plan,
-            tiers: AgreedTiers(agreed),
+            tiers: EntryTiers(tiers),
         }
     }
 
@@ -231,16 +230,17 @@ struct FoundPath {
 }
 
 impl FoundPath {
-    /// `skip` outside the roots; otherwise the tier its rules agree on, or a
-    /// conflict, as `verdict`, the verdict of its tiers, says.
+    /// `skip` outside the roots; otherwise as the tier of `verdict`, the verdict of its
+    /// tiers, selects it, with a skip its rules disagree on surfaced as a conflict.
     fn into_delete(self, verdict: Verdict, aggressive: AggressiveItems) -> Delete {
-        let status = match (self.reach, verdict) {
-            (Reach::OutsideRoots, _) => Status::Skip(SkipReason::OutsideRoots),
-            (Reach::InRoots, Verdict::Agreed(tier)) => match aggressive.selection(tier) {
-                Selection::Clean => Status::Clean,
-                Selection::Skip => Status::Skip(SkipReason::Aggressive),
-            },
-            (Reach::InRoots, Verdict::Disagreed(disagreement)) => {
+        let selection = aggressive.selection(verdict.tier());
+        let status = match (self.reach, selection, verdict) {
+            (Reach::OutsideRoots, _, _) => Status::Skip(SkipReason::OutsideRoots),
+            (Reach::InRoots, Selection::Clean, _) => Status::Clean,
+            (Reach::InRoots, Selection::Skip, Verdict::Agreed(_)) => {
+                Status::Skip(SkipReason::Aggressive)
+            }
+            (Reach::InRoots, Selection::Skip, Verdict::Disagreed(disagreement)) => {
                 Status::Conflict(Sides::Scanned(disagreement))
             }
         };
@@ -470,22 +470,34 @@ mod tests {
         assert_eq!(statuses(aggressive), [Status::Clean, Status::Clean]);
     }
 
-    #[test]
-    fn rules_disagreeing_on_one_path_make_it_a_conflict_even_with_aggressive() {
-        for aggressive in [AggressiveItems::Skip, AggressiveItems::Clean] {
-            let plan = built(
-                aggressive,
-                vec![
-                    found("/w/a", "rosie/strict", Tier::Aggressive),
-                    found("/w/a", "rosie/plain", Tier::Normal),
-                ],
-            );
+    fn disagreeing_on(path: &str) -> Vec<PathMatch> {
+        vec![
+            found(path, "rosie/strict", Tier::Aggressive),
+            found(path, "rosie/plain", Tier::Normal),
+        ]
+    }
 
-            assert_eq!(
-                disagreement(&plan.deletes()[0].status),
-                conflict(&["rosie/plain"], &["rosie/strict"])
-            );
+    #[test]
+    fn rules_disagreeing_on_one_path_make_it_a_conflict() {
+        let plan = built(AggressiveItems::Skip, disagreeing_on("/w/a"));
+
+        assert_eq!(
+            disagreement(&plan.deletes()[0].status),
+            conflict(&["rosie/plain"], &["rosie/strict"])
+        );
+    }
+
+    #[test]
+    fn with_aggressive_rules_disagreeing_on_tier_clean_the_entry_as_aggressive() {
+        let mut builder = PlanBuilder::new(AggressiveItems::Clean);
+        for found in disagreeing_on("/w/a") {
+            builder.add_path(found).expect("valid match");
         }
+
+        let built = builder.build();
+
+        assert_eq!(built.plan.deletes()[0].status, Status::Clean);
+        assert_eq!(built.tiers.of(Path::new("/w/a")), Some(Tier::Aggressive));
     }
 
     #[test]

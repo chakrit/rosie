@@ -30,7 +30,7 @@ use crate::config::Walk;
 use crate::fs::{
     self, Backend, Cleanup, FileKind, FsContext, FsOp, Metadata, PathPattern, UserInput,
 };
-use crate::plan::{AggressiveItems, AgreedTiers, Plan, PlanBuilder};
+use crate::plan::{AggressiveItems, EntryTiers, Plan, PlanBuilder};
 use crate::rules::{RuleId, RuleSet, Shape};
 use crate::tier::Tier;
 use crate::wildcard::Pattern;
@@ -82,8 +82,8 @@ pub struct Settings {
 #[derive(Debug)]
 pub struct Scan {
     pub plan: Plan,
-    /// The tier the rules of each delete entry agree on; a conflict entry has none.
-    pub tiers: AgreedTiers,
+    /// Each delete entry's tier.
+    pub tiers: EntryTiers,
     /// Items a running process executes from, kept out of the plan, sorted by path.
     pub refused: Vec<Refused>,
     /// Paths the walk or the sizing did not enter, sorted by path.

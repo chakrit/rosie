@@ -36,7 +36,7 @@ pub enum PathVerdict<'s> {
     NoRule,
 }
 
-/// A plan entry's status, with the tier its rules agree on where it shows.
+/// A plan entry's status, with its tier where it shows.
 #[derive(Debug)]
 pub enum Planned<'s> {
     Clean(Tier),
@@ -122,7 +122,7 @@ impl Scan {
         }
     }
 
-    /// `delete`'s status, with the tier its rules agree on when it is `clean`.
+    /// `delete`'s status, with its tier when it is `clean`.
     fn planned<'s>(&self, delete: &'s Delete) -> Planned<'s> {
         match &delete.status {
             Status::Clean => {

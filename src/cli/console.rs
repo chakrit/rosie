@@ -79,7 +79,8 @@ pub trait Console {
     /// Asks one line of text.
     fn ask(&mut self, prompt: &str) -> Result<String, PromptError>;
 
-    /// Lets the user pick one of `options`; returns its position.
+    /// Lets the user pick one of `options`, the cursor starting on the first; returns its
+    /// position.
     fn pick(&mut self, prompt: &str, options: &[String]) -> Result<usize, PromptError>;
 
     /// Shows `items`, all checked; returns the items the user left checked.

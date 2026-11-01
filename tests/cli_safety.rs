@@ -147,7 +147,7 @@ fn clean_refuses_y_while_a_rule_conflict_remains() {
 
 #[test]
 fn clean_edit_makes_the_user_choose_each_conflict() {
-    for (pick, cleaned) in [(0, true), (1, false)] {
+    for (pick, cleaned) in [(0, false), (1, true)] {
         let sandbox = conflicted_project();
         let script = Script::terminal()
             .answer("e")
@@ -173,10 +173,43 @@ fn clean_edit_makes_the_user_choose_each_conflict() {
 }
 
 #[test]
+fn enter_at_a_conflict_pick_skips_it() {
+    let sandbox = conflicted_project();
+    let script = Script::terminal()
+        .answer("e")
+        .enter()
+        .keep(&[0])
+        .answer("y");
+
+    let ran = sandbox.run_with(script, &["clean", "tree", "."]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert!(
+        sandbox.exists(&format!("{CWD}/app/node_modules")),
+        "{ran:#?}"
+    );
+}
+
+#[test]
+fn with_aggressive_rules_disagreeing_on_tier_are_no_conflict() {
+    let sandbox = conflicted_project();
+    let script = Script::terminal().answer("y");
+
+    let ran = sandbox.run_with(script, &["clean", "tree", ".", "--aggressive"]);
+
+    ran.assert_status(ExitStatus::Success);
+    assert_eq!(ran.asked.len(), 1, "{:?}", ran.asked);
+    assert!(
+        !sandbox.exists(&format!("{CWD}/app/node_modules")),
+        "{ran:#?}"
+    );
+}
+
+#[test]
 fn a_cancelled_checklist_drops_the_conflict_answers_given_before_it() {
     let sandbox = conflicted_project();
     // The checklist has no scripted answer, so it is cancelled.
-    let script = Script::terminal().answer("e").pick(0).answer("y");
+    let script = Script::terminal().answer("e").pick(1).answer("y");
 
     let ran = sandbox.run_with(script, &["clean", "tree", "."]);
 
@@ -217,7 +250,7 @@ fn run_without_a_terminal_refuses_an_unanswered_conflict_naming_its_line() {
 
 #[test]
 fn run_on_a_terminal_asks_about_each_conflict() {
-    for (pick, cleaned) in [(0, true), (1, false)] {
+    for (pick, cleaned) in [(0, false), (1, true)] {
         let sandbox = conflicted_project();
         let scanned = sandbox.run(&["scan", "tree", ".", "--toml"]);
         sandbox
@@ -232,7 +265,7 @@ fn run_on_a_terminal_asks_about_each_conflict() {
             ran.asked,
             [format!(
                 "Rules disagree on {node_modules} (4.1 KB; rosie/deps, rosie/node-modules): \
-                 clean: remove it | skip: leave it"
+                 skip: leave it | clean: remove it"
             )]
         );
         assert_eq!(!sandbox.exists(&node_modules), cleaned, "pick {pick}");

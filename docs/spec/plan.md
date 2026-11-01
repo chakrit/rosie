@@ -130,8 +130,12 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 
 ### Rule conflicts
 
-- An entry is `conflict` when two or more rules' scan matches overlap (the same path, or
-  one nested in another) and the rules disagree on tier. No rule's tier wins.
+- An entry a rule marks aggressive is aggressive; another rule cannot make it normal.
+- Without `--aggressive`, an entry is `conflict` when two or more rules' scan matches
+  overlap (the same path, or one nested in another) and the rules disagree on tier.
+- With `--aggressive`, rules that disagree on tier are not a conflict: the entry is
+  `clean`.
+- A conflict pick, in `e` and in `rosie run`, defaults to `skip`.
 - An overlap outside the roots is `skip (outside the roots)`, never `conflict`.
   *(agent-inferred)*
 - The plan file lists conflicts first. Its header counts them; each one's comment names
@@ -148,7 +152,6 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
 - A rule never conflicts with itself: a rule whose normal and aggressive values match the
   same path counts as normal, and a rule matching inside a path it already matched keeps
   the outer match's tier. *(agent-inferred)*
-- `--aggressive` does not hide a conflict. *(agent-inferred)*
 - A conflict entry's `rules` lists only the outer path's own rules; rules from nested
   paths appear only in its comment. *(agent-inferred)*
 - A conflict read back from a plan file is asked about by its rules, since the file
@@ -247,8 +250,7 @@ to clean or skip it; the user must choose one. It then opens a checklist with
 every `clean` entry checked; after the user edits it, rosie re-shows the trimmed plan
 and re-prompts.
 
-- A conflict pick has no default; cancelling any pick cancels the whole edit.
-  *(agent-inferred)*
+- Cancelling any conflict pick cancels the whole edit. *(agent-inferred)*
 - The checklist shows a tool entry's `cmd` only. *(agent-inferred)*
 
 ## Run

@@ -50,9 +50,12 @@ impl Answer {
 
 const PROMPT: &str = "Clean the items marked clean? [y/N/e]";
 
-/// The two choices for a rule conflict; the first makes it `clean`.
-const CLEAN: &str = "clean: remove it";
-const SKIP: &str = "skip: leave it";
+/// The choices for a rule conflict, `skip` first so that the cursor starts on it
+/// (`docs/spec/plan.md#rule-conflicts`).
+const CONFLICT_CHOICES: [(&str, Selection); 2] = [
+    ("skip: leave it", Selection::Skip),
+    ("clean: remove it", Selection::Clean),
+];
 
 /// How resolving the rule conflicts ended.
 enum Resolved {
@@ -341,7 +344,7 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
     /// The plan with every conflict made `clean` or `skip` as the user picks it, one at a
     /// time (`docs/spec/plan.md#rule-conflicts`).
     fn resolve(&mut self, plan: &Plan) -> Result<Resolved, Error> {
-        let options = [CLEAN.to_owned(), SKIP.to_owned()];
+        let options = CONFLICT_CHOICES.map(|(label, _)| label.to_owned());
 
         let mut choices = Vec::new();
         for (conflict, sides) in plan.conflicts() {
@@ -355,9 +358,8 @@ impl<'a, B: Backend + Sync, N: Network, C: Console> Session<'a, B, N, C> {
                 conflict.path.display(),
                 conflict.size,
             );
-            let selection = match self.console.pick(&prompt, &options) {
-                Ok(0) => Selection::Clean,
-                Ok(_) => Selection::Skip,
+            let (_, selection) = match self.console.pick(&prompt, &options) {
+                Ok(position) => CONFLICT_CHOICES[position],
                 Err(PromptError::Cancelled) => return Ok(Resolved::Cancelled),
                 Err(error) => return Err(error.into()),
             };

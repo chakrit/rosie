@@ -27,7 +27,7 @@ use crate::hint::{self, Hint};
 
 use deletes::Deletes;
 
-pub use builder::{AggressiveItems, AgreedTiers, Built, PathMatch, PlanBuilder, Reach};
+pub use builder::{AggressiveItems, Built, EntryTiers, PathMatch, PlanBuilder, Reach};
 pub use conflict::Disagreement;
 pub use error::{EntryProblem, Error};
 pub use size::Size;

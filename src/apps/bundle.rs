@@ -6,8 +6,8 @@ use std::path::{Path, PathBuf};
 
 use rayon::prelude::*;
 
-use super::Error;
 use super::listing::{Listing, list_folder};
+use super::{Error, app_folders};
 use crate::fs::{self, Backend, Cleanup, FileKind, FsContext, FsOp, SystemArgv, SystemTool};
 use crate::plan::Report;
 
@@ -268,7 +268,7 @@ pub(super) fn installed_apps<B>(ctx: &FsContext<B>) -> Result<Installed, Error>
 where
     B: Backend + Sync,
 {
-    let [applications, home_applications] = super::app_folders(ctx.paths());
+    let [applications, home_applications] = app_folders(ctx.paths());
     let folders = [
         applications,
         home_applications,

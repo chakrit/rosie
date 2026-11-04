@@ -49,9 +49,12 @@ re-open it. If a spec is wrong, raise it with the user and amend the spec.
 
 **Everything settled is a `docs/spec/` amendment** — an instruction you were given, an
 approach that was agreed, a library that was picked, a convention or preference that
-was fixed. Write it there as it was given: the rule, at the length it was given, with
-no reason supplied and no note of what it was chosen over. A one-sentence rule — "use
-RESTful routes" — is a complete entry.
+was fixed. Write it there as it was given: the rule, at the length it was given. Do not
+widen it, split it into further rules, add reasons of your own, or note what it was
+chosen over; a one-sentence rule — "use RESTful routes" — is a complete entry. The user
+owes no reason. The one exception is a rule a later reader would take for an oversight
+or a hazard: write it with the user's own reason for it, and if they gave none, ask
+before writing.
 
 File new material by the gate, first match wins: third-party lookup → `vendor/`; our
 own design or surface → `spec/`; unsettled exploration → `scratch/` (last resort,

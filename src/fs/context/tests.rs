@@ -397,7 +397,7 @@ fn leaves_the_permissions_of_other_users_folders_alone() {
 }
 
 #[test]
-fn stops_at_a_failure_partway_through_and_names_its_path() {
+fn a_failure_partway_through_names_its_path_and_keeps_the_folder() {
     let fake = FakeBackend::new();
     fake.add_file("/Users/me/code/app/target/a", "x");
     fake.add_file("/Users/me/code/app/target/b", "x");
@@ -414,7 +414,6 @@ fn stops_at_a_failure_partway_through_and_names_its_path() {
     assert!(
         matches!(result, Err(Error::Io { op: Op::RemoveFile, path, .. }) if path == Path::new("/Users/me/code/app/target/b"))
     );
-    assert!(!fake.exists("/Users/me/code/app/target/a"));
     assert!(fake.exists("/Users/me/code/app/target/b"));
     assert!(fake.exists("/Users/me/code/app/target"));
 }

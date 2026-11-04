@@ -302,14 +302,13 @@ fn entry_reason(delete: &Delete, planned: &Planned, place: Place, shown: &Shown)
     let what = match (place, planned) {
         (Place::Inside, _) => Some(format!("inside {} ({rules})", shown.path(&delete.path))),
         (Place::At, Planned::Clean(tier)) => Some(format!("{rules} ({})", tier.label())),
-        (Place::At, Planned::Skip(SkipReason::Aggressive)) => Some(format!("{rules} (aggressive)")),
-        (Place::At, Planned::Skip(SkipReason::OtherApp)) => {
-            Some(format!("{rules} (another app's)"))
+        (Place::At, Planned::Skip(reason @ SkipReason::OutsideRoots)) => {
+            reason.label().map(str::to_owned)
         }
-        (Place::At, Planned::Skip(SkipReason::OutsideRoots)) => {
-            Some("outside the roots".to_owned())
-        }
-        (Place::At, Planned::Skip(SkipReason::Chosen)) => Some(rules),
+        (Place::At, Planned::Skip(reason)) => match reason.label() {
+            Some(words) => Some(format!("{rules} ({words})")),
+            None => Some(rules),
+        },
         (Place::At, Planned::Conflict(disagreement)) => Some(sides(disagreement)),
     };
     let sudo = sudo_note(delete.run_as);

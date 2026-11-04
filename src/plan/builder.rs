@@ -17,8 +17,8 @@ use std::path::{Path, PathBuf};
 use super::conflict::{Tiers, Verdict};
 use super::deletes::{Found, Located};
 use super::{
-    Bootout, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt, Report, RunAs,
-    Selection, Sides, Size, SkipReason, Status, Tool, check_path,
+    Bootout, CommandStatus, Delete, Deletes, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
+    Report, RunAs, Selection, Sides, Size, SkipReason, Status, Tool, check_path,
 };
 use crate::fs::ShellCommand;
 use crate::tier::{Tier, Twin};
@@ -142,7 +142,7 @@ impl PlanBuilder {
             .map(|(tier, command)| Tool {
                 rule: rule.to_owned(),
                 command: command.clone(),
-                selection: self.selection(tier),
+                status: self.tool_status(tier),
             })
             .collect();
         self.tools.extend(tools);
@@ -153,11 +153,11 @@ impl PlanBuilder {
     pub fn add_receipt(&mut self, package: &str, claim: Claim) -> Result<(), Error> {
         let package = Package::new(package.to_owned())?;
 
-        let selection = match claim {
-            Claim::Sole => Selection::Clean,
-            Claim::Shared => Selection::Skip,
+        let status = match claim {
+            Claim::Sole => CommandStatus::Clean,
+            Claim::Shared => CommandStatus::Skip(SkipReason::OtherApp),
         };
-        self.receipts.push(Receipt { package, selection });
+        self.receipts.push(Receipt { package, status });
         Ok(())
     }
 
@@ -214,8 +214,12 @@ impl PlanBuilder {
 
     // selection
 
-    fn selection(&self, tier: Tier) -> Selection {
-        self.aggressive.selection(tier)
+    /// A tool is skipped only as aggressive.
+    fn tool_status(&self, tier: Tier) -> CommandStatus {
+        match self.aggressive.selection(tier) {
+            Selection::Clean => CommandStatus::Clean,
+            Selection::Skip => CommandStatus::Skip(SkipReason::Aggressive),
+        }
     }
 }
 
@@ -350,10 +354,10 @@ mod tests {
             .collect()
     }
 
-    fn tool_summary(plan: &Plan) -> Vec<(&str, &str, Selection)> {
+    fn tool_summary(plan: &Plan) -> Vec<(&str, &str, CommandStatus)> {
         plan.tools()
             .iter()
-            .map(|tool| (tool.rule.as_str(), tool.command.cmd(), tool.selection))
+            .map(|tool| (tool.rule.as_str(), tool.command.cmd(), tool.status))
             .collect()
     }
 
@@ -537,7 +541,10 @@ mod tests {
 
         let plan = builder.build().plan;
 
-        assert_eq!(plan.receipts()[0].selection, Selection::Skip);
+        assert_eq!(
+            plan.receipts()[0].status,
+            CommandStatus::Skip(SkipReason::OtherApp)
+        );
     }
 
     fn disagreeing_on(path: &str) -> Vec<PathMatch> {
@@ -857,19 +864,19 @@ mod tests {
                 (
                     "rosie/docker",
                     "docker system prune --force",
-                    Selection::Clean
+                    CommandStatus::Clean
                 ),
                 (
                     "rosie/docker",
                     "docker system prune --all --force",
-                    Selection::Skip,
+                    CommandStatus::Skip(SkipReason::Aggressive),
                 ),
                 (
                     "alice/docker",
                     "docker system prune --force",
-                    Selection::Skip
+                    CommandStatus::Skip(SkipReason::Aggressive)
                 ),
-                ("rosie/brew", "brew cleanup", Selection::Clean),
+                ("rosie/brew", "brew cleanup", CommandStatus::Clean),
             ]
         );
     }
@@ -895,9 +902,9 @@ mod tests {
                 (
                     "rosie/docker",
                     "docker system prune --all --force",
-                    Selection::Clean,
+                    CommandStatus::Clean,
                 ),
-                ("rosie/brew", "brew cleanup", Selection::Clean),
+                ("rosie/brew", "brew cleanup", CommandStatus::Clean),
             ]
         );
     }

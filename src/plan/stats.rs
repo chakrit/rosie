@@ -3,7 +3,7 @@
 
 use std::fmt;
 
-use super::{Delete, Plan, Receipt, Selection, Size, SkipReason, Status, StatusKind, Tool};
+use super::{Delete, Plan, Size, SkipReason, Status, StatusKind};
 
 /// How much one item weighs in the totals. Tool commands are "size unknown" and are
 /// excluded from the byte totals.
@@ -77,34 +77,24 @@ pub struct PlanStats {
 }
 
 /// One tally of a [`PlanStats`] and the words it is shown with.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Counted {
     pub kind: StatusKind,
     /// `clean`, `skip (aggressive)`, `skip (another app's)`, `skip (outside the roots)`,
     /// `skip`, or `conflict`.
-    pub label: &'static str,
+    pub label: String,
     pub tally: Tally,
 }
 
 impl PlanStats {
     /// Report-only entries are not items: rosie does nothing with them.
     pub fn of(plan: &Plan) -> Self {
-        let tools = plan
-            .tools()
-            .iter()
-            .map(|tool| (tool.selection, Tool::SKIPPED_AS));
-        let receipts = plan
-            .receipts()
-            .iter()
-            .map(|receipt| (receipt.selection, Receipt::SKIPPED_AS));
+        let tools = plan.tools().iter().map(|tool| tool.status);
+        let receipts = plan.receipts().iter().map(|receipt| receipt.status);
 
         let mut stats = PlanStats::of_deletes(plan.deletes());
-        for (selection, skipped) in tools.chain(receipts) {
-            let status = match selection {
-                Selection::Clean => Status::Clean,
-                Selection::Skip => Status::Skip(skipped),
-            };
-            stats.bucket(&status).add(ItemSize::Unknown);
+        for status in tools.chain(receipts) {
+            stats.bucket(&status.status()).add(ItemSize::Unknown);
         }
         stats
     }
@@ -122,18 +112,23 @@ impl PlanStats {
 
     /// Every tally with its words, in the order the stats show them.
     pub fn counted(&self) -> [Counted; 6] {
-        let counted = |kind, label, tally| Counted { kind, label, tally };
+        let counted = |kind: StatusKind, tally| Counted {
+            kind,
+            label: kind.label().to_owned(),
+            tally,
+        };
+        let skipped = |reason: SkipReason, tally| Counted {
+            kind: StatusKind::Skip,
+            label: reason.status_words(),
+            tally,
+        };
         [
-            counted(StatusKind::Clean, "clean", self.clean),
-            counted(StatusKind::Skip, "skip (aggressive)", self.aggressive),
-            counted(StatusKind::Skip, "skip (another app's)", self.other_app),
-            counted(
-                StatusKind::Skip,
-                "skip (outside the roots)",
-                self.outside_roots,
-            ),
-            counted(StatusKind::Skip, "skip", self.chosen),
-            counted(StatusKind::Conflict, "conflict", self.conflicts),
+            counted(StatusKind::Clean, self.clean),
+            skipped(SkipReason::Aggressive, self.aggressive),
+            skipped(SkipReason::OtherApp, self.other_app),
+            skipped(SkipReason::OutsideRoots, self.outside_roots),
+            skipped(SkipReason::Chosen, self.chosen),
+            counted(StatusKind::Conflict, self.conflicts),
         ]
     }
 

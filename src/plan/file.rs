@@ -15,9 +15,9 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    Bootout, Delete, Deletes, EntryProblem, Error, ItemKind, LaunchDomain, Package, Plan, Receipt,
-    Report, RunAs, Selection, Sides, Size, SkipReason, Status, StatusKind, Tool, check_path,
-    comment, skip_note, skip_words,
+    Bootout, CommandStatus, Delete, Deletes, EntryProblem, Error, ItemKind, LaunchDomain, Package,
+    Plan, Receipt, Report, RunAs, Sides, Size, SkipReason, Status, StatusKind, Tool, check_path,
+    comment, skip_note,
 };
 use crate::fs::ShellCommand;
 
@@ -55,11 +55,11 @@ impl Plan {
             push_entry(&mut text, Some(note), PlanFile::delete(delete))?;
         }
         for tool in &self.tools {
-            let note = Some(command_note(tool.selection, Tool::SKIPPED_AS));
+            let note = Some(command_note(tool.status));
             push_entry(&mut text, note, PlanFile::tool(tool))?;
         }
         for receipt in &self.receipts {
-            let note = Some(command_note(receipt.selection, Receipt::SKIPPED_AS));
+            let note = Some(command_note(receipt.status));
             push_entry(&mut text, note, PlanFile::receipt(receipt))?;
         }
         for report in &self.reports {
@@ -86,11 +86,11 @@ impl Plan {
     }
 }
 
-/// A command entry's comment: its size is unknown, and a `skip` says why, `skipped`.
-fn command_note(selection: Selection, skipped: SkipReason) -> String {
-    match selection {
-        Selection::Clean => "size unknown".to_owned(),
-        Selection::Skip => format!("size unknown; {}", skip_words(skipped)),
+/// A command entry's comment: its size is unknown, and a `skip` says why.
+fn command_note(status: CommandStatus) -> String {
+    match status {
+        CommandStatus::Clean => "size unknown".to_owned(),
+        CommandStatus::Skip(reason) => format!("size unknown; {}", reason.comment_words()),
     }
 }
 
@@ -244,7 +244,7 @@ impl PlanFile {
             rule: tool.rule.clone(),
             shell: path_text(tool.command.shell()),
             cmd: tool.command.cmd().to_owned(),
-            status: tool.selection.label().to_owned(),
+            status: tool.status.label().to_owned(),
             env: tool.command.env().clone(),
         };
         PlanFile {
@@ -256,7 +256,7 @@ impl PlanFile {
     fn receipt(receipt: &Receipt) -> Self {
         let table = ForgetTable {
             package: receipt.package.as_str().to_owned(),
-            status: receipt.selection.label().to_owned(),
+            status: receipt.status.label().to_owned(),
         };
         PlanFile {
             forget: vec![table],
@@ -395,11 +395,11 @@ impl ToolTable {
         }
         let command =
             ShellCommand::new(self.shell, self.cmd, self.env).map_err(EntryProblem::Command)?;
-        let selection = selection(&self.status)?;
+        let status = command_status(&self.status)?;
         Ok(Tool {
             rule: self.rule,
             command,
-            selection,
+            status,
         })
     }
 }
@@ -407,8 +407,8 @@ impl ToolTable {
 impl ForgetTable {
     fn into_receipt(self) -> Result<Receipt, EntryProblem> {
         let package = Package::new(self.package).map_err(EntryProblem::Value)?;
-        let selection = selection(&self.status)?;
-        Ok(Receipt { package, selection })
+        let status = command_status(&self.status)?;
+        Ok(Receipt { package, status })
     }
 }
 
@@ -444,11 +444,11 @@ fn status(text: &StatusText, file: &str) -> Result<Status, EntryProblem> {
     }
 }
 
-/// Commands are outside the roots gate and never conflict.
-fn selection(text: &str) -> Result<Selection, EntryProblem> {
+/// Commands are outside the roots gate and never conflict; a `skip` read back is chosen.
+fn command_status(text: &str) -> Result<CommandStatus, EntryProblem> {
     match StatusKind::parse(text) {
-        Some(StatusKind::Clean) => Ok(Selection::Clean),
-        Some(StatusKind::Skip) => Ok(Selection::Skip),
+        Some(StatusKind::Clean) => Ok(CommandStatus::Clean),
+        Some(StatusKind::Skip) => Ok(CommandStatus::Skip(SkipReason::Chosen)),
         _ => Err(EntryProblem::UnknownSelection {
             text: text.to_owned(),
         }),
@@ -571,10 +571,21 @@ mod tests {
             Status::Skip(_) => Status::Skip(SkipReason::Chosen),
             other => other.clone(),
         });
-        Plan {
+        let chosen = |status: &mut CommandStatus| match status {
+            CommandStatus::Clean => {}
+            CommandStatus::Skip(reason) => *reason = SkipReason::Chosen,
+        };
+        let mut read = Plan {
             deletes,
             ..plan.clone()
-        }
+        };
+        read.tools
+            .iter_mut()
+            .for_each(|tool| chosen(&mut tool.status));
+        read.receipts
+            .iter_mut()
+            .for_each(|receipt| chosen(&mut receipt.status));
+        read
     }
 
     fn parse_error(text: &str) -> Error {

@@ -227,13 +227,7 @@ fn receipts_matching_the_bundle_id_are_forgotten() {
         .map(|receipt| receipt.package.as_str())
         .collect();
     assert_eq!(packages, ["com.foo.Bar", "com.foo.Bar.pkg"]);
-    assert!(
-        scanned
-            .plan
-            .receipts()
-            .iter()
-            .all(|r| r.selection.is_clean())
-    );
+    assert!(scanned.plan.receipts().iter().all(|r| r.status.is_clean()));
 }
 
 #[test]
@@ -455,7 +449,7 @@ fn another_installed_copy_with_the_same_id_leaves_shared_leftovers_skipped_even_
             ],
             "{aggressive:?}"
         );
-        assert!(!scanned.plan.receipts()[0].selection.is_clean());
+        assert!(!scanned.plan.receipts()[0].status.is_clean());
     }
 }
 
@@ -549,7 +543,7 @@ fn longer_installed_bundle_id_matches(aggressive: AggressiveItems) {
         .plan
         .receipts()
         .iter()
-        .map(|r| (r.package.as_str(), r.selection.is_clean()))
+        .map(|r| (r.package.as_str(), r.status.is_clean()))
         .collect();
     assert_eq!(
         receipts,
@@ -610,7 +604,7 @@ fn a_receipt_is_taken_by_another_installed_app_only_through_its_plain_id() {
 
     let scanned = scanned_app(&fake, &ALL_ROOTS, AggressiveItems::Skip);
 
-    assert!(scanned.plan.receipts()[0].selection.is_clean());
+    assert!(scanned.plan.receipts()[0].status.is_clean());
 }
 
 #[test]

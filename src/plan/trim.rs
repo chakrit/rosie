@@ -42,12 +42,12 @@ impl Plan {
         let tools = self
             .tools
             .iter()
-            .filter(|tool| tool.selection.is_clean())
+            .filter(|tool| tool.status.is_clean())
             .map(CleanEntry::Tool);
         let receipts = self
             .receipts
             .iter()
-            .filter(|receipt| receipt.selection.is_clean())
+            .filter(|receipt| receipt.status.is_clean())
             .map(CleanEntry::Receipt);
 
         deletes.chain(tools).chain(receipts).collect()
@@ -113,11 +113,11 @@ impl Kept {
     }
 
     fn keeps_tool(&self, tool: &Tool) -> bool {
-        !tool.selection.is_clean() || self.tools.contains(&ptr::from_ref(tool))
+        !tool.status.is_clean() || self.tools.contains(&ptr::from_ref(tool))
     }
 
     fn keeps_receipt(&self, receipt: &Receipt) -> bool {
-        !receipt.selection.is_clean() || self.receipts.contains(&ptr::from_ref(receipt))
+        !receipt.status.is_clean() || self.receipts.contains(&ptr::from_ref(receipt))
     }
 }
 

@@ -16,9 +16,7 @@
 
 use std::path::Path;
 
-use super::{
-    Error, Plan, Receipt, Selection, SkipReason, Status, Tool, comment, skip_note, skip_words,
-};
+use super::{CommandStatus, Error, Plan, Status, comment, skip_note};
 use crate::fs::{Argv, SystemTool};
 use crate::shell;
 
@@ -87,12 +85,12 @@ impl Plan {
         }
         for tool in &self.tools {
             let note = format!("size unknown · {}", shell::comment_text(&tool.rule));
-            let line = Line::pathless(tool.selection, Tool::SKIPPED_AS, note);
+            let line = Line::pathless(tool.status, note);
             script.push_str(&line.render(&command_line(&tool.command.argv())));
         }
         for receipt in &self.receipts {
             let note = "size unknown · forget receipt".to_owned();
-            let line = Line::pathless(receipt.selection, Receipt::SKIPPED_AS, note);
+            let line = Line::pathless(receipt.status, note);
             let argv = receipt.argv_for(programs.pkgutil);
             script.push_str(&line.render(&command_line(&argv)));
         }
@@ -129,18 +127,15 @@ impl Line {
         Line { status, note }
     }
 
-    /// A command entry, which the roots gate does not cover, and which a scan skips only
-    /// as `skipped`.
-    fn pathless(selection: Selection, skipped: SkipReason, note: String) -> Self {
-        match selection {
-            Selection::Clean => Line {
-                status: Status::Clean,
-                note,
-            },
-            Selection::Skip => Line {
-                status: Status::Skip(skipped),
-                note: format!("{note}; {}", skip_words(skipped)),
-            },
+    /// A command entry, which the roots gate does not cover.
+    fn pathless(status: CommandStatus, note: String) -> Self {
+        let note = match status {
+            CommandStatus::Clean => note,
+            CommandStatus::Skip(reason) => format!("{note}; {}", reason.comment_words()),
+        };
+        Line {
+            status: status.status(),
+            note,
         }
     }
 

@@ -14,7 +14,7 @@ use super::shown::Shown;
 use crate::hint::{Hint, hint_lines};
 use crate::output::{Palette, Tone};
 use crate::plan::{
-    Delete, Plan, Receipt, Report, Selection, Sides, Size, SkipReason, Status, Tool,
+    CommandStatus, Delete, Plan, Receipt, Report, Sides, Size, SkipReason, Status, Tool,
 };
 use crate::scan::{Refused, Skipped};
 
@@ -207,13 +207,13 @@ fn delete_item(delete: &Delete, shown: &Shown) -> Item {
 fn status_word(status: &Status) -> Option<(Tone, String)> {
     let (tone, word) = match status {
         Status::Clean => return None,
-        Status::Skip(SkipReason::Aggressive) => (Tone::Calm, "skip (aggressive)"),
-        Status::Skip(SkipReason::OtherApp) => (Tone::Calm, "skip (another app's)"),
-        Status::Skip(SkipReason::OutsideRoots) => (Tone::Alarm, "skip (outside the roots)"),
-        Status::Skip(SkipReason::Chosen) => (Tone::Calm, "skip"),
-        Status::Conflict(_) => (Tone::Caution, "conflict"),
+        Status::Skip(reason @ SkipReason::OutsideRoots) => (Tone::Alarm, reason.status_words()),
+        Status::Skip(
+            reason @ (SkipReason::Aggressive | SkipReason::OtherApp | SkipReason::Chosen),
+        ) => (Tone::Calm, reason.status_words()),
+        Status::Conflict(_) => (Tone::Caution, status.label().to_owned()),
     };
-    Some((tone, word.to_owned()))
+    Some((tone, word))
 }
 
 fn refused_item(refused: &Refused) -> Item {
@@ -260,10 +260,10 @@ fn skipped_item(skipped: &Skipped, shown: &Shown, mode: &Mode) -> Item {
 fn tool_item(tool: &Tool) -> Item {
     Item {
         size: SizeCell::Unknown,
-        saved: tool.selection == Selection::Clean,
+        saved: tool.status.is_clean(),
         rules: vec![tool.rule.clone()],
         name: format!("$ {}", tool.command.cmd()),
-        note: Some(selection_note(tool.selection, Tool::SKIPPED_AS)),
+        note: Some(command_note(tool.status)),
         steps: Vec::new(),
     }
 }
@@ -271,21 +271,18 @@ fn tool_item(tool: &Tool) -> Item {
 fn forget_item(receipt: &Receipt) -> Item {
     Item {
         size: SizeCell::Unknown,
-        saved: receipt.selection == Selection::Clean,
+        saved: receipt.status.is_clean(),
         rules: Vec::new(),
         name: format!("forget package {}", receipt.package.as_str()),
-        note: Some(selection_note(receipt.selection, Receipt::SKIPPED_AS)),
+        note: Some(command_note(receipt.status)),
         steps: Vec::new(),
     }
 }
 
-/// A tool command or package forget is `clean` or `skip`; a scan skips one only as
-/// `skipped`, and `--aggressive` lifts only an aggressive skip.
-fn selection_note(selection: Selection, skipped: SkipReason) -> Note {
-    let status = match selection {
-        Selection::Clean => Status::Clean,
-        Selection::Skip => Status::Skip(skipped),
-    };
+/// A tool command or package forget is `clean` or `skip`; `--aggressive` lifts only an
+/// aggressive skip.
+fn command_note(status: CommandStatus) -> Note {
+    let status = status.status();
     let hints = match status {
         Status::Skip(SkipReason::Aggressive) => vec![aggressive_hint()],
         Status::Clean
@@ -818,7 +815,7 @@ steps = ["Open System Settings > General > Login Items", "Remove X"]
                 "",
                 "commands",
                 "       ?  user/homebrew  $ brew cleanup",
-                "          skip (aggressive); to clean it: --aggressive",
+                "          skip",
                 "       ?                 forget package com.x.pkg",
                 "",
                 "by hand",

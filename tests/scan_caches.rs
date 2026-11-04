@@ -7,8 +7,8 @@ use std::path::{Path, PathBuf};
 
 use rosie::config::Walk;
 use rosie::fs::{EnterLinks, ROOT_UID};
-use rosie::plan::{AggressiveItems, ItemKind, RunAs, Selection, SkipReason, Status};
-use rosie::scan::WalkSkip;
+use rosie::plan::{AggressiveItems, CommandStatus, ItemKind, RunAs, SkipReason, Status};
+use rosie::scan::{Scan, WalkSkip};
 use scan_fixture::*;
 
 const NPM: &str = "[rules.npm-cache]\nstrategy = \"path\"\npaths = [\"~/.npm\"]\n";
@@ -190,13 +190,13 @@ fn tool_rules_list_their_commands() {
          [rules.homebrew]\nstrategy = \"tool\"\ncmd = \"brew cleanup\"\n",
     );
 
-    let tools = |scan: &rosie::scan::Scan| -> Vec<(String, String, Selection)> {
+    let tools = |scan: &Scan| -> Vec<(String, String, CommandStatus)> {
         scan.plan
             .tools()
             .iter()
             .map(|tool| {
                 let cmd = tool.command.cmd().to_owned();
-                (tool.rule.clone(), cmd, tool.selection)
+                (tool.rule.clone(), cmd, tool.status)
             })
             .collect()
     };
@@ -212,15 +212,23 @@ fn tool_rules_list_their_commands() {
             (
                 docker.clone(),
                 "docker system prune --force".into(),
-                Selection::Clean
+                CommandStatus::Clean
             ),
             (
                 docker.clone(),
                 "docker system prune --all --volumes --force".into(),
-                Selection::Skip
+                CommandStatus::Skip(SkipReason::Aggressive)
             ),
-            (gradle.clone(), "gradle --stop".into(), Selection::Skip),
-            (homebrew.clone(), "brew cleanup".into(), Selection::Clean),
+            (
+                gradle.clone(),
+                "gradle --stop".into(),
+                CommandStatus::Skip(SkipReason::Aggressive)
+            ),
+            (
+                homebrew.clone(),
+                "brew cleanup".into(),
+                CommandStatus::Clean
+            ),
         ]
     );
     assert_eq!(
@@ -229,10 +237,10 @@ fn tool_rules_list_their_commands() {
             (
                 docker,
                 "docker system prune --all --volumes --force".into(),
-                Selection::Clean
+                CommandStatus::Clean
             ),
-            (gradle, "gradle --stop".into(), Selection::Clean),
-            (homebrew, "brew cleanup".into(), Selection::Clean),
+            (gradle, "gradle --stop".into(), CommandStatus::Clean),
+            (homebrew, "brew cleanup".into(), CommandStatus::Clean),
         ]
     );
 }

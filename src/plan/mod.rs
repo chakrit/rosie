@@ -125,27 +125,17 @@ impl Plan {
     }
 }
 
-/// What a `skip` entry's comment says: [`skip_words`], with the hints that would let it
-/// in on the lines below when it is outside the roots.
+/// What a `skip` entry's comment says: [`SkipReason::comment_words`], with the hints that
+/// would let it in on the lines below when it is outside the roots.
 fn skip_note(reason: SkipReason, path: &Path) -> String {
     match reason {
         SkipReason::OutsideRoots => {
             let hints = hint::hints_text(&Hint::allow_in_roots(path));
-            format!("{}\n{hints}", skip_words(reason))
+            format!("{}\n{hints}", reason.comment_words())
         }
         SkipReason::Aggressive | SkipReason::OtherApp | SkipReason::Chosen => {
-            skip_words(reason).to_owned()
+            reason.comment_words()
         }
-    }
-}
-
-/// What the comment of an entry skipped for `reason` says: `skip: aggressive`.
-fn skip_words(reason: SkipReason) -> &'static str {
-    match reason {
-        SkipReason::Aggressive => "skip: aggressive",
-        SkipReason::OtherApp => "skip: another app's",
-        SkipReason::OutsideRoots => "skip: outside the roots",
-        SkipReason::Chosen => "skip",
     }
 }
 
@@ -326,17 +316,14 @@ impl Bootout {
 pub struct Tool {
     pub rule: String,
     pub command: ShellCommand,
-    pub selection: Selection,
+    pub status: CommandStatus,
 }
 
 impl Tool {
-    /// Why a scan skips a tool: it skips one only as aggressive.
-    pub const SKIPPED_AS: SkipReason = SkipReason::Aggressive;
-
     /// Whether this tool is `clean` and belongs to the part acting as `run_as`: tools run
     /// as the user.
     fn runs_in(&self, run_as: RunAs) -> bool {
-        self.selection.is_clean() && run_as == RunAs::User
+        self.status.is_clean() && run_as == RunAs::User
     }
 }
 
@@ -344,13 +331,10 @@ impl Tool {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Receipt {
     pub package: Package,
-    pub selection: Selection,
+    pub status: CommandStatus,
 }
 
 impl Receipt {
-    /// Why a scan skips a receipt: it skips one only as another app's.
-    pub const SKIPPED_AS: SkipReason = SkipReason::OtherApp;
-
     /// The command as a run executes it: the [`SystemTool`] by its absolute path, so no
     /// `PATH` lookup can put another program in its place.
     pub fn absolute_argv(&self) -> SystemArgv {
@@ -374,7 +358,7 @@ impl Receipt {
 
     /// Whether this receipt is `clean` and belongs to the part acting as `run_as`.
     fn runs_in(&self, run_as: RunAs) -> bool {
-        self.selection.is_clean() && self.run_as() == run_as
+        self.status.is_clean() && self.run_as() == run_as
     }
 }
 
@@ -511,6 +495,34 @@ pub enum SkipReason {
     Chosen,
 }
 
+impl SkipReason {
+    /// The reason's words; a chosen skip has none and reads plain `skip`.
+    pub fn label(self) -> Option<&'static str> {
+        match self {
+            SkipReason::Aggressive => Some("aggressive"),
+            SkipReason::OtherApp => Some("another app's"),
+            SkipReason::OutsideRoots => Some("outside the roots"),
+            SkipReason::Chosen => None,
+        }
+    }
+
+    /// The status as the listing and stats name it: `skip (aggressive)`.
+    pub fn status_words(self) -> String {
+        match self.label() {
+            Some(reason) => format!("skip ({reason})"),
+            None => StatusKind::Skip.label().to_owned(),
+        }
+    }
+
+    /// The status as a plan file or script comment says it: `skip: aggressive`.
+    pub fn comment_words(self) -> String {
+        match self.label() {
+            Some(reason) => format!("skip: {reason}"),
+            None => StatusKind::Skip.label().to_owned(),
+        }
+    }
+}
+
 /// The words a plan file's `status` takes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum StatusKind {
@@ -538,8 +550,7 @@ impl StatusKind {
     }
 }
 
-/// Whether a command entry runs. Commands are outside the roots gate and never conflict;
-/// a scan skips each kind for one reason, its `SKIPPED_AS`.
+/// A `clean` or `skip` answer to a conflict.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Selection {
     Clean,
@@ -563,9 +574,29 @@ impl Selection {
     }
 }
 
-impl Selection {
+/// Whether a command entry runs. Commands are outside the roots gate and never
+/// conflict; a scan skips a tool only as aggressive and a receipt only as another app's.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CommandStatus {
+    Clean,
+    Skip(SkipReason),
+}
+
+impl CommandStatus {
+    /// The same status as a filesystem entry's.
+    pub fn status(self) -> Status {
+        match self {
+            CommandStatus::Clean => Status::Clean,
+            CommandStatus::Skip(reason) => Status::Skip(reason),
+        }
+    }
+
+    pub fn label(self) -> &'static str {
+        self.status().label()
+    }
+
     pub fn is_clean(self) -> bool {
-        self == Selection::Clean
+        self == CommandStatus::Clean
     }
 }
 
